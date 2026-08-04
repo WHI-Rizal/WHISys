@@ -22,52 +22,95 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-8">
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#020617',
+      padding: '1rem',
+      fontFamily: 'sans-serif'
+    }}>
+      <div style={{
+        maxWidth: '28rem',
+        width: '100%',
+        backgroundColor: '#0f172a',
+        border: '1px solid #1e293b',
+        borderRadius: '1rem',
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+        padding: '2rem'
+      }}>
         
         {/* Header Logo & Title */}
-        <div className="text-center mb-8">
-          <div className="text-4xl mb-3">🕌</div>
-          <h1 className="text-2xl font-bold text-white tracking-wide">
-            Erahajj AI Portal
+        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+          <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🕌</div>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#ffffff', letterSpacing: '0.025em' }}>
+            WHI System Portal
           </h1>
-          <p className="text-slate-400 text-sm mt-1">
+          <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginTop: '0.25rem' }}>
             Masuk untuk mengakses Dashboard Analisis
           </p>
         </div>
 
         {/* Error Alert */}
         {error && (
-          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 text-sm text-center">
+          <div style={{
+            marginBottom: '1rem',
+            padding: '0.75rem',
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.5)',
+            borderRadius: '0.5rem',
+            color: '#f87171',
+            fontSize: '0.875rem',
+            textAlign: 'center'
+          }}>
             {error}
           </div>
         )}
 
         {/* Form Login */}
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '600', color: '#cbd5e1', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
               Email Kantor
             </label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
+              style={{
+                width: '100%',
+                padding: '0.75rem 1rem',
+                backgroundColor: '#1e293b',
+                border: '1px solid #334155',
+                borderRadius: '0.75rem',
+                color: '#ffffff',
+                outline: 'none',
+                boxSizing: 'border-box'
+              }}
               placeholder="nama@company.com"
               required
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '600', color: '#cbd5e1', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
               Password
             </label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
+              style={{
+                width: '100%',
+                padding: '0.75rem 1rem',
+                backgroundColor: '#1e293b',
+                border: '1px solid #334155',
+                borderRadius: '0.75rem',
+                color: '#ffffff',
+                outline: 'none',
+                boxSizing: 'border-box'
+              }}
               placeholder="••••••••"
               required
             />
@@ -75,7 +118,18 @@ export default function Login() {
 
           <button
             type="submit"
-            className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl shadow-lg shadow-emerald-600/20 transition-all duration-200 mt-2"
+            style={{
+              width: '100%',
+              padding: '0.875rem 1rem',
+              backgroundColor: '#059669',
+              color: '#ffffff',
+              fontWeight: '500',
+              borderRadius: '0.75rem',
+              border: 'none',
+              cursor: 'pointer',
+              marginTop: '0.5rem',
+              transition: 'background-color 0.2s'
+            }}
           >
             Sign In
           </button>
