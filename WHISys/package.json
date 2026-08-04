@@ -12,7 +12,7 @@
     "@google/genai": "latest",
     "firebase": "^10.8.0",
     "lucide-react": "^0.330.0",
-    "next": "14.1.0",
+    "next": "14.2.5",
     "react": "^18",
     "react-dom": "^18",
     "xlsx": "^0.18.5"
