@@ -43,7 +43,15 @@ export default function Login() {
         
         {/* Header Logo & Title */}
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🕌</div>
+          {/* BARIS DI BAWAH INI YANG DIGANTI */}
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
+            <img 
+              src="/logo.png" 
+              alt="WHI Logo" 
+              style={{ height: '60px', width: 'auto', objectFit: 'contain' }} 
+            />
+          </div>
+          
           <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#ffffff', letterSpacing: '0.025em' }}>
             WHI System Portal
           </h1>
