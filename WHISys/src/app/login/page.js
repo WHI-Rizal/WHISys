@@ -96,7 +96,7 @@ export default function Login() {
                 outline: 'none',
                 boxSizing: 'border-box'
               }}
-              placeholder="nama@company.com"
+              placeholder="nama@wisatahalalindonesia.com"
               required
             />
           </div>
