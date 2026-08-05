@@ -127,61 +127,49 @@ export default function DashboardPage() {
               onClick={() => setActiveMenu('dashboard')} 
             />
             
-            {hasAccess(['operations']) && (
-              <SidebarItem 
-                icon={Plane} 
-                label="Paket Travel & LA" 
-                active={activeMenu === 'packages'} 
-                onClick={() => setActiveMenu('packages')} 
-              />
-            )}
+            <SidebarItem 
+              icon={Plane} 
+              label="Paket Travel & LA" 
+              active={activeMenu === 'packages'} 
+              onClick={() => setActiveMenu('packages')} 
+            />
 
-            {hasAccess(['operations']) && (
-              <SidebarItem 
-                icon={Users} 
-                label="Data Master Jamaah" 
-                active={activeMenu === 'jamaah'} 
-                onClick={() => setActiveMenu('jamaah')} 
-              />
-            )}
+            <SidebarItem 
+              icon={Users} 
+              label="Data Master Jamaah" 
+              active={activeMenu === 'jamaah'} 
+              onClick={() => setActiveMenu('jamaah')} 
+            />
 
-            {hasAccess(['operations', 'agent']) && (
-              <SidebarItem 
-                icon={BookOpen} 
-                label="Booking & Manifest" 
-                active={activeMenu === 'bookings'} 
-                onClick={() => setActiveMenu('bookings')} 
-              />
-            )}
+            <SidebarItem 
+              icon={BookOpen} 
+              label="Booking & Manifest" 
+              active={activeMenu === 'bookings'} 
+              onClick={() => setActiveMenu('bookings')} 
+            />
 
             <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Operasional Travel</p>
             
-            {hasAccess(['finance']) && (
-              <SidebarItem 
-                icon={Wallet} 
-                label="Keuangan & Pelunasan" 
-                active={activeMenu === 'finance'} 
-                onClick={() => setActiveMenu('finance')} 
-              />
-            )}
+            <SidebarItem 
+              icon={Wallet} 
+              label="Keuangan & Pelunasan" 
+              active={activeMenu === 'finance'} 
+              onClick={() => setActiveMenu('finance')} 
+            />
 
-            {hasAccess(['operations']) && (
-              <SidebarItem 
-                icon={PackageCheck} 
-                label="Perlengkapan Jamaah" 
-                active={activeMenu === 'equipment'} 
-                onClick={() => setActiveMenu('equipment')} 
-              />
-            )}
+            <SidebarItem 
+              icon={PackageCheck} 
+              label="Perlengkapan Jamaah" 
+              active={activeMenu === 'equipment'} 
+              onClick={() => setActiveMenu('equipment')} 
+            />
 
-            {hasAccess(['admin']) && (
-              <SidebarItem 
-                icon={UserCheck} 
-                label="Mitra & Agen" 
-                active={activeMenu === 'agents'} 
-                onClick={() => setActiveMenu('agents')} 
-              />
-            )}
+            <SidebarItem 
+              icon={UserCheck} 
+              label="Mitra & Agen" 
+              active={activeMenu === 'agents'} 
+              onClick={() => setActiveMenu('agents')} 
+            />
 
             <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Smart Assistant</p>
             <SidebarItem 
@@ -191,7 +179,6 @@ export default function DashboardPage() {
               onClick={() => setActiveMenu('ai-analyzer')} 
             />
           </nav>
-        </div>
 
         {/* Profile Footer & Logout Button */}
         <div className="border-t border-slate-800 pt-4 flex items-center justify-between px-2">
