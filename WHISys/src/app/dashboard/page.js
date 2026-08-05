@@ -23,6 +23,7 @@ import PackagesModule from './PackagesModule';
 import JamaahModule from './JamaahModule';
 import BookingsModule from './BookingsModule';
 import FinanceModule from './FinanceModule';
+import ThemePreviewModule from './ThemePreviewModule';
 
 export default function DashboardPage() {
   const [activeMenu, setActiveMenu] = useState('dashboard');
@@ -217,7 +218,14 @@ export default function DashboardPage() {
               icon={Sparkles} 
               label="AI Business Intelligence" 
               active={activeMenu === 'ai-analyzer'} 
-              onClick={() => changeMenu('ai-analyzer')} 
+              onClick={() => changeMenu('ai-analyzer')}
+
+{/* TARUH DI SINI: Menu Preview Warna Tema */}
+            <SidebarItem 
+              icon={Sparkles} 
+              label="Preview Warna Tema" 
+              active={activeMenu === 'theme-preview'} 
+              onClick={() => changeMenu('theme-preview')}
             />
           </nav>
         </div>
@@ -401,8 +409,10 @@ export default function DashboardPage() {
         {/* MODUL KEUANGAN & PELUNASAN */}
         {activeMenu === 'finance' && <FinanceModule />}
 
+        {activeMenu === 'theme-preview' && <ThemePreviewModule />}
+
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
-        {activeMenu !== 'dashboard' && activeMenu !== 'packages' && activeMenu !== 'jamaah' && activeMenu !== 'bookings' && activeMenu !== 'finance' && (
+        {activeMenu !== 'dashboard' && activeMenu !== 'packages' && activeMenu !== 'jamaah' && activeMenu !== 'bookings' && activeMenu !== 'finance' && activeMenu !== 'theme-preview' && (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
             <div className="p-4 bg-emerald-500/10 text-emerald-400 w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center">
               <Plane className="w-8 h-8" />
