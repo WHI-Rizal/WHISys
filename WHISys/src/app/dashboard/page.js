@@ -12,7 +12,6 @@ import {
   Sparkles,
   LogOut, 
   Plus, 
-  Search,
   Calendar,
   AlertCircle,
   ShieldCheck
@@ -36,6 +35,29 @@ export default function DashboardPage() {
     expiringPassportsCount: 0,
   });
   const [upcomingPackages, setUpcomingPackages] = useState([]);
+
+  // Logika Mengganti Menu + Update URL Hash (#)
+  const changeMenu = (menuKey) => {
+    setActiveMenu(menuKey);
+    window.location.hash = menuKey;
+  };
+
+  // Sync menu dengan URL Hash saat komponen dimuat atau di-refresh
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (hash) {
+        setActiveMenu(hash);
+      }
+    };
+
+    // Baca hash saat pertama kali di-load
+    handleHashChange();
+
+    // Event listener saat URL Hash berubah
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   // Fetch Data Real dari Firestore
   const fetchDashboardData = async () => {
@@ -142,28 +164,28 @@ export default function DashboardPage() {
               icon={LayoutDashboard} 
               label="Dashboard Utama" 
               active={activeMenu === 'dashboard'} 
-              onClick={() => { setActiveMenu('dashboard'); fetchDashboardData(); }} 
+              onClick={() => { changeMenu('dashboard'); fetchDashboardData(); }} 
             />
             
             <SidebarItem 
               icon={Plane} 
               label="Paket Travel & LA" 
               active={activeMenu === 'packages'} 
-              onClick={() => setActiveMenu('packages')} 
+              onClick={() => changeMenu('packages')} 
             />
 
             <SidebarItem 
               icon={Users} 
               label="Data Master Jamaah" 
               active={activeMenu === 'jamaah'} 
-              onClick={() => setActiveMenu('jamaah')} 
+              onClick={() => changeMenu('jamaah')} 
             />
 
             <SidebarItem 
               icon={BookOpen} 
               label="Booking & Manifest" 
               active={activeMenu === 'bookings'} 
-              onClick={() => setActiveMenu('bookings')} 
+              onClick={() => changeMenu('bookings')} 
             />
 
             <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Operasional Travel</p>
@@ -172,21 +194,21 @@ export default function DashboardPage() {
               icon={Wallet} 
               label="Keuangan & Pelunasan" 
               active={activeMenu === 'finance'} 
-              onClick={() => setActiveMenu('finance')} 
+              onClick={() => changeMenu('finance')} 
             />
 
             <SidebarItem 
               icon={PackageCheck} 
               label="Perlengkapan Jamaah" 
               active={activeMenu === 'equipment'} 
-              onClick={() => setActiveMenu('equipment')} 
+              onClick={() => changeMenu('equipment')} 
             />
 
             <SidebarItem 
               icon={UserCheck} 
               label="Mitra & Agen" 
               active={activeMenu === 'agents'} 
-              onClick={() => setActiveMenu('agents')} 
+              onClick={() => changeMenu('agents')} 
             />
 
             <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Smart Assistant</p>
@@ -194,7 +216,7 @@ export default function DashboardPage() {
               icon={Sparkles} 
               label="AI Business Intelligence" 
               active={activeMenu === 'ai-analyzer'} 
-              onClick={() => setActiveMenu('ai-analyzer')} 
+              onClick={() => changeMenu('ai-analyzer')} 
             />
           </nav>
         </div>
@@ -232,7 +254,7 @@ export default function DashboardPage() {
 
           <div className="flex items-center gap-3">
             <button 
-              onClick={() => setActiveMenu('jamaah')}
+              onClick={() => changeMenu('jamaah')}
               className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg shadow-emerald-900/30"
             >
               <Plus className="w-4 h-4" /> Register Jamaah Baru
@@ -297,7 +319,7 @@ export default function DashboardPage() {
                     </h3>
                     <p className="text-xs text-slate-400">Data terhubung langsung dari modul Paket Travel</p>
                   </div>
-                  <button onClick={() => setActiveMenu('packages')} className="text-xs text-emerald-400 hover:underline">
+                  <button onClick={() => changeMenu('packages')} className="text-xs text-emerald-400 hover:underline">
                     + Buat Paket Baru
                   </button>
                 </div>
