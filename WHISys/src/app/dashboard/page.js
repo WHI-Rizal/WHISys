@@ -376,7 +376,7 @@ export default function DashboardPage() {
         {activeMenu === 'bookings' && <BookingsModule />}
 
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
-        {activeMenu !== 'dashboard' && activeMenu !== 'packages' && activeMenu !== 'jamaah' && activeMenu !== 'bookings'(
+        {activeMenu !== 'dashboard' && activeMenu !== 'packages' && activeMenu !== 'jamaah' && activeMenu !== 'bookings' && (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
             <div className="p-4 bg-emerald-500/10 text-emerald-400 w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center">
               <Plane className="w-8 h-8" />
