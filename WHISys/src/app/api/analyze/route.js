@@ -1,3 +1,5 @@
+import { GoogleGenAI } from '@google/genai';
+
 export async function POST(req) {
   try {
     const { data } = await req.json();
@@ -11,7 +13,7 @@ export async function POST(req) {
       return Response.json({ error: "GEMINI_API_KEY belum dikonfigurasi di Vercel" }, { status: 500 });
     }
 
-    // Batasi sampel data maksimal 200 baris agar payload tidak melebih batas token
+    // Ambil sampel 200 baris pertama agar ukuran data tetap optimal
     const limitedData = data.slice(0, 200);
     const totalRows = data.length;
 
@@ -28,45 +30,16 @@ export async function POST(req) {
       3. Rekomendasi Strategis Bisnis.
     `;
 
-    // Daftar endpoint alternatif jika salah satu mengalami kegagalan/deprecated
-    const endpoints = [
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`
-    ];
+    // Inisialisasi SDK resmi Google Gen AI
+    const ai = new GoogleGenAI({ apiKey });
 
-    let resultData = null;
-    let lastError = null;
+    // Menggunakan model 'gemini-2.5-flash'
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: promptText,
+    });
 
-    // Coba memanggil endpoint secara berurutan hingga berhasil
-    for (const endpoint of endpoints) {
-      try {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: promptText }] }]
-          })
-        });
-
-        const resJson = await response.json();
-
-        if (response.ok && resJson.candidates?.[0]?.content?.parts?.[0]?.text) {
-          resultData = resJson;
-          break; // Berhasil, keluar dari loop
-        } else {
-          lastError = resJson.error?.message || "Gagal mendapatkan respons";
-        }
-      } catch (err) {
-        lastError = err.message;
-      }
-    }
-
-    if (!resultData) {
-      throw new Error(lastError || "Gagal memproses data dengan semua model Gemini yang tersedia.");
-    }
-
-    const text = resultData.candidates[0].content.parts[0].text;
+    const text = response.text || "Tidak ada hasil analisis.";
     return Response.json({ result: text });
 
   } catch (error) {
