@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import { 
   LayoutDashboard, 
@@ -15,7 +17,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 
-export default function App() {
+export default function DashboardPage() {
   const [activeMenu, setActiveMenu] = useState('dashboard');
 
   // Ringkasan Statistik Utama ERP
