@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, query, orderBy } from 'firebase/firestore';
-import { BookOpen, Plus, Search, Calendar, Users, Hotel, Bus, X, CheckCircle, Clock } from 'lucide-react';
+import { collection, addDoc, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { BookOpen, Plus, Search, CheckCircle, Clock, X } from 'lucide-react';
 
 export default function BookingsModule() {
   const [bookings, setBookings] = useState([]);
@@ -25,18 +25,18 @@ export default function BookingsModule() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch Packages
-      const pkgSnap = await getDocs(query(collection(db, 'packages'), orderBy('name', 'asc')));
+      // 1. Fetch Packages (Aman tanpa orderBy Firestore)
+      const pkgSnap = await getDocs(collection(db, 'packages'));
       const pkgs = pkgSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       setPackagesList(pkgs);
 
       // 2. Fetch Jamaah
-      const jmhSnap = await getDocs(query(collection(db, 'jamaah'), orderBy('fullName', 'asc')));
+      const jmhSnap = await getDocs(collection(db, 'jamaah'));
       const jmhs = jmhSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       setJamaahList(jmhs);
 
       // 3. Fetch Bookings
-      const bkSnap = await getDocs(query(collection(db, 'bookings'), orderBy('createdAt', 'desc')));
+      const bkSnap = await getDocs(collection(db, 'bookings'));
       const bks = bkSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       setBookings(bks);
     } catch (err) {
@@ -60,15 +60,20 @@ export default function BookingsModule() {
       const selectedPkg = packagesList.find(p => p.id === formData.packageId);
       const selectedJamaah = jamaahList.find(j => j.id === formData.jamaahId);
 
-      if (selectedPkg.quotaRemaining <= 0) {
+      if (!selectedPkg || !selectedJamaah) {
+        alert("Data paket atau jamaah tidak ditemukan.");
+        return;
+      }
+
+      if (Number(selectedPkg.quotaRemaining || 0) <= 0) {
         alert("Kuota paket ini sudah habis!");
         return;
       }
 
       // Hitung Total Tagihan Berdasarkan Tipe Kamar
-      let price = selectedPkg.priceQuad || 0;
-      if (formData.roomType === 'Triple') price = selectedPkg.priceTriple || price;
-      if (formData.roomType === 'Double') price = selectedPkg.priceDouble || price;
+      let price = Number(selectedPkg.priceQuad || 0);
+      if (formData.roomType === 'Triple') price = Number(selectedPkg.priceTriple || price);
+      if (formData.roomType === 'Double') price = Number(selectedPkg.priceDouble || price);
 
       const bookingCode = `BK-${Date.now().toString().slice(-6)}`;
 
@@ -76,11 +81,11 @@ export default function BookingsModule() {
       await addDoc(collection(db, 'bookings'), {
         bookingCode,
         packageId: selectedPkg.id,
-        packageName: selectedPkg.name,
-        packageCode: selectedPkg.code,
-        departureDate: selectedPkg.departureDate,
+        packageName: selectedPkg.name || 'Paket Travel',
+        packageCode: selectedPkg.code || '-',
+        departureDate: selectedPkg.departureDate || '-',
         jamaahId: selectedJamaah.id,
-        jamaahName: selectedJamaah.fullName,
+        jamaahName: selectedJamaah.fullName || 'Jamaah',
         passportNumber: selectedJamaah.passportNumber || '-',
         roomType: formData.roomType,
         busGroup: formData.busGroup,
@@ -92,7 +97,7 @@ export default function BookingsModule() {
       // 2. Potong Kuota Package di Firestore
       const pkgRef = doc(db, 'packages', selectedPkg.id);
       await updateDoc(pkgRef, {
-        quotaRemaining: Number(selectedPkg.quotaRemaining) - 1
+        quotaRemaining: Number(selectedPkg.quotaRemaining || 1) - 1
       });
 
       setShowModal(false);
@@ -104,9 +109,9 @@ export default function BookingsModule() {
   };
 
   const filteredBookings = bookings.filter(b => 
-    b.jamaahName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    b.packageName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    b.bookingCode?.toLowerCase().includes(searchTerm.toLowerCase())
+    (b.jamaahName && b.jamaahName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (b.packageName && b.packageName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (b.bookingCode && b.bookingCode.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   return (
@@ -168,20 +173,20 @@ export default function BookingsModule() {
                 filteredBookings.map((item) => (
                   <tr key={item.id} className="hover:bg-slate-800/30 transition-colors">
                     <td className="p-4 font-semibold text-white">
-                      {item.jamaahName}
+                      {item.jamaahName || '-'}
                       <span className="block text-[10px] text-emerald-400 font-mono">{item.bookingCode}</span>
                     </td>
                     <td className="p-4">
-                      {item.packageName}
+                      {item.packageName || '-'}
                       <span className="block text-[10px] text-slate-400">{item.departureDate}</span>
                     </td>
-                    <td className="p-4 font-mono">{item.passportNumber}</td>
+                    <td className="p-4 font-mono">{item.passportNumber || '-'}</td>
                     <td className="p-4">
                       <span className="inline-block bg-slate-800 px-2 py-0.5 rounded text-[10px] mr-1">{item.roomType}</span>
                       <span className="inline-block bg-slate-800 px-2 py-0.5 rounded text-[10px]">{item.busGroup}</span>
                     </td>
                     <td className="p-4 font-bold text-slate-100">
-                      Rp {item.totalAmount?.toLocaleString('id-ID')}
+                      Rp {item.totalAmount ? Number(item.totalAmount).toLocaleString('id-ID') : '0'}
                     </td>
                     <td className="p-4">
                       {item.paymentStatus === 'Full Payment' ? (
@@ -226,7 +231,7 @@ export default function BookingsModule() {
                   <option value="">-- Pilih Program Keberangkatan --</option>
                   {packagesList.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.name} ({p.code}) - Sisa Seat: {p.quotaRemaining}
+                      {p.name} ({p.code}) - Sisa Seat: {p.quotaRemaining ?? p.quotaTotal}
                     </option>
                   ))}
                 </select>
