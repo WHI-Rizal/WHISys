@@ -22,6 +22,7 @@ import { doc, getDoc, collection, getDocs, query, orderBy, limit } from 'firebas
 import PackagesModule from './PackagesModule';
 import JamaahModule from './JamaahModule';
 import BookingsModule from './BookingsModule';
+import FinanceModule from './FinanceModule';
 
 export default function DashboardPage() {
   const [activeMenu, setActiveMenu] = useState('dashboard');
@@ -397,8 +398,11 @@ export default function DashboardPage() {
         {/* MODUL BOOKING & MANIFEST */}
         {activeMenu === 'bookings' && <BookingsModule />}
 
+        {/* MODUL KEUANGAN & PELUNASAN */}
+        {activeMenu === 'finance' && <FinanceModule />}
+
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
-        {activeMenu !== 'dashboard' && activeMenu !== 'packages' && activeMenu !== 'jamaah' && activeMenu !== 'bookings' && (
+        {activeMenu !== 'dashboard' && activeMenu !== 'packages' && activeMenu !== 'jamaah' && activeMenu !== 'bookings' && activeMenu !== 'finance' && (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
             <div className="p-4 bg-emerald-500/10 text-emerald-400 w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center">
               <Plane className="w-8 h-8" />
