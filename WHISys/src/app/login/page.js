@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { auth } from '../../firebase';
+import { auth } from '../firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { Plane, Lock, Mail, AlertCircle } from 'lucide-react';
 
@@ -18,7 +18,6 @@ export default function LoginPage() {
 
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      // Redirect otomatis ke dashboard setelah berhasil login
       window.location.href = '/dashboard';
     } catch (err) {
       setError("Gagal masuk: Periksa kembali email dan password Anda.");
@@ -30,7 +29,6 @@ export default function LoginPage() {
     <div className="flex h-screen bg-slate-950 text-slate-100 items-center justify-center font-sans px-4">
       <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl w-full max-w-md shadow-2xl">
         
-        {/* Logo Header */}
         <div className="text-center mb-8">
           <div className="w-12 h-12 bg-emerald-600 rounded-xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-emerald-900/40">
             <Plane className="w-6 h-6 text-white" />
@@ -46,7 +44,6 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* Form Login */}
         <form onSubmit={handleLogin} className="space-y-4 text-xs">
           <div>
             <label className="block mb-1 font-medium text-slate-300">Email Administrator / Staf</label>
