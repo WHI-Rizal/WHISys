@@ -1,147 +1,94 @@
 'use client';
-import { useState } from 'react';
-import { useAuth } from '@/context/AuthContext';
-import { useRouter } from 'next/navigation';
 
-export default function Login() {
+import React, { useState } from 'react';
+import { auth } from '@/firebase';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { Plane, Lock, Mail, AlertCircle } from 'lucide-react';
+
+export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const { login } = useAuth();
-  const router = useRouter();
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
+    setLoading(true);
     setError('');
+
     try {
-      await login(email, password);
-      router.push('/dashboard');
+      await signInWithEmailAndPassword(auth, email, password);
+      // Redirect otomatis ke dashboard setelah berhasil login
+      window.location.href = '/dashboard';
     } catch (err) {
-      setError('Email atau password salah');
+      setError("Gagal masuk: Periksa kembali email dan password Anda.");
+      setLoading(false);
     }
   };
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: '#020617',
-      padding: '1rem',
-      fontFamily: 'sans-serif'
-    }}>
-      <div style={{
-        maxWidth: '28rem',
-        width: '100%',
-        backgroundColor: '#0f172a',
-        border: '1px solid #1e293b',
-        borderRadius: '1rem',
-        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-        padding: '2rem'
-      }}>
+    <div className="flex h-screen bg-slate-950 text-slate-100 items-center justify-center font-sans px-4">
+      <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl w-full max-w-md shadow-2xl">
         
-        {/* Header Logo & Title */}
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          {/* BARIS DI BAWAH INI YANG DIGANTI */}
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
-            <img 
-              src="/logo.png" 
-              alt="WHI Logo" 
-              style={{ height: '60px', width: 'auto', objectFit: 'contain' }} 
-            />
+        {/* Logo Header */}
+        <div className="text-center mb-8">
+          <div className="w-12 h-12 bg-emerald-600 rounded-xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-emerald-900/40">
+            <Plane className="w-6 h-6 text-white" />
           </div>
-          
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#ffffff', letterSpacing: '0.025em' }}>
-            WHI System Portal
-          </h1>
-          <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginTop: '0.25rem' }}>
-            Masuk untuk mengakses Dashboard Analisis
-          </p>
+          <h1 className="text-2xl font-bold text-white">WHISys ERP</h1>
+          <p className="text-xs text-slate-400 mt-1">Sistem Manajemen Travel Umrah, Haji & Wisata Halal</p>
         </div>
 
-        {/* Error Alert */}
         {error && (
-          <div style={{
-            marginBottom: '1rem',
-            padding: '0.75rem',
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid rgba(239, 68, 68, 0.5)',
-            borderRadius: '0.5rem',
-            color: '#f87171',
-            fontSize: '0.875rem',
-            textAlign: 'center'
-          }}>
-            {error}
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
 
         {/* Form Login */}
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <form onSubmit={handleLogin} className="space-y-4 text-xs">
           <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '600', color: '#cbd5e1', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
-              Email
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '0.75rem 1rem',
-                backgroundColor: '#1e293b',
-                border: '1px solid #334155',
-                borderRadius: '0.75rem',
-                color: '#ffffff',
-                outline: 'none',
-                boxSizing: 'border-box'
-              }}
-              placeholder="nama@wisatahalalindonesia.com"
-              required
-            />
+            <label className="block mb-1 font-medium text-slate-300">Email Administrator / Staf</label>
+            <div className="relative">
+              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              <input 
+                type="email" required
+                placeholder="nama@wisatahalalindonesia.com"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2.5 text-white focus:outline-none focus:border-emerald-500"
+                value={email} onChange={e => setEmail(e.target.value)}
+              />
+            </div>
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '600', color: '#cbd5e1', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '0.75rem 1rem',
-                backgroundColor: '#1e293b',
-                border: '1px solid #334155',
-                borderRadius: '0.75rem',
-                color: '#ffffff',
-                outline: 'none',
-                boxSizing: 'border-box'
-              }}
-              placeholder="••••••••"
-              required
-            />
+            <label className="block mb-1 font-medium text-slate-300">Password</label>
+            <div className="relative">
+              <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              <input 
+                type="password" required
+                placeholder="••••••••"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2.5 text-white focus:outline-none focus:border-emerald-500"
+                value={password} onChange={e => setPassword(e.target.value)}
+              />
+            </div>
           </div>
 
-          <button
-            type="submit"
-            style={{
-              width: '100%',
-              padding: '0.875rem 1rem',
-              backgroundColor: '#059669',
-              color: '#ffffff',
-              fontWeight: '500',
-              borderRadius: '0.75rem',
-              border: 'none',
-              cursor: 'pointer',
-              marginTop: '0.5rem',
-              transition: 'background-color 0.2s'
-            }}
+          <button 
+            type="submit" disabled={loading}
+            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-lg font-medium transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2 mt-2"
           >
-            Sign In
+            {loading ? (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+            ) : (
+              'Masuk ke Sistem ERP'
+            )}
           </button>
         </form>
+
+        <div className="mt-8 pt-4 border-t border-slate-800 text-center text-[11px] text-slate-500">
+          PT Wisata Halal Indonesia • Secure Enterprise System
+        </div>
 
       </div>
     </div>
