@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { auth, db } from '../../lib/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import PackagesModule from './PackagesModule';
 import JamaahModule from './JamaahModule';
 
@@ -28,7 +28,49 @@ export default function DashboardPage() {
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Load Profil User dari Firebase Firestore
+  // Dynamic Real-time States dari Firestore
+  const [realStats, setRealStats] = useState({
+    totalJamaah: 0,
+    totalPackages: 0,
+    expiringPassportsCount: 0,
+  });
+  const [upcomingPackages, setUpcomingPackages] = useState([]);
+
+  // Fetch Data Real dari Firestore
+  const fetchDashboardData = async () => {
+    try {
+      // 1. Fetch Jamaah Data
+      const jamaahSnap = await getDocs(collection(db, 'jamaah'));
+      const jamaahList = jamaahSnap.docs.map(doc => doc.data());
+      
+      // Hitung Paspor Expired < 6 bulan
+      const today = new Date();
+      const sixMonths = new Date();
+      sixMonths.setMonth(today.getMonth() + 6);
+
+      const expiringCount = jamaahList.filter(j => {
+        if (!j.passportExpiry) return false;
+        return new Date(j.passportExpiry) < sixMonths;
+      }).length;
+
+      // 2. Fetch Keberangkatan Terdekat dari Packages
+      const pkgQuery = query(collection(db, 'packages'), orderBy('departureDate', 'asc'), limit(5));
+      const pkgSnap = await getDocs(pkgQuery);
+      const pkgList = pkgSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      setRealStats({
+        totalJamaah: jamaahSnap.size,
+        totalPackages: pkgSnap.size,
+        expiringPassportsCount: expiringCount,
+      });
+
+      setUpcomingPackages(pkgList);
+    } catch (err) {
+      console.error("Gagal memuat statistik dashboard:", err);
+    }
+  };
+
+  // Load Profil User & Data Dashboard
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
@@ -46,6 +88,7 @@ export default function DashboardPage() {
         } catch (error) {
           console.error("Gagal mengambil profil user:", error);
         }
+        await fetchDashboardData();
       } else {
         window.location.href = '/login';
       }
@@ -64,27 +107,12 @@ export default function DashboardPage() {
     }
   };
 
-  // Ringkasan Statistik Utama ERP
-  const stats = [
-    { title: 'Total Jamaah Active', value: '342 Orang', icon: Users, color: 'text-blue-400', bg: 'bg-blue-500/10' },
-    { title: 'Group Keberangkatan', value: '12 Group', icon: Plane, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
-    { title: 'Pending Pelunasan', value: 'Rp 450M', icon: Wallet, color: 'text-amber-400', bg: 'bg-amber-500/10' },
-    { title: 'Koper & Perlengkapan', value: '88 Pcs Pending', icon: PackageCheck, color: 'text-purple-400', bg: 'bg-purple-500/10' },
-  ];
-
-  // Data Keberangkatan Terdekat
-  const upcomingDepartures = [
-    { code: 'UMR-VIP-DEC26', name: 'Umrah Akhir Tahun VIP', date: '2026-12-20', airline: 'Saudi Airlines', seats: '38/45', status: 'Ready' },
-    { code: 'HAL-TURK-OCT26', name: 'Wisata Halal Turki 10D', date: '2026-10-15', airline: 'Turkish Airlines', seats: '20/25', status: 'Processing Visa' },
-    { code: 'HAJ-FUR-2027', name: 'Haji Furoda Khusus 2027', date: '2027-05-10', airline: 'Garuda Indonesia', seats: '12/15', status: 'Open Seat' },
-  ];
-
   if (loading) {
     return (
       <div className="flex h-screen bg-slate-950 text-slate-100 items-center justify-center font-sans">
         <div className="flex items-center gap-3">
           <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-slate-400 text-sm">Memverifikasi Sesi & Otorisasi WHISys...</p>
+          <p className="text-slate-400 text-sm">Memverifikasi Sesi & Memuat Dashboard...</p>
         </div>
       </div>
     );
@@ -96,7 +124,6 @@ export default function DashboardPage() {
       {/* 1. SIDEBAR NAVIGASI ERP */}
       <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between p-4 shrink-0">
         <div>
-          {/* Header Branding Logo */}
           <div className="flex items-center gap-3 px-3 py-4 mb-6 border-b border-slate-800">
             <div className="p-2 bg-emerald-600 rounded-lg">
               <Plane className="w-6 h-6 text-white" />
@@ -107,7 +134,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Menu Utama ERP */}
           <nav className="space-y-1">
             <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Core ERP System</p>
             
@@ -115,7 +141,7 @@ export default function DashboardPage() {
               icon={LayoutDashboard} 
               label="Dashboard Utama" 
               active={activeMenu === 'dashboard'} 
-              onClick={() => setActiveMenu('dashboard')} 
+              onClick={() => { setActiveMenu('dashboard'); fetchDashboardData(); }} 
             />
             
             <SidebarItem 
@@ -172,7 +198,6 @@ export default function DashboardPage() {
           </nav>
         </div>
 
-        {/* Profile Footer & Logout Button */}
         <div className="border-t border-slate-800 pt-4 flex items-center justify-between px-2">
           <div className="flex items-center gap-3 overflow-hidden">
             <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs uppercase shrink-0">
@@ -198,7 +223,6 @@ export default function DashboardPage() {
       {/* 2. AREA KONTEN UTAMA */}
       <main className="flex-1 overflow-y-auto bg-slate-950 p-8">
         
-        {/* Top Header */}
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
             <h2 className="text-2xl font-bold text-white">WHISys ERP Executive Board</h2>
@@ -206,14 +230,6 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-              <input 
-                type="text" 
-                placeholder="Cari Paspor / Nama Jamaah..." 
-                className="bg-slate-900 text-slate-200 pl-9 pr-4 py-2 rounded-lg border border-slate-800 text-sm focus:outline-none focus:border-emerald-500 w-64"
-              />
-            </div>
             <button 
               onClick={() => setActiveMenu('jamaah')}
               className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg shadow-emerald-900/30"
@@ -226,101 +242,122 @@ export default function DashboardPage() {
         {/* DASHBOARD UTAMA VIEW */}
         {activeMenu === 'dashboard' && (
           <>
-            {/* Stat Cards Grid */}
+            {/* Real Stat Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-              {stats.map((item, idx) => {
-                const IconComponent = item.icon;
-                return (
-                  <div key={idx} className="bg-slate-900 border border-slate-800 p-5 rounded-xl flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-medium text-slate-400 mb-1">{item.title}</p>
-                      <h3 className="text-2xl font-bold text-white">{item.value}</h3>
-                    </div>
-                    <div className={`p-3 rounded-lg ${item.bg} ${item.color}`}>
-                      <IconComponent className="w-6 h-6" />
-                    </div>
-                  </div>
-                );
-              })}
+              <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-slate-400 mb-1">Total Jamaah Terdaftar</p>
+                  <h3 className="text-2xl font-bold text-white">{realStats.totalJamaah} Orang</h3>
+                </div>
+                <div className="p-3 rounded-lg bg-blue-500/10 text-blue-400">
+                  <Users className="w-6 h-6" />
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-slate-400 mb-1">Group & Paket Keberangkatan</p>
+                  <h3 className="text-2xl font-bold text-white">{realStats.totalPackages} Program</h3>
+                </div>
+                <div className="p-3 rounded-lg bg-emerald-500/10 text-emerald-400">
+                  <Plane className="w-6 h-6" />
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-slate-400 mb-1">Paspor &lt; 6 Bulan Expired</p>
+                  <h3 className="text-2xl font-bold text-amber-400">{realStats.expiringPassportsCount} Paspor</h3>
+                </div>
+                <div className="p-3 rounded-lg bg-amber-500/10 text-amber-400">
+                  <AlertCircle className="w-6 h-6" />
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-slate-400 mb-1">Status Sistem</p>
+                  <h3 className="text-lg font-bold text-emerald-400">Firestore Connected</h3>
+                </div>
+                <div className="p-3 rounded-lg bg-purple-500/10 text-purple-400">
+                  <ShieldCheck className="w-6 h-6" />
+                </div>
+              </div>
             </div>
 
-            {/* Content Layout: Table & Activity */}
+            {/* Layout: Table Keberangkatan Terdekat */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               
-              {/* Tabel Keberangkatan Terdekat */}
               <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6">
                 <div className="flex items-center justify-between mb-6">
                   <div>
                     <h3 className="font-bold text-white flex items-center gap-2">
-                      <Calendar className="w-5 h-5 text-emerald-400" /> Keberangkatan Mendatang
+                      <Calendar className="w-5 h-5 text-emerald-400" /> Program Keberangkatan Mendatang
                     </h3>
-                    <p className="text-xs text-slate-400">Monitoring alokasi seat & status dokumen group</p>
+                    <p className="text-xs text-slate-400">Data terhubung langsung dari modul Paket Travel</p>
                   </div>
                   <button onClick={() => setActiveMenu('packages')} className="text-xs text-emerald-400 hover:underline">
-                    Kelola Semua Paket
+                    + Buat Paket Baru
                   </button>
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm text-slate-300">
-                    <thead className="bg-slate-800/50 text-slate-400 text-xs uppercase">
-                      <tr>
-                        <th className="p-3 rounded-l-lg">Kode / Paket</th>
-                        <th className="p-3">Tanggal</th>
-                        <th className="p-3">Maskapai</th>
-                        <th className="p-3">Quota Seat</th>
-                        <th className="p-3 rounded-r-lg">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60">
-                      {upcomingDepartures.map((group, idx) => (
-                        <tr key={idx} className="hover:bg-slate-800/30 transition-colors">
-                          <td className="p-3 font-semibold text-white">
-                            {group.name}
-                            <span className="block text-xs font-normal text-slate-400">{group.code}</span>
-                          </td>
-                          <td className="p-3">{group.date}</td>
-                          <td className="p-3">{group.airline}</td>
-                          <td className="p-3 font-medium text-emerald-400">{group.seats}</td>
-                          <td className="p-3">
-                            <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs rounded-full font-medium">
-                              {group.status}
-                            </span>
-                          </td>
+                  {upcomingPackages.length === 0 ? (
+                    <div className="p-8 text-center text-slate-500 text-xs border border-dashed border-slate-800 rounded-lg">
+                      Belum ada paket travel terdaftar di database.
+                    </div>
+                  ) : (
+                    <table className="w-full text-left text-sm text-slate-300">
+                      <thead className="bg-slate-800/50 text-slate-400 text-xs uppercase">
+                        <tr>
+                          <th className="p-3 rounded-l-lg">Kode / Paket</th>
+                          <th className="p-3">Tanggal</th>
+                          <th className="p-3">Maskapai</th>
+                          <th className="p-3 rounded-r-lg">Sisa Seat</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60 text-xs">
+                        {upcomingPackages.map((pkg) => (
+                          <tr key={pkg.id} className="hover:bg-slate-800/30 transition-colors">
+                            <td className="p-3 font-semibold text-white">
+                              {pkg.name}
+                              <span className="block text-[10px] font-normal text-slate-400">{pkg.code}</span>
+                            </td>
+                            <td className="p-3">{pkg.departureDate}</td>
+                            <td className="p-3">{pkg.airline}</td>
+                            <td className="p-3 font-medium text-emerald-400">{pkg.quotaRemaining} / {pkg.quotaTotal}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               </div>
 
-              {/* Alert Operations & Reminders */}
+              {/* Alert Operations */}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col justify-between">
                 <div>
                   <h3 className="font-bold text-white mb-4 flex items-center gap-2">
-                    <AlertCircle className="w-5 h-5 text-amber-400" /> Perhatian Operasional
+                    <AlertCircle className="w-5 h-5 text-amber-400" /> Peringatan Sistem
                   </h3>
                   
                   <div className="space-y-4">
-                    <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs">
-                      <p className="font-semibold text-amber-400 mb-1">12 Paspor Masa Berlaku &lt; 6 Bulan</p>
-                      <p className="text-slate-300">Diperlukan perpanjangan paspor jamaah Umrah Des 2026 segera.</p>
-                    </div>
-
-                    <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg text-xs">
-                      <p className="font-semibold text-blue-400 mb-1">Pengambilan Koper & Seragam</p>
-                      <p className="text-slate-300">25 Set Koper & Batik siap dikirim ke Mitra Bandung.</p>
-                    </div>
-
-                    <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-lg text-xs">
-                      <p className="font-semibold text-purple-400 mb-1">Pengajuan Visa Siskopatuh</p>
-                      <p className="text-slate-300">Manifest Group UMR-VIP membutuhkan verifikasi akhir data paspor.</p>
-                    </div>
+                    {realStats.expiringPassportsCount > 0 ? (
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs">
+                        <p className="font-semibold text-amber-400 mb-1">{realStats.expiringPassportsCount} Paspor Perlu Perpanjangan</p>
+                        <p className="text-slate-300">Ada paspor jamaah yang akan expired kurang dari 6 bulan.</p>
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-xs">
+                        <p className="font-semibold text-emerald-400 mb-1">Masa Berlaku Paspor Aman</p>
+                        <p className="text-slate-300">Tidak ada paspor jamaah yang mendekati masa kadaluarsa.</p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 <div className="mt-6 pt-4 border-t border-slate-800 text-center">
-                  <span className="text-xs text-slate-500">WHISys ERP Platform • Version 1.0</span>
+                  <span className="text-xs text-slate-500">WHISys ERP Platform • Live Firestore DB</span>
                 </div>
               </div>
 
@@ -352,7 +389,6 @@ export default function DashboardPage() {
   );
 }
 
-// Navigasi Item Komponen
 function SidebarItem({ icon: Icon, label, active, onClick }) {
   return (
     <button
