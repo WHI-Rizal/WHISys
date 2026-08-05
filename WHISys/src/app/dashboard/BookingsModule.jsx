@@ -2,15 +2,17 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc } from 'firebase/firestore';
-import { BookOpen, Plus, Search, CheckCircle, Clock, X } from 'lucide-react';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc } from 'firebase/firestore';
+import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2 } from 'lucide-react';
 
 export default function BookingsModule() {
   const [bookings, setBookings] = useState([]);
   const [packagesList, setPackagesList] = useState([]);
   const [jamaahList, setJamaahList] = useState([]);
   const [loading, setLoading] = useState(true);
+  
   const [showModal, setShowModal] = useState(false);
+  const [editingBookingId, setEditingBookingId] = useState(null); // ID jika mode edit
   const [searchTerm, setSearchTerm] = useState('');
 
   // Form State
@@ -25,20 +27,14 @@ export default function BookingsModule() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch Packages (Aman tanpa orderBy Firestore)
       const pkgSnap = await getDocs(collection(db, 'packages'));
-      const pkgs = pkgSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setPackagesList(pkgs);
+      setPackagesList(pkgSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
-      // 2. Fetch Jamaah
       const jmhSnap = await getDocs(collection(db, 'jamaah'));
-      const jmhs = jmhSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setJamaahList(jmhs);
+      setJamaahList(jmhSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
-      // 3. Fetch Bookings
       const bkSnap = await getDocs(collection(db, 'bookings'));
-      const bks = bkSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setBookings(bks);
+      setBookings(bkSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (err) {
       console.error("Gagal mengambil data booking:", err);
     }
@@ -49,6 +45,55 @@ export default function BookingsModule() {
     fetchData();
   }, []);
 
+  // Buka Modal Tambah Baru
+  const handleOpenAddModal = () => {
+    setEditingBookingId(null);
+    setFormData({ packageId: '', jamaahId: '', roomType: 'Quad', busGroup: 'Bus 1', paymentStatus: 'DP Paid' });
+    setShowModal(true);
+  };
+
+  // Buka Modal Edit
+  const handleOpenEditModal = (item) => {
+    setEditingBookingId(item.id);
+    setFormData({
+      packageId: item.packageId || '',
+      jamaahId: item.jamaahId || '',
+      roomType: item.roomType || 'Quad',
+      busGroup: item.busGroup || 'Bus 1',
+      paymentStatus: item.paymentStatus || 'DP Paid',
+    });
+    setShowModal(true);
+  };
+
+  // Hapus Booking
+  const handleDeleteBooking = async (item) => {
+    if (!confirm(`Apakah Anda yakin ingin menghapus/membatalkan booking ${item.bookingCode} atas nama ${item.jamaahName}?`)) {
+      return;
+    }
+
+    try {
+      // 1. Hapus dokumen booking
+      await deleteDoc(doc(db, 'bookings', item.id));
+
+      // 2. Kembalikan Kuota Paket (+1)
+      if (item.packageId) {
+        const pkgRef = doc(db, 'packages', item.packageId);
+        const pkgSnap = await getDoc(pkgRef);
+        if (pkgSnap.exists()) {
+          const currentQuota = pkgSnap.data().quotaRemaining ?? 0;
+          await updateDoc(pkgRef, {
+            quotaRemaining: Number(currentQuota) + 1
+          });
+        }
+      }
+
+      fetchData();
+    } catch (err) {
+      alert("Gagal menghapus booking: " + err.message);
+    }
+  };
+
+  // Submit Simpan (Tambah atau Edit)
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.packageId || !formData.jamaahId) {
@@ -65,43 +110,62 @@ export default function BookingsModule() {
         return;
       }
 
-      if (Number(selectedPkg.quotaRemaining || 0) <= 0) {
-        alert("Kuota paket ini sudah habis!");
-        return;
-      }
-
-      // Hitung Total Tagihan Berdasarkan Tipe Kamar
-      let price = Number(selectedPkg.priceQuad || 0);
+      // Hitung Total Biaya
+      let price = Number(selectedPkg.priceQuad || selectedPkg.priceMain || 0);
       if (formData.roomType === 'Triple') price = Number(selectedPkg.priceTriple || price);
       if (formData.roomType === 'Double') price = Number(selectedPkg.priceDouble || price);
 
-      const bookingCode = `BK-${Date.now().toString().slice(-6)}`;
+      if (editingBookingId) {
+        // MODE EDIT DATA BOOKING
+        const bookingRef = doc(db, 'bookings', editingBookingId);
+        await updateDoc(bookingRef, {
+          packageId: selectedPkg.id,
+          packageName: selectedPkg.name || 'Paket Travel',
+          packageCode: selectedPkg.code || '-',
+          departureDate: selectedPkg.departureDate || '-',
+          jamaahId: selectedJamaah.id,
+          jamaahName: selectedJamaah.fullName || 'Jamaah',
+          passportNumber: selectedJamaah.passportNumber || '-',
+          roomType: formData.roomType,
+          busGroup: formData.busGroup,
+          totalAmount: price,
+          paymentStatus: formData.paymentStatus,
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        // MODE TAMBAH BOOKING BARU
+        if (Number(selectedPkg.quotaRemaining || 0) <= 0) {
+          alert("Kuota paket ini sudah habis!");
+          return;
+        }
 
-      // 1. Simpan Ke Collection Bookings
-      await addDoc(collection(db, 'bookings'), {
-        bookingCode,
-        packageId: selectedPkg.id,
-        packageName: selectedPkg.name || 'Paket Travel',
-        packageCode: selectedPkg.code || '-',
-        departureDate: selectedPkg.departureDate || '-',
-        jamaahId: selectedJamaah.id,
-        jamaahName: selectedJamaah.fullName || 'Jamaah',
-        passportNumber: selectedJamaah.passportNumber || '-',
-        roomType: formData.roomType,
-        busGroup: formData.busGroup,
-        totalAmount: price,
-        paymentStatus: formData.paymentStatus,
-        createdAt: new Date().toISOString()
-      });
+        const bookingCode = `BK-${Date.now().toString().slice(-6)}`;
 
-      // 2. Potong Kuota Package di Firestore
-      const pkgRef = doc(db, 'packages', selectedPkg.id);
-      await updateDoc(pkgRef, {
-        quotaRemaining: Number(selectedPkg.quotaRemaining || 1) - 1
-      });
+        await addDoc(collection(db, 'bookings'), {
+          bookingCode,
+          packageId: selectedPkg.id,
+          packageName: selectedPkg.name || 'Paket Travel',
+          packageCode: selectedPkg.code || '-',
+          departureDate: selectedPkg.departureDate || '-',
+          jamaahId: selectedJamaah.id,
+          jamaahName: selectedJamaah.fullName || 'Jamaah',
+          passportNumber: selectedJamaah.passportNumber || '-',
+          roomType: formData.roomType,
+          busGroup: formData.busGroup,
+          totalAmount: price,
+          paymentStatus: formData.paymentStatus,
+          createdAt: new Date().toISOString()
+        });
+
+        // Potong Kuota Package di Firestore (-1)
+        const pkgRef = doc(db, 'packages', selectedPkg.id);
+        await updateDoc(pkgRef, {
+          quotaRemaining: Number(selectedPkg.quotaRemaining || 1) - 1
+        });
+      }
 
       setShowModal(false);
-      setFormData({ packageId: '', jamaahId: '', roomType: 'Quad', busGroup: 'Bus 1', paymentStatus: 'DP Paid' });
+      setEditingBookingId(null);
       fetchData();
     } catch (err) {
       alert("Gagal memproses booking: " + err.message);
@@ -125,7 +189,7 @@ export default function BookingsModule() {
           <p className="text-xs text-slate-400 mt-1">Plotting jamaah ke paket keberangkatan, alokasi bus, dan status manifes.</p>
         </div>
         <button
-          onClick={() => setShowModal(true)}
+          onClick={handleOpenAddModal}
           className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg shadow-emerald-900/30"
         >
           <Plus className="w-4 h-4" /> Tambah Booking Baru
@@ -158,16 +222,17 @@ export default function BookingsModule() {
                 <th className="p-4">Kamar & Bus</th>
                 <th className="p-4">Total Biaya</th>
                 <th className="p-4">Status Pembayaran</th>
+                <th className="p-4 text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
               {loading ? (
                 <tr>
-                  <td colSpan="6" className="p-8 text-center text-slate-400">Memuat data manifest...</td>
+                  <td colSpan="7" className="p-8 text-center text-slate-400">Memuat data manifest...</td>
                 </tr>
               ) : filteredBookings.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="p-8 text-center text-slate-400">Belum ada booking terdaftar. Klik 'Tambah Booking Baru' untuk mendaftar.</td>
+                  <td colSpan="7" className="p-8 text-center text-slate-400">Belum ada booking terdaftar. Klik 'Tambah Booking Baru' untuk mendaftar.</td>
                 </tr>
               ) : (
                 filteredBookings.map((item) => (
@@ -199,6 +264,24 @@ export default function BookingsModule() {
                         </span>
                       )}
                     </td>
+                    <td className="p-4 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          onClick={() => handleOpenEditModal(item)}
+                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-lg transition-colors"
+                          title="Edit Booking"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteBooking(item)}
+                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-rose-400 rounded-lg transition-colors"
+                          title="Hapus / Batal Booking"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -207,7 +290,7 @@ export default function BookingsModule() {
         </div>
       </div>
 
-      {/* Modal Form Tambah Booking */}
+      {/* Modal Form Booking (Tambah / Edit) */}
       {showModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 relative">
@@ -216,7 +299,7 @@ export default function BookingsModule() {
             </button>
 
             <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-              <BookOpen className="w-5 h-5 text-emerald-400" /> Registrasi Booking Jamaah
+              <BookOpen className="w-5 h-5 text-emerald-400" /> {editingBookingId ? 'Edit Data Booking Jamaah' : 'Registrasi Booking Jamaah'}
             </h3>
 
             <form onSubmit={handleSubmit} className="space-y-4 text-xs text-slate-300">
@@ -298,7 +381,7 @@ export default function BookingsModule() {
                   Batal
                 </button>
                 <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
-                  Proses Booking
+                  {editingBookingId ? 'Simpan Perubahan' : 'Proses Booking'}
                 </button>
               </div>
             </form>
