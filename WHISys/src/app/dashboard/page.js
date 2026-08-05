@@ -21,6 +21,7 @@ import { auth, db } from '../../lib/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import PackagesModule from './PackagesModule';
+import JamaahModule from './JamaahModule';
 
 export default function DashboardPage() {
   const [activeMenu, setActiveMenu] = useState('dashboard');
@@ -349,6 +350,8 @@ export default function DashboardPage() {
 
         {/* MODUL PAKET TRAVEL & LA VIEW */}
         {activeMenu === 'packages' && <PackagesModule />}
+        {/* TAMBAHKAN BARIS MODUL JAMAAH DI SINI */}
+        {activeMenu === 'jamaah' && <JamaahModule />}
 
         {/* FALLBACK VIEW UNTUK MODUL LAIN YANG SEDANG DIKEMBANGKAN */}
         {activeMenu !== 'dashboard' && activeMenu !== 'packages' && (
