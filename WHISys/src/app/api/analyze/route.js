@@ -11,7 +11,7 @@ export async function POST(req) {
       return Response.json({ error: "GEMINI_API_KEY belum dikonfigurasi di Vercel" }, { status: 500 });
     }
 
-    // Ambil sampel 200 baris pertama
+    // Sampel data maksimal 200 baris agar payload tidak membengkak
     const limitedData = data.slice(0, 200);
     const totalRows = data.length;
 
@@ -28,7 +28,7 @@ export async function POST(req) {
       3. Rekomendasi Strategis Bisnis.
     `;
 
-    // 1. Dapatkan daftar model yang didukung oleh API key ini secara otomatis
+    // 1. Ambil daftar model yang tersedia untuk API key ini
     const listResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
     const listData = await listResponse.json();
 
@@ -36,7 +36,7 @@ export async function POST(req) {
       throw new Error(listData.error?.message || "Gagal mengambil daftar model Gemini.");
     }
 
-    // Cari model yang mendukung metode generateContent (prioritas model flash)
+    // 2. Pilih model yang mendukung metode generateContent (diutamakan versi flash)
     const availableModels = listData.models || [];
     const validModel = availableModels.find(m => 
       m.supportedGenerationMethods?.includes("generateContent") && m.name.includes("flash")
@@ -48,7 +48,7 @@ export async function POST(req) {
       throw new Error("Tidak ada model Gemini yang cocok ditemukan untuk akun ini.");
     }
 
-    // 2. Kirim permintaan ke model yang valid
+    // 3. Kirim permintaan ke model yang ditemukan
     const modelName = validModel.name; // Format: "models/gemini-..."
     const generateResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`,
