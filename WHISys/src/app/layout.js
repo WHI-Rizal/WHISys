@@ -2,8 +2,8 @@ import './globals.css'; // Opsional jika Anda pakai Tailwind CSS
 import { AuthContextProvider } from '@/context/AuthContext';
 
 export const metadata = {
-  title: 'Erahajj Business Intelligence',
-  description: 'AI Analytics untuk Travel Haji & Umrah',
+  title: 'WHI Business Intelligence',
+  description: 'AI Analytics untuk Travel Haji Umrah & Wisata Halal',
 };
 
 export default function RootLayout({ children }) {
