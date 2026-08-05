@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, 
   Plane, 
@@ -14,11 +14,63 @@ import {
   Plus, 
   Search,
   Calendar,
-  AlertCircle
+  AlertCircle,
+  ShieldCheck
 } from 'lucide-react';
+import { auth, db } from '../../lib/firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import PackagesModule from './PackagesModule';
 
 export default function DashboardPage() {
   const [activeMenu, setActiveMenu] = useState('dashboard');
+  const [userProfile, setUserProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Load Profil User & Hak Akses dari Firebase Firestore
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists()) {
+            setUserProfile(userDoc.data());
+          } else {
+            // Default Role jika belum terdaftar
+            setUserProfile({
+              email: user.email,
+              fullName: user.displayName || 'Staf WHI',
+              role: 'admin' 
+            });
+          }
+        } catch (error) {
+          console.error("Gagal mengambil profil user:", error);
+        }
+      } else {
+        // Jika tidak ada session user login, redirect ke halaman login
+        window.location.href = '/login';
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      window.location.href = '/login';
+    } catch (err) {
+      console.error("Gagal Logout:", err);
+    }
+  };
+
+  // Helper Cek Hak Akses Menu
+  const hasAccess = (allowedRoles) => {
+    if (!userProfile) return false;
+    if (userProfile.role === 'admin') return true; // Admin bisa akses seluruh modul
+    return allowedRoles.includes(userProfile.role);
+  };
 
   // Ringkasan Statistik Utama ERP
   const stats = [
@@ -35,11 +87,22 @@ export default function DashboardPage() {
     { code: 'HAJ-FUR-2027', name: 'Haji Furoda Khusus 2027', date: '2027-05-10', airline: 'Garuda Indonesia', seats: '12/15', status: 'Open Seat' },
   ];
 
+  if (loading) {
+    return (
+      <div className="flex h-screen bg-slate-950 text-slate-100 items-center justify-center font-sans">
+        <div className="flex items-center gap-3">
+          <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-slate-400 text-sm">Memverifikasi Sesi & Otorisasi WHISys...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 font-sans">
       
       {/* 1. SIDEBAR NAVIGASI ERP */}
-      <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between p-4">
+      <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between p-4 shrink-0">
         <div>
           {/* Header Branding Logo */}
           <div className="flex items-center gap-3 px-3 py-4 mb-6 border-b border-slate-800">
@@ -62,45 +125,62 @@ export default function DashboardPage() {
               active={activeMenu === 'dashboard'} 
               onClick={() => setActiveMenu('dashboard')} 
             />
-            <SidebarItem 
-              icon={Plane} 
-              label="Paket Travel & LA" 
-              active={activeMenu === 'packages'} 
-              onClick={() => setActiveMenu('packages')} 
-            />
-            <SidebarItem 
-              icon={Users} 
-              label="Data Master Jamaah" 
-              active={activeMenu === 'jamaah'} 
-              onClick={() => setActiveMenu('jamaah')} 
-            />
-            <SidebarItem 
-              icon={BookOpen} 
-              label="Booking & Manifest" 
-              active={activeMenu === 'bookings'} 
-              onClick={() => setActiveMenu('bookings')} 
-            />
+            
+            {hasAccess(['operations']) && (
+              <SidebarItem 
+                icon={Plane} 
+                label="Paket Travel & LA" 
+                active={activeMenu === 'packages'} 
+                onClick={() => setActiveMenu('packages')} 
+              />
+            )}
+
+            {hasAccess(['operations']) && (
+              <SidebarItem 
+                icon={Users} 
+                label="Data Master Jamaah" 
+                active={activeMenu === 'jamaah'} 
+                onClick={() => setActiveMenu('jamaah')} 
+              />
+            )}
+
+            {hasAccess(['operations', 'agent']) && (
+              <SidebarItem 
+                icon={BookOpen} 
+                label="Booking & Manifest" 
+                active={activeMenu === 'bookings'} 
+                onClick={() => setActiveMenu('bookings')} 
+              />
+            )}
 
             <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Operasional Travel</p>
             
-            <SidebarItem 
-              icon={Wallet} 
-              label="Keuangan & Pelunasan" 
-              active={activeMenu === 'finance'} 
-              onClick={() => setActiveMenu('finance')} 
-            />
-            <SidebarItem 
-              icon={PackageCheck} 
-              label="Perlengkapan Jamaah" 
-              active={activeMenu === 'equipment'} 
-              onClick={() => setActiveMenu('equipment')} 
-            />
-            <SidebarItem 
-              icon={UserCheck} 
-              label="Mitra & Agen" 
-              active={activeMenu === 'agents'} 
-              onClick={() => setActiveMenu('agents')} 
-            />
+            {hasAccess(['finance']) && (
+              <SidebarItem 
+                icon={Wallet} 
+                label="Keuangan & Pelunasan" 
+                active={activeMenu === 'finance'} 
+                onClick={() => setActiveMenu('finance')} 
+              />
+            )}
+
+            {hasAccess(['operations']) && (
+              <SidebarItem 
+                icon={PackageCheck} 
+                label="Perlengkapan Jamaah" 
+                active={activeMenu === 'equipment'} 
+                onClick={() => setActiveMenu('equipment')} 
+              />
+            )}
+
+            {hasAccess(['admin']) && (
+              <SidebarItem 
+                icon={UserCheck} 
+                label="Mitra & Agen" 
+                active={activeMenu === 'agents'} 
+                onClick={() => setActiveMenu('agents')} 
+              />
+            )}
 
             <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Smart Assistant</p>
             <SidebarItem 
@@ -112,18 +192,24 @@ export default function DashboardPage() {
           </nav>
         </div>
 
-        {/* Profile Footer */}
+        {/* Profile Footer & Logout Button */}
         <div className="border-t border-slate-800 pt-4 flex items-center justify-between px-2">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
-              W
+          <div className="flex items-center gap-3 overflow-hidden">
+            <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs uppercase shrink-0">
+              {userProfile?.role?.[0] || 'A'}
             </div>
-            <div>
-              <p className="text-sm font-medium text-slate-200">PT Wisata Halal</p>
-              <p className="text-xs text-slate-400">Admin Travel ERP</p>
+            <div className="truncate">
+              <p className="text-sm font-medium text-slate-200 truncate">{userProfile?.fullName || userProfile?.email}</p>
+              <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-semibold uppercase bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                <ShieldCheck className="w-3 h-3" /> {userProfile?.role || 'Admin'}
+              </span>
             </div>
           </div>
-          <button className="text-slate-400 hover:text-red-400 transition-colors">
+          <button 
+            onClick={handleLogout} 
+            className="text-slate-400 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-slate-800"
+            title="Keluar / Logout"
+          >
             <LogOut className="w-5 h-5" />
           </button>
         </div>
@@ -148,13 +234,15 @@ export default function DashboardPage() {
                 className="bg-slate-900 text-slate-200 pl-9 pr-4 py-2 rounded-lg border border-slate-800 text-sm focus:outline-none focus:border-emerald-500 w-64"
               />
             </div>
-            <button className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg shadow-emerald-900/30">
-              <Plus className="w-4 h-4" /> Register Jamaah Baru
-            </button>
+            {hasAccess(['operations', 'agent']) && (
+              <button className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg shadow-emerald-900/30">
+                <Plus className="w-4 h-4" /> Register Jamaah Baru
+              </button>
+            )}
           </div>
         </header>
 
-        {/* Dynamic Content Switching Based on activeMenu */}
+        {/* DASHBOARD UTAMA VIEW */}
         {activeMenu === 'dashboard' && (
           <>
             {/* Stat Cards Grid */}
@@ -178,7 +266,7 @@ export default function DashboardPage() {
             {/* Content Layout: Table & Activity */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               
-              {/* Tabel Keberangkatan Terdekat (2 Cols) */}
+              {/* Tabel Keberangkatan Terdekat */}
               <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6">
                 <div className="flex items-center justify-between mb-6">
                   <div>
@@ -187,7 +275,9 @@ export default function DashboardPage() {
                     </h3>
                     <p className="text-xs text-slate-400">Monitoring alokasi seat & status dokumen group</p>
                   </div>
-                  <button className="text-xs text-emerald-400 hover:underline">Lihat Semua Group</button>
+                  <button onClick={() => setActiveMenu('packages')} className="text-xs text-emerald-400 hover:underline">
+                    Kelola Semua Paket
+                  </button>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -223,7 +313,7 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Alert Operations & Reminders (1 Col) */}
+              {/* Alert Operations & Reminders */}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col justify-between">
                 <div>
                   <h3 className="font-bold text-white mb-4 flex items-center gap-2">
@@ -257,8 +347,11 @@ export default function DashboardPage() {
           </>
         )}
 
-        {/* Fallback View untuk Modul yang sedang dikembangkan */}
-        {activeMenu !== 'dashboard' && (
+        {/* MODUL PAKET TRAVEL & LA VIEW */}
+        {activeMenu === 'packages' && <PackagesModule />}
+
+        {/* FALLBACK VIEW UNTUK MODUL LAIN YANG SEDANG DIKEMBANGKAN */}
+        {activeMenu !== 'dashboard' && activeMenu !== 'packages' && (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
             <div className="p-4 bg-emerald-500/10 text-emerald-400 w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center">
               <Plane className="w-8 h-8" />
