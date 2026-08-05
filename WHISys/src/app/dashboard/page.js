@@ -19,6 +19,8 @@ import {
 import { auth, db } from '../../lib/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
+
+// Module Imports
 import PackagesModule from './PackagesModule';
 import JamaahModule from './JamaahModule';
 import BookingsModule from './BookingsModule';
@@ -53,10 +55,7 @@ export default function DashboardPage() {
       }
     };
 
-    // Baca hash saat pertama kali di-load
     handleHashChange();
-
-    // Event listener saat URL Hash berubah
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
@@ -68,7 +67,6 @@ export default function DashboardPage() {
       const jamaahSnap = await getDocs(collection(db, 'jamaah'));
       const jamaahList = jamaahSnap.docs.map(doc => doc.data());
       
-      // Hitung Paspor Expired < 6 bulan
       const today = new Date();
       const sixMonths = new Date();
       sixMonths.setMonth(today.getMonth() + 6);
@@ -214,18 +212,19 @@ export default function DashboardPage() {
             />
 
             <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Smart Assistant</p>
+
             <SidebarItem 
               icon={Sparkles} 
               label="AI Business Intelligence" 
               active={activeMenu === 'ai-analyzer'} 
-              onClick={() => changeMenu('ai-analyzer')}
+              onClick={() => changeMenu('ai-analyzer')} 
+            />
 
-{/* TARUH DI SINI: Menu Preview Warna Tema */}
             <SidebarItem 
               icon={Sparkles} 
               label="Preview Warna Tema" 
               active={activeMenu === 'theme-preview'} 
-              onClick={() => changeMenu('theme-preview')}
+              onClick={() => changeMenu('theme-preview')} 
             />
           </nav>
         </div>
@@ -274,7 +273,6 @@ export default function DashboardPage() {
         {/* DASHBOARD UTAMA VIEW */}
         {activeMenu === 'dashboard' && (
           <>
-            {/* Real Stat Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
               <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl flex items-center justify-between">
                 <div>
@@ -317,9 +315,7 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Layout: Table Keberangkatan Terdekat */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              
               <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6">
                 <div className="flex items-center justify-between mb-6">
                   <div>
@@ -366,7 +362,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Alert Operations */}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col justify-between">
                 <div>
                   <h3 className="font-bold text-white mb-4 flex items-center gap-2">
@@ -392,7 +387,6 @@ export default function DashboardPage() {
                   <span className="text-xs text-slate-500">WHISys ERP Platform • Live Firestore DB</span>
                 </div>
               </div>
-
             </div>
           </>
         )}
@@ -409,10 +403,16 @@ export default function DashboardPage() {
         {/* MODUL KEUANGAN & PELUNASAN */}
         {activeMenu === 'finance' && <FinanceModule />}
 
+        {/* MODUL PREVIEW WARNA TEMA */}
         {activeMenu === 'theme-preview' && <ThemePreviewModule />}
 
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
-        {activeMenu !== 'dashboard' && activeMenu !== 'packages' && activeMenu !== 'jamaah' && activeMenu !== 'bookings' && activeMenu !== 'finance' && activeMenu !== 'theme-preview' && (
+        {activeMenu !== 'dashboard' && 
+         activeMenu !== 'packages' && 
+         activeMenu !== 'jamaah' && 
+         activeMenu !== 'bookings' && 
+         activeMenu !== 'finance' && 
+         activeMenu !== 'theme-preview' && (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
             <div className="p-4 bg-emerald-500/10 text-emerald-400 w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center">
               <Plane className="w-8 h-8" />
