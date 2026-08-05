@@ -28,7 +28,7 @@ export default function DashboardPage() {
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Load Profil User & Hak Akses dari Firebase Firestore
+  // Load Profil User dari Firebase Firestore
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
@@ -37,7 +37,6 @@ export default function DashboardPage() {
           if (userDoc.exists()) {
             setUserProfile(userDoc.data());
           } else {
-            // Default Role jika belum terdaftar
             setUserProfile({
               email: user.email,
               fullName: user.displayName || 'Staf WHI',
@@ -48,7 +47,6 @@ export default function DashboardPage() {
           console.error("Gagal mengambil profil user:", error);
         }
       } else {
-        // Jika tidak ada session user login, redirect ke halaman login
         window.location.href = '/login';
       }
       setLoading(false);
@@ -64,13 +62,6 @@ export default function DashboardPage() {
     } catch (err) {
       console.error("Gagal Logout:", err);
     }
-  };
-
-  // Helper Cek Hak Akses Menu
-  const hasAccess = (allowedRoles) => {
-    if (!userProfile) return false;
-    if (userProfile.role === 'admin') return true; // Admin bisa akses seluruh modul
-    return allowedRoles.includes(userProfile.role);
   };
 
   // Ringkasan Statistik Utama ERP
@@ -179,6 +170,7 @@ export default function DashboardPage() {
               onClick={() => setActiveMenu('ai-analyzer')} 
             />
           </nav>
+        </div>
 
         {/* Profile Footer & Logout Button */}
         <div className="border-t border-slate-800 pt-4 flex items-center justify-between px-2">
@@ -222,11 +214,12 @@ export default function DashboardPage() {
                 className="bg-slate-900 text-slate-200 pl-9 pr-4 py-2 rounded-lg border border-slate-800 text-sm focus:outline-none focus:border-emerald-500 w-64"
               />
             </div>
-            {hasAccess(['operations', 'agent']) && (
-              <button className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg shadow-emerald-900/30">
-                <Plus className="w-4 h-4" /> Register Jamaah Baru
-              </button>
-            )}
+            <button 
+              onClick={() => setActiveMenu('jamaah')}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg shadow-emerald-900/30"
+            >
+              <Plus className="w-4 h-4" /> Register Jamaah Baru
+            </button>
           </div>
         </header>
 
@@ -335,12 +328,13 @@ export default function DashboardPage() {
           </>
         )}
 
-        {/* MODUL PAKET TRAVEL & LA VIEW */}
+        {/* MODUL PAKET TRAVEL & LA */}
         {activeMenu === 'packages' && <PackagesModule />}
-        {/* TAMBAHKAN BARIS MODUL JAMAAH DI SINI */}
+
+        {/* MODUL MASTER DATA JAMAAH */}
         {activeMenu === 'jamaah' && <JamaahModule />}
 
-        {/* FALLBACK VIEW UNTUK MODUL LAIN YANG SEDANG DIKEMBANGKAN */}
+        {/* FALLBACK VIEW UNTUK MODUL LAIN */}
         {activeMenu !== 'dashboard' && activeMenu !== 'packages' && activeMenu !== 'jamaah' && (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
             <div className="p-4 bg-emerald-500/10 text-emerald-400 w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center">
