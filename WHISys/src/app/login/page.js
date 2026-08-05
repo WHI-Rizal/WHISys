@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { auth } from '../firebase';
+import { auth } from '../../lib/firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { Plane, Lock, Mail, AlertCircle } from 'lucide-react';
 
