@@ -14,7 +14,8 @@ import {
   Plus, 
   Calendar,
   AlertCircle,
-  ShieldCheck
+  ShieldCheck,
+  Palette
 } from 'lucide-react';
 import { auth, db } from '../../lib/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -25,12 +26,60 @@ import PackagesModule from './PackagesModule';
 import JamaahModule from './JamaahModule';
 import BookingsModule from './BookingsModule';
 import FinanceModule from './FinanceModule';
-import ThemePreviewModule from './ThemePreviewModule';
 
 export default function DashboardPage() {
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Dynamic Theme State ('emerald', 'gold', 'indigo')
+  const [theme, setTheme] = useState('emerald');
+
+  // Load saved theme from LocalStorage on mount
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('whisys_theme');
+    if (savedTheme) {
+      setTheme(savedTheme);
+    }
+  }, []);
+
+  const handleThemeChange = (newTheme) => {
+    setTheme(newTheme);
+    localStorage.setItem('whisys_theme', newTheme);
+  };
+
+  // Dynamic Theme Config
+  const themeStyles = {
+    emerald: {
+      bg: 'bg-slate-950 text-slate-100',
+      sidebar: 'bg-slate-900 border-slate-800',
+      card: 'bg-slate-900 border-slate-800',
+      accentText: 'text-emerald-400',
+      accentBg: 'bg-emerald-600 hover:bg-emerald-500',
+      accentBorder: 'border-emerald-500/20',
+      activeMenu: 'bg-emerald-600 text-white shadow-emerald-900/20',
+    },
+    gold: {
+      bg: 'bg-[#090a0f] text-zinc-100',
+      sidebar: 'bg-[#12141d] border-zinc-800',
+      card: 'bg-[#12141d] border-zinc-800',
+      accentText: 'text-amber-400',
+      accentBg: 'bg-amber-600 hover:bg-amber-500',
+      accentBorder: 'border-amber-500/20',
+      activeMenu: 'bg-amber-600 text-white shadow-amber-950/30',
+    },
+    indigo: {
+      bg: 'bg-[#0f172a] text-slate-100',
+      sidebar: 'bg-[#1e293b] border-slate-700/60',
+      card: 'bg-[#1e293b] border-slate-700/60',
+      accentText: 'text-indigo-400',
+      accentBg: 'bg-indigo-600 hover:bg-indigo-500',
+      accentBorder: 'border-indigo-500/20',
+      activeMenu: 'bg-indigo-600 text-white shadow-indigo-950/30',
+    }
+  };
+
+  const currentTheme = themeStyles[theme];
 
   // Dynamic Real-time States dari Firestore
   const [realStats, setRealStats] = useState({
@@ -40,13 +89,11 @@ export default function DashboardPage() {
   });
   const [upcomingPackages, setUpcomingPackages] = useState([]);
 
-  // Logika Mengganti Menu + Update URL Hash (#)
   const changeMenu = (menuKey) => {
     setActiveMenu(menuKey);
     window.location.hash = menuKey;
   };
 
-  // Sync menu dengan URL Hash saat komponen dimuat atau di-refresh
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '');
@@ -54,16 +101,13 @@ export default function DashboardPage() {
         setActiveMenu(hash);
       }
     };
-
     handleHashChange();
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // Fetch Data Real dari Firestore
   const fetchDashboardData = async () => {
     try {
-      // 1. Fetch Jamaah Data
       const jamaahSnap = await getDocs(collection(db, 'jamaah'));
       const jamaahList = jamaahSnap.docs.map(doc => doc.data());
       
@@ -76,7 +120,6 @@ export default function DashboardPage() {
         return new Date(j.passportExpiry) < sixMonths;
       }).length;
 
-      // 2. Fetch Keberangkatan Terdekat dari Packages
       const pkgQuery = query(collection(db, 'packages'), orderBy('departureDate', 'asc'), limit(5));
       const pkgSnap = await getDocs(pkgQuery);
       const pkgList = pkgSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -93,7 +136,6 @@ export default function DashboardPage() {
     }
   };
 
-  // Load Profil User & Data Dashboard
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
@@ -132,7 +174,7 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex h-screen bg-slate-950 text-slate-100 items-center justify-center font-sans">
+      <div className={`flex h-screen ${currentTheme.bg} items-center justify-center font-sans`}>
         <div className="flex items-center gap-3">
           <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
           <p className="text-slate-400 text-sm">Memverifikasi Sesi & Memuat Dashboard...</p>
@@ -142,17 +184,17 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-100 font-sans">
+    <div className={`flex h-screen ${currentTheme.bg} font-sans transition-colors duration-300`}>
       
       {/* 1. SIDEBAR NAVIGASI ERP */}
-      <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between p-4 shrink-0">
+      <aside className={`w-64 ${currentTheme.sidebar} border-r flex flex-col justify-between p-4 shrink-0 transition-colors duration-300`}>
         <div>
-          <div className="flex items-center gap-3 px-3 py-4 mb-6 border-b border-slate-800">
-            <div className="p-2 bg-emerald-600 rounded-lg">
-              <Plane className="w-6 h-6 text-white" />
+          <div className="flex items-center gap-3 px-3 py-4 mb-6 border-b border-slate-800/80">
+            <div className={`p-2 ${currentTheme.accentBg} rounded-lg text-white`}>
+              <Plane className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="font-bold text-lg text-emerald-400 leading-none">WHISys</h1>
+              <h1 className={`font-bold text-lg ${currentTheme.accentText} leading-none`}>WHISys</h1>
               <span className="text-xs text-slate-400">Travel & Halal ERP</span>
             </div>
           </div>
@@ -164,6 +206,7 @@ export default function DashboardPage() {
               icon={LayoutDashboard} 
               label="Dashboard Utama" 
               active={activeMenu === 'dashboard'} 
+              activeClass={currentTheme.activeMenu}
               onClick={() => { changeMenu('dashboard'); fetchDashboardData(); }} 
             />
             
@@ -171,6 +214,7 @@ export default function DashboardPage() {
               icon={Plane} 
               label="Paket Travel & LA" 
               active={activeMenu === 'packages'} 
+              activeClass={currentTheme.activeMenu}
               onClick={() => changeMenu('packages')} 
             />
 
@@ -178,6 +222,7 @@ export default function DashboardPage() {
               icon={Users} 
               label="Data Master Jamaah" 
               active={activeMenu === 'jamaah'} 
+              activeClass={currentTheme.activeMenu}
               onClick={() => changeMenu('jamaah')} 
             />
 
@@ -185,6 +230,7 @@ export default function DashboardPage() {
               icon={BookOpen} 
               label="Booking & Manifest" 
               active={activeMenu === 'bookings'} 
+              activeClass={currentTheme.activeMenu}
               onClick={() => changeMenu('bookings')} 
             />
 
@@ -194,6 +240,7 @@ export default function DashboardPage() {
               icon={Wallet} 
               label="Keuangan & Pelunasan" 
               active={activeMenu === 'finance'} 
+              activeClass={currentTheme.activeMenu}
               onClick={() => changeMenu('finance')} 
             />
 
@@ -201,6 +248,7 @@ export default function DashboardPage() {
               icon={PackageCheck} 
               label="Perlengkapan Jamaah" 
               active={activeMenu === 'equipment'} 
+              activeClass={currentTheme.activeMenu}
               onClick={() => changeMenu('equipment')} 
             />
 
@@ -208,6 +256,7 @@ export default function DashboardPage() {
               icon={UserCheck} 
               label="Mitra & Agen" 
               active={activeMenu === 'agents'} 
+              activeClass={currentTheme.activeMenu}
               onClick={() => changeMenu('agents')} 
             />
 
@@ -217,26 +266,20 @@ export default function DashboardPage() {
               icon={Sparkles} 
               label="AI Business Intelligence" 
               active={activeMenu === 'ai-analyzer'} 
+              activeClass={currentTheme.activeMenu}
               onClick={() => changeMenu('ai-analyzer')} 
-            />
-
-            <SidebarItem 
-              icon={Sparkles} 
-              label="Preview Warna Tema" 
-              active={activeMenu === 'theme-preview'} 
-              onClick={() => changeMenu('theme-preview')} 
             />
           </nav>
         </div>
 
-        <div className="border-t border-slate-800 pt-4 flex items-center justify-between px-2">
+        <div className="border-t border-slate-800/80 pt-4 flex items-center justify-between px-2">
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs uppercase shrink-0">
+            <div className={`w-8 h-8 rounded-full ${currentTheme.accentText} bg-white/5 flex items-center justify-center font-bold text-xs uppercase shrink-0`}>
               {userProfile?.role?.[0] || 'A'}
             </div>
             <div className="truncate">
               <p className="text-sm font-medium text-slate-200 truncate">{userProfile?.fullName || userProfile?.email}</p>
-              <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-semibold uppercase bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+              <span className={`inline-flex items-center gap-1 text-[10px] ${currentTheme.accentText} font-semibold uppercase bg-white/5 px-1.5 py-0.5 rounded border border-white/10`}>
                 <ShieldCheck className="w-3 h-3" /> {userProfile?.role || 'Admin'}
               </span>
             </div>
@@ -252,8 +295,9 @@ export default function DashboardPage() {
       </aside>
 
       {/* 2. AREA KONTEN UTAMA */}
-      <main className="flex-1 overflow-y-auto bg-slate-950 p-8">
+      <main className="flex-1 overflow-y-auto p-8">
         
+        {/* HEADER BAR & SWITCHER WARNA */}
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
             <h2 className="text-2xl font-bold text-white">WHISys ERP Executive Board</h2>
@@ -261,9 +305,29 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* SWITCHER TEMA KECIL */}
+            <div className="flex items-center gap-1.5 bg-black/40 border border-white/10 p-1 rounded-lg">
+              <Palette className="w-3.5 h-3.5 text-slate-400 ml-1.5 mr-0.5" />
+              <button
+                onClick={() => handleThemeChange('emerald')}
+                title="Tema Emerald Executive"
+                className={`w-5 h-5 rounded-md bg-emerald-500 border transition-all ${theme === 'emerald' ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'}`}
+              />
+              <button
+                onClick={() => handleThemeChange('gold')}
+                title="Tema Royal Gold VIP"
+                className={`w-5 h-5 rounded-md bg-amber-500 border transition-all ${theme === 'gold' ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'}`}
+              />
+              <button
+                onClick={() => handleThemeChange('indigo')}
+                title="Tema Deep Tech Indigo"
+                className={`w-5 h-5 rounded-md bg-indigo-500 border transition-all ${theme === 'indigo' ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'}`}
+              />
+            </div>
+
             <button 
               onClick={() => changeMenu('jamaah')}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg shadow-emerald-900/30"
+              className={`flex items-center gap-2 ${currentTheme.accentBg} text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg`}
             >
               <Plus className="w-4 h-4" /> Register Jamaah Baru
             </button>
@@ -274,7 +338,7 @@ export default function DashboardPage() {
         {activeMenu === 'dashboard' && (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-              <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl flex items-center justify-between">
+              <div className={`${currentTheme.card} p-5 rounded-xl flex items-center justify-between border transition-colors`}>
                 <div>
                   <p className="text-xs font-medium text-slate-400 mb-1">Total Jamaah Terdaftar</p>
                   <h3 className="text-2xl font-bold text-white">{realStats.totalJamaah} Orang</h3>
@@ -284,17 +348,17 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl flex items-center justify-between">
+              <div className={`${currentTheme.card} p-5 rounded-xl flex items-center justify-between border transition-colors`}>
                 <div>
                   <p className="text-xs font-medium text-slate-400 mb-1">Group & Paket Keberangkatan</p>
-                  <h3 className="text-2xl font-bold text-white">{realStats.totalPackages} Program</h3>
+                  <h3 className={`text-2xl font-bold ${currentTheme.accentText}`}>{realStats.totalPackages} Program</h3>
                 </div>
-                <div className="p-3 rounded-lg bg-emerald-500/10 text-emerald-400">
+                <div className={`p-3 rounded-lg bg-white/5 ${currentTheme.accentText}`}>
                   <Plane className="w-6 h-6" />
                 </div>
               </div>
 
-              <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl flex items-center justify-between">
+              <div className={`${currentTheme.card} p-5 rounded-xl flex items-center justify-between border transition-colors`}>
                 <div>
                   <p className="text-xs font-medium text-slate-400 mb-1">Paspor &lt; 6 Bulan Expired</p>
                   <h3 className="text-2xl font-bold text-amber-400">{realStats.expiringPassportsCount} Paspor</h3>
@@ -304,10 +368,10 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl flex items-center justify-between">
+              <div className={`${currentTheme.card} p-5 rounded-xl flex items-center justify-between border transition-colors`}>
                 <div>
                   <p className="text-xs font-medium text-slate-400 mb-1">Status Sistem</p>
-                  <h3 className="text-lg font-bold text-emerald-400">Firestore Connected</h3>
+                  <h3 className={`text-lg font-bold ${currentTheme.accentText}`}>Firestore Connected</h3>
                 </div>
                 <div className="p-3 rounded-lg bg-purple-500/10 text-purple-400">
                   <ShieldCheck className="w-6 h-6" />
@@ -316,15 +380,15 @@ export default function DashboardPage() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6">
+              <div className={`lg:col-span-2 ${currentTheme.card} border rounded-xl p-6 transition-colors`}>
                 <div className="flex items-center justify-between mb-6">
                   <div>
                     <h3 className="font-bold text-white flex items-center gap-2">
-                      <Calendar className="w-5 h-5 text-emerald-400" /> Program Keberangkatan Mendatang
+                      <Calendar className={`w-5 h-5 ${currentTheme.accentText}`} /> Program Keberangkatan Mendatang
                     </h3>
                     <p className="text-xs text-slate-400">Data terhubung langsung dari modul Paket Travel</p>
                   </div>
-                  <button onClick={() => changeMenu('packages')} className="text-xs text-emerald-400 hover:underline">
+                  <button onClick={() => changeMenu('packages')} className={`text-xs ${currentTheme.accentText} hover:underline`}>
                     + Buat Paket Baru
                   </button>
                 </div>
@@ -336,7 +400,7 @@ export default function DashboardPage() {
                     </div>
                   ) : (
                     <table className="w-full text-left text-sm text-slate-300">
-                      <thead className="bg-slate-800/50 text-slate-400 text-xs uppercase">
+                      <thead className="bg-white/5 text-slate-400 text-xs uppercase">
                         <tr>
                           <th className="p-3 rounded-l-lg">Kode / Paket</th>
                           <th className="p-3">Tanggal</th>
@@ -344,16 +408,16 @@ export default function DashboardPage() {
                           <th className="p-3 rounded-r-lg">Sisa Seat</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-800/60 text-xs">
+                      <tbody className="divide-y divide-white/5 text-xs">
                         {upcomingPackages.map((pkg) => (
-                          <tr key={pkg.id} className="hover:bg-slate-800/30 transition-colors">
+                          <tr key={pkg.id} className="hover:bg-white/5 transition-colors">
                             <td className="p-3 font-semibold text-white">
                               {pkg.name}
                               <span className="block text-[10px] font-normal text-slate-400">{pkg.code}</span>
                             </td>
                             <td className="p-3">{pkg.departureDate}</td>
                             <td className="p-3">{pkg.airline}</td>
-                            <td className="p-3 font-medium text-emerald-400">{pkg.quotaRemaining} / {pkg.quotaTotal}</td>
+                            <td className={`p-3 font-medium ${currentTheme.accentText}`}>{pkg.quotaRemaining} / {pkg.quotaTotal}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -362,7 +426,7 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col justify-between">
+              <div className={`${currentTheme.card} border rounded-xl p-6 flex flex-col justify-between transition-colors`}>
                 <div>
                   <h3 className="font-bold text-white mb-4 flex items-center gap-2">
                     <AlertCircle className="w-5 h-5 text-amber-400" /> Peringatan Sistem
@@ -403,18 +467,14 @@ export default function DashboardPage() {
         {/* MODUL KEUANGAN & PELUNASAN */}
         {activeMenu === 'finance' && <FinanceModule />}
 
-        {/* MODUL PREVIEW WARNA TEMA */}
-        {activeMenu === 'theme-preview' && <ThemePreviewModule />}
-
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
         {activeMenu !== 'dashboard' && 
          activeMenu !== 'packages' && 
          activeMenu !== 'jamaah' && 
          activeMenu !== 'bookings' && 
-         activeMenu !== 'finance' && 
-         activeMenu !== 'theme-preview' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
-            <div className="p-4 bg-emerald-500/10 text-emerald-400 w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center">
+         activeMenu !== 'finance' && (
+          <div className={`${currentTheme.card} border rounded-xl p-12 text-center`}>
+            <div className="p-4 bg-white/5 text-slate-300 w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center">
               <Plane className="w-8 h-8" />
             </div>
             <h3 className="text-xl font-bold text-white mb-2">Modul {activeMenu.toUpperCase()}</h3>
@@ -429,14 +489,14 @@ export default function DashboardPage() {
   );
 }
 
-function SidebarItem({ icon: Icon, label, active, onClick }) {
+function SidebarItem({ icon: Icon, label, active, activeClass, onClick }) {
   return (
     <button
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
         active 
-          ? 'bg-emerald-600 text-white shadow-md shadow-emerald-900/20' 
-          : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+          ? `${activeClass} shadow-md` 
+          : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
       }`}
     >
       <Icon className="w-4 h-4" />
