@@ -1,5 +1,3 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
 export async function POST(req) {
   try {
     const { data } = await req.json();
@@ -13,14 +11,11 @@ export async function POST(req) {
       return Response.json({ error: "GEMINI_API_KEY belum dikonfigurasi di Vercel" }, { status: 500 });
     }
 
-    // Ambil sampel data jika terlalu banyak (maksimal 200 baris pertama & statistik total)
+    // Sampel 200 baris pertama agar tidak overflow token
     const limitedData = data.slice(0, 200);
     const totalRows = data.length;
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
-    const prompt = `
+    const promptText = `
       Anda adalah analis bisnis profesional untuk agen perjalanan Umrah/Haji.
       Berikut adalah data laporan transaksi/penjualan (Total keseluruhan: ${totalRows} baris).
       
@@ -33,14 +28,30 @@ export async function POST(req) {
       3. Rekomendasi Strategis Bisnis.
     `;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    // Panggil Gemini REST API langsung via fetch
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: promptText }] }]
+        })
+      }
+    );
+
+    const resultData = await response.json();
+
+    if (!response.ok) {
+      throw new Error(resultData.error?.message || "Gagal merespons dari Gemini API");
+    }
+
+    const text = resultData.candidates?.[0]?.content?.parts?.[0]?.text || "Tidak ada hasil analisis.";
 
     return Response.json({ result: text });
 
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return Response.json({ error: "Gagal memproses data dengan Gemini AI: " + error.message }, { status: 500 });
+    return Response.json({ error: "Gagal memproses data: " + error.message }, { status: 500 });
   }
 }
