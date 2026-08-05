@@ -11,7 +11,7 @@ export async function POST(req) {
       return Response.json({ error: "GEMINI_API_KEY belum dikonfigurasi di Vercel" }, { status: 500 });
     }
 
-    // Ambil 200 baris pertama agar tidak overflow token
+    // Batasi sampel data maksimal 200 baris agar payload tidak melebih batas token
     const limitedData = data.slice(0, 200);
     const totalRows = data.length;
 
@@ -28,26 +28,45 @@ export async function POST(req) {
       3. Rekomendasi Strategis Bisnis.
     `;
 
-    // Menggunakan endpoint resmi & paling stabil: gemini-1.5-flash
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: promptText }] }]
-        })
+    // Daftar endpoint alternatif jika salah satu mengalami kegagalan/deprecated
+    const endpoints = [
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`
+    ];
+
+    let resultData = null;
+    let lastError = null;
+
+    // Coba memanggil endpoint secara berurutan hingga berhasil
+    for (const endpoint of endpoints) {
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: promptText }] }]
+          })
+        });
+
+        const resJson = await response.json();
+
+        if (response.ok && resJson.candidates?.[0]?.content?.parts?.[0]?.text) {
+          resultData = resJson;
+          break; // Berhasil, keluar dari loop
+        } else {
+          lastError = resJson.error?.message || "Gagal mendapatkan respons";
+        }
+      } catch (err) {
+        lastError = err.message;
       }
-    );
-
-    const resultData = await response.json();
-
-    if (!response.ok) {
-      throw new Error(resultData.error?.message || "Gagal merespons dari Gemini API");
     }
 
-    const text = resultData.candidates?.[0]?.content?.parts?.[0]?.text || "Tidak ada hasil analisis.";
+    if (!resultData) {
+      throw new Error(lastError || "Gagal memproses data dengan semua model Gemini yang tersedia.");
+    }
 
+    const text = resultData.candidates[0].content.parts[0].text;
     return Response.json({ result: text });
 
   } catch (error) {
