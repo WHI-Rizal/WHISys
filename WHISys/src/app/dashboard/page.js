@@ -22,6 +22,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import PackagesModule from './PackagesModule';
 import JamaahModule from './JamaahModule';
+import BookingsModule from './BookingsModule';
 
 export default function DashboardPage() {
   const [activeMenu, setActiveMenu] = useState('dashboard');
@@ -370,6 +371,9 @@ export default function DashboardPage() {
 
         {/* MODUL MASTER DATA JAMAAH */}
         {activeMenu === 'jamaah' && <JamaahModule />}
+
+        {/* MODUL BOOKING & MANIFEST */}
+        {activeMenu === 'bookings' && <BookingsModule />}
 
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
         {activeMenu !== 'dashboard' && activeMenu !== 'packages' && activeMenu !== 'jamaah' && (
