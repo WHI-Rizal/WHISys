@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore'; // 1. Tambah import getFirestore
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyAUSMYLLiJIMTG0wP8P-rKM3FNwfCuHU_8",
@@ -12,4 +13,6 @@ const firebaseConfig = {
 
 // Mencegah re-initialization di Next.js
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+
 export const auth = getAuth(app);
+export const db = getFirestore(app); // 2. Tambah export db untuk Firestore!
