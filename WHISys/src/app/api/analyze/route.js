@@ -11,7 +11,7 @@ export async function POST(req) {
       return Response.json({ error: "GEMINI_API_KEY belum dikonfigurasi di Vercel" }, { status: 500 });
     }
 
-    // Sampel data maksimal 200 baris agar payload tidak membengkak
+    // Ambil 200 baris pertama untuk sampel analisis
     const limitedData = data.slice(0, 200);
     const totalRows = data.length;
 
@@ -28,30 +28,9 @@ export async function POST(req) {
       3. Rekomendasi Strategis Bisnis.
     `;
 
-    // 1. Ambil daftar model yang tersedia untuk API key ini
-    const listResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-    const listData = await listResponse.json();
-
-    if (!listResponse.ok) {
-      throw new Error(listData.error?.message || "Gagal mengambil daftar model Gemini.");
-    }
-
-    // 2. Pilih model yang mendukung metode generateContent (diutamakan versi flash)
-    const availableModels = listData.models || [];
-    const validModel = availableModels.find(m => 
-      m.supportedGenerationMethods?.includes("generateContent") && m.name.includes("flash")
-    ) || availableModels.find(m => 
-      m.supportedGenerationMethods?.includes("generateContent")
-    );
-
-    if (!validModel) {
-      throw new Error("Tidak ada model Gemini yang cocok ditemukan untuk akun ini.");
-    }
-
-    // 3. Kirim permintaan ke model yang ditemukan
-    const modelName = validModel.name; // Format: "models/gemini-..."
-    const generateResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`,
+    // Panggil Gemini API langsung
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -61,9 +40,9 @@ export async function POST(req) {
       }
     );
 
-    const resultData = await generateResponse.json();
+    const resultData = await response.json();
 
-    if (!generateResponse.ok) {
+    if (!response.ok) {
       throw new Error(resultData.error?.message || "Gagal merespons dari Gemini API");
     }
 
