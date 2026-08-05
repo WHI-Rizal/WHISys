@@ -11,7 +11,7 @@ export async function POST(req) {
       return Response.json({ error: "GEMINI_API_KEY belum dikonfigurasi di Vercel" }, { status: 500 });
     }
 
-    // Ambil 200 baris pertama
+    // Ambil 200 baris pertama agar tidak overflow token
     const limitedData = data.slice(0, 200);
     const totalRows = data.length;
 
@@ -28,9 +28,9 @@ export async function POST(req) {
       3. Rekomendasi Strategis Bisnis.
     `;
 
-    // Menggunakan model gemini-2.5-flash terbaru
+    // Menggunakan endpoint resmi & paling stabil: gemini-1.5-flash
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
