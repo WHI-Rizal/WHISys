@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { db } from '../../../lib/firebase';
+import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
 import { Plane, Plus, Search, Calendar, Users, Hotel, DollarSign, Trash2, X, MapPin } from 'lucide-react';
 
