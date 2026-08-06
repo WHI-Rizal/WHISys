@@ -15,10 +15,11 @@ const formatDateDDMMYYYY = (dateString) => {
   return `${day}/${month}/${year}`;
 };
 
-// Helper Generasi Kode Unik CST
+// Helper Generasi Kode Unik CST (Dimulai dari CST002000)
 const generateCustomerCode = () => {
-  const randomDigits = Math.floor(100000 + Math.random() * 900000);
-  return `CST${randomDigits}`;
+  const number = Math.floor(2000 + Math.random() * 998000);
+  const paddedNumber = String(number).padStart(6, '0');
+  return `CST${paddedNumber}`;
 };
 
 export default function JamaahModule({ theme = 'dark' }) {
@@ -193,7 +194,7 @@ export default function JamaahModule({ theme = 'dark' }) {
                   return (
                     <tr key={item.id} className={`${isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'} transition-colors`}>
                       <td className="p-4 font-mono font-bold text-emerald-500">
-                        {item.customerCode || 'CST-000000'}
+                        {item.customerCode || 'CST002000'}
                       </td>
                       <td className={`p-4 font-semibold ${styles.textTitle}`}>
                         {item.fullName}
