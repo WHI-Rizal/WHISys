@@ -137,7 +137,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
     const message = `*KONFIRMASI BOOKING PROGRAM TRAVEL*
 *PT. WISATA HALAL INTERNASIONAL*
 --------------------------------------------------
-Assalamu'alaikum Wr. Wb.
+Assalamu'alaikum Warahmatullahi Wabarakatuh.
 Yth. Bpk/Ibu *${booking.jamaahName}* (${jamaahData.customerCode || 'CST'}),
 
 Terima kasih telah mendaftar program perjalanan ibadah bersama kami. Berikut rincian booking Anda:
@@ -155,10 +155,10 @@ Terima kasih telah mendaftar program perjalanan ibadah bersama kami. Berikut rin
 • *Status Pembayaran:* ${isLunas ? '✅ LUNAS' : '⏳ DP Paid'}
 
 📌 *CATATAN BERKAS DOKUMEN:*
-Mohon melengkapi 8 berkas dokumen (Paspor, KTP/Foto, Buku Nikah, Surat Sponsor, Rekening Koran, Vaksin Meningitis, Visa, & Tiket).
+Mohon melengkapi 8 berkas dokumen (Paspor, KTP/Foto, Buku Nikah, Surat Sponsor, Rekening Koran, Vaksin Meningitis, Visa (Jika sudah ada), & Tiket (Jika sudah ada)).
 
 Apabila ada pertanyaan lebih lanjut, silakan hubungi tim kami.
-Wassalamu'alaikum Wr. Wb.`;
+Terima kasih;
 
     const encodedMessage = encodeURIComponent(message);
     window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMessage}`, '_blank');
