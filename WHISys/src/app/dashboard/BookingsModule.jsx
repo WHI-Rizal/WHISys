@@ -196,238 +196,234 @@ export default function BookingsModule({ targetBookingId }) {
   };
 
   const handlePrintInvoice = async (booking) => {
-  const isLunas = booking.paymentStatus === 'Full Payment';
-  const totalAmount = Number(booking.totalAmount) || 0;
-  
-  // 1. Ambil riwayat pembayaran dari Firestore
-  let payments = [];
-  try {
-    const q = query(collection(db, 'payments_income'), where('bookingId', '==', booking.id));
-    const snap = await getDocs(q);
-    payments = snap.docs.map(d => d.data());
-  } catch (err) {
-    console.error("Gagal mengambil riwayat setoran untuk invoice:", err);
-  }
-
-  // Hitung total terbayar dari riwayat
-  const totalPaid = payments.length > 0 
-    ? payments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
-    : (Number(booking.totalPaid) || 0);
+    const isLunas = booking.paymentStatus === 'Full Payment';
+    const totalAmount = Number(booking.totalAmount) || 0;
     
-  const sisaTagihan = totalAmount - totalPaid;
+    // 1. Ambil riwayat pembayaran dari Firestore
+    let payments = [];
+    try {
+      const q = query(collection(db, 'payments_income'), where('bookingId', '==', booking.id));
+      const snap = await getDocs(q);
+      payments = snap.docs.map(d => d.data());
+    } catch (err) {
+      console.error("Gagal mengambil riwayat setoran untuk invoice:", err);
+    }
 
-  // Generate baris HTML untuk rincian tiap setoran dengan `white-space: nowrap`
-  const paymentRowsHtml = payments.length > 0
-    ? payments.map((pay, idx) => `
-        <tr style="background-color: #f8fafc; font-size: 11px; color: #475569;">
-          <td style="padding: 6px 12px; border-bottom: 1px solid #f1f5f9;">
-            • Setoran #${idx + 1} (${formatDateDDMMYYYY(pay.createdAt)}) - <span style="font-style: italic;">${pay.paymentMethod || 'Transfer'} (${pay.notes || 'Setoran'})</span>
-          </td>
-          <td style="text-align: right; padding: 6px 12px; font-weight: 600; color: #059669; border-bottom: 1px solid #f1f5f9; white-space: nowrap;">
-            + Rp ${Number(pay.amount || 0).toLocaleString('id-ID')}
-          </td>
-        </tr>
-      `).join('')
-    : `
-        <tr style="background-color: #f8fafc; font-size: 11px; color: #94a3b8;">
-          <td style="padding: 6px 12px;" colspan="2">• Belum ada catatan setoran masuk</td>
-        </tr>
-      `;
+    // Hitung total terbayar dari riwayat
+    const totalPaid = payments.length > 0 
+      ? payments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
+      : (Number(booking.totalPaid) || 0);
+      
+    const sisaTagihan = totalAmount - totalPaid;
 
-  const printWindow = window.open('', '_blank');
-  const docContent = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>${isLunas ? 'INVOICE' : 'PROFORMA INVOICE'} - ${booking.bookingCode}</title>
-        <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📄</text></svg>">
-        
-        <style>
-          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; margin: 0; padding: 40px; background-color: #fff; }
-          .invoice-box { max-width: 800px; margin: auto; border: 1px solid #e2e8f0; padding: 35px; border-radius: 12px; }
+    // Generate baris HTML untuk rincian tiap setoran dengan `white-space: nowrap`
+    const paymentRowsHtml = payments.length > 0
+      ? payments.map((pay, idx) => `
+          <tr style="background-color: #f8fafc; font-size: 11px; color: #475569;">
+            <td style="padding: 6px 12px; border-bottom: 1px solid #f1f5f9;">
+              • Setoran #${idx + 1} (${formatDateDDMMYYYY(pay.createdAt)}) - <span style="font-style: italic;">${pay.paymentMethod || 'Transfer'} (${pay.notes || 'Setoran'})</span>
+            </td>
+            <td style="text-align: right; padding: 6px 12px; font-weight: 600; color: #059669; border-bottom: 1px solid #f1f5f9; white-space: nowrap;">
+              + Rp ${Number(pay.amount || 0).toLocaleString('id-ID')}
+            </td>
+          </tr>
+        `).join('')
+      : `
+          <tr style="background-color: #f8fafc; font-size: 11px; color: #94a3b8;">
+            <td style="padding: 6px 12px;" colspan="2">• Belum ada catatan setoran masuk</td>
+          </tr>
+        `;
+
+    const docContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${isLunas ? 'INVOICE' : 'PROFORMA INVOICE'} - ${booking.bookingCode}</title>
+          <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📄</text></svg>">
           
-          /* KOP SURAT PERUSAHAAN */
-          .kop-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px double #059669; padding-bottom: 20px; margin-bottom: 25px; }
-          .company-logo-title { font-size: 22px; font-weight: 800; color: #065f46; letter-spacing: -0.5px; margin: 0; }
-          .company-sub { font-size: 11px; color: #047857; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin: 2px 0 8px 0; }
-          .company-address { font-size: 11px; color: #475569; line-height: 1.5; margin: 0; }
-          
-          .invoice-type { font-size: 20px; font-weight: 800; text-transform: uppercase; color: ${isLunas ? '#059669' : '#d97706'}; text-align: right; }
-          .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: bold; margin-top: 5px; background-color: ${isLunas ? '#d1fae5' : '#fef3c7'}; color: ${isLunas ? '#065f46' : '#92400e'}; }
-          
-          /* META CUSTOMER & TAGIHAN */
-          .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px; }
-          .meta-card { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #f1f5f9; }
-          .meta-card h4 { margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; color: #059669; letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
-          .meta-card p { margin: 3px 0; font-size: 12px; color: #334155; }
-          .meta-card strong { color: #0f172a; }
-
-          /* TABEL TIKET / PACKAGES */
-          table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-          th { background-color: #f1f5f9; text-align: left; padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #475569; border-bottom: 2px solid #cbd5e1; }
-          td { padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; }
-          
-          /* SUMMARY TABLE RAPI & SEJAJAR */
-          .summary-table { width: 100%; max-width: 500px; margin-left: auto; margin-bottom: 30px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
-          .summary-table td { padding: 8px 12px; }
-          .summary-header-row { background-color: #f1f5f9; font-weight: bold; }
-          .summary-table .total-row { font-size: 14px; font-weight: bold; color: #0f172a; background-color: #f8fafc; border-top: 2px solid #cbd5e1; }
-
-          /* FOOTER INFO PEMBAYARAN & REKENING */
-          .footer-section { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 20px; border-top: 1px solid #e2e8f0; padding-top: 20px; margin-top: 10px; }
-          .bank-info { background-color: #f0fdf4; border: 1px dashed #a7f3d0; padding: 12px 15px; border-radius: 8px; font-size: 11px; color: #065f46; }
-          .bank-info h5 { margin: 0 0 6px 0; font-size: 12px; color: #047857; text-transform: uppercase; letter-spacing: 0.5px; }
-          .bank-details { font-family: monospace; font-size: 12px; color: #0f172a; margin-top: 4px; }
-          
-          .signature-box { text-align: center; font-size: 11px; color: #64748b; }
-          .signature-space { height: 50px; }
-          
-          .footer-note { text-align: center; font-size: 10px; color: #94a3b8; margin-top: 25px; border-top: 1px solid #f1f5f9; padding-top: 10px; }
-
-          @media print {
-            body { padding: 0; }
-            .invoice-box { border: none; padding: 0; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="invoice-box">
-          
-          <!-- KOP PERUSAHAAN -->
-          <div class="kop-header">
-            <div>
-              <h1 class="company-logo-title">PT. WISATA HALAL INTERNASIONAL</h1>
-              <p class="company-sub">Penyelenggara Perjalanan Ibadah Umrah, Haji & Wisata Halal</p>
-              <p class="company-address">
-                Ruko Graha Cirendeu No.1C Jl. Cirendeu Raya, Tangerang Selatan, Banten, Indonesia, 15445<br>
-                Telp/WA: +62 812-0000-0000 | Email: admin@wisatahalalindonesia.id
-              </p>
-            </div>
-            <div>
-              <div class="invoice-type">${isLunas ? 'INVOICE' : 'PROFORMA INVOICE'}</div>
-              <div class="badge">${isLunas ? 'LUNAS / PAID' : 'BELUM LUNAS / UNPAID'}</div>
-            </div>
-          </div>
-
-          <!-- DETAIL CUSTOMER & TAGIHAN -->
-          <div class="meta-grid">
-            <div class="meta-card">
-              <h4>Ditagihkan Kepada (Customer):</h4>
-              <p>Nama Lengkap: <strong>${booking.jamaahName || '-'}</strong></p>
-              <p>No. Telepon / WA: <strong>${booking.jamaahPhone || booking.phone || '-'}</strong></p>
-              <p>NPWP: <strong>${booking.jamaahNpwp || booking.npwp || '-'}</strong></p>
-              <p>Alamat: <strong>${booking.jamaahAddress || booking.address || '-'}</strong></p>
-            </div>
-            <div class="meta-card">
-              <h4>Rincian Dokumen:</h4>
-              <p>Kode Booking: <strong style="color: #059669; font-family: monospace;">${booking.bookingCode}</strong></p>
-              <p>Tanggal Terbit: <strong>${new Date().toLocaleDateString('id-ID')}</strong></p>
-              <p>Status Setoran: <strong>${booking.paymentStatus || 'DP Paid'}</strong></p>
-            </div>
-          </div>
-
-          <!-- TABEL RINCIAN PAKET -->
-          <table>
-            <thead>
-              <tr>
-                <th>Program Paket Travel</th>
-                <th>Tgl Keberangkatan</th>
-                <th>Kamar / Bus</th>
-                <th style="text-align: right;">Jumlah Tagihan</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>${booking.packageName || '-'}</strong></td>
-                <td>${formatDateDDMMYYYY(booking.departureDate)}</td>
-                <td>${booking.roomType} / ${booking.busGroup}</td>
-                <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <!-- SUMMARY PENGHITUNGAN DENGAN RINCIAN SETORAN SEJAJAR -->
-          <table class="summary-table">
-            <tr class="summary-header-row">
-              <td>Total Harga Paket:</td>
-              <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
-            </tr>
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; margin: 0; padding: 40px; background-color: #fff; }
+            .invoice-box { max-width: 800px; margin: auto; border: 1px solid #e2e8f0; padding: 35px; border-radius: 12px; }
             
-            <!-- RINCIAN TIAP SETORAN -->
-            <tr style="background-color: #f1f5f9; border-top: 1px solid #e2e8f0;">
-              <td colspan="2" style="font-weight: bold; font-size: 11px; color: #047857; text-transform: uppercase;">
-                Rincian Setoran Pembayaran Diterima:
-              </td>
-            </tr>
-            ${paymentRowsHtml}
+            /* KOP SURAT PERUSAHAAN */
+            .kop-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px double #059669; padding-bottom: 20px; margin-bottom: 25px; }
+            .company-logo-title { font-size: 22px; font-weight: 800; color: #065f46; letter-spacing: -0.5px; margin: 0; }
+            .company-sub { font-size: 11px; color: #047857; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin: 2px 0 8px 0; }
+            .company-address { font-size: 11px; color: #475569; line-height: 1.5; margin: 0; }
+            
+            .invoice-type { font-size: 20px; font-weight: 800; text-transform: uppercase; color: ${isLunas ? '#059669' : '#d97706'}; text-align: right; }
+            .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: bold; margin-top: 5px; background-color: ${isLunas ? '#d1fae5' : '#fef3c7'}; color: ${isLunas ? '#065f46' : '#92400e'}; }
+            
+            /* META CUSTOMER & TAGIHAN */
+            .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px; }
+            .meta-card { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #f1f5f9; }
+            .meta-card h4 { margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; color: #059669; letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+            .meta-card p { margin: 3px 0; font-size: 12px; color: #334155; }
+            .meta-card strong { color: #0f172a; }
 
-            <tr style="border-top: 1px dashed #cbd5e1;">
-              <td style="font-weight: bold;">Total Terbayar:</td>
-              <td style="text-align: right; font-weight: bold; color: #059669; white-space: nowrap;">
-                Rp ${totalPaid.toLocaleString('id-ID')}
-              </td>
-            </tr>
+            /* TABEL TIKET / PACKAGES */
+            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+            th { background-color: #f1f5f9; text-align: left; padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #475569; border-bottom: 2px solid #cbd5e1; }
+            td { padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; }
+            
+            /* SUMMARY TABLE RAPI & SEJAJAR */
+            .summary-table { width: 100%; max-width: 500px; margin-left: auto; margin-bottom: 30px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+            .summary-table td { padding: 8px 12px; }
+            .summary-header-row { background-color: #f1f5f9; font-weight: bold; }
+            .summary-table .total-row { font-size: 14px; font-weight: bold; color: #0f172a; background-color: #f8fafc; border-top: 2px solid #cbd5e1; }
 
-            <tr class="total-row">
-              <td>Sisa Tagihan / Saldo:</td>
-              <td style="text-align: right; color: ${sisaTagihan > 0 ? '#d97706' : '#059669'}; white-space: nowrap;">
-                Rp ${sisaTagihan.toLocaleString('id-ID')}
-              </td>
-            </tr>
-          </table>
+            /* FOOTER INFO PEMBAYARAN & REKENING */
+            .footer-section { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 20px; border-top: 1px solid #e2e8f0; padding-top: 20px; margin-top: 10px; }
+            .bank-info { background-color: #f0fdf4; border: 1px dashed #a7f3d0; padding: 12px 15px; border-radius: 8px; font-size: 11px; color: #065f46; }
+            .bank-info h5 { margin: 0 0 6px 0; font-size: 12px; color: #047857; text-transform: uppercase; letter-spacing: 0.5px; }
+            .bank-details { font-family: monospace; font-size: 12px; color: #0f172a; margin-top: 4px; }
+            
+            .signature-box { text-align: center; font-size: 11px; color: #64748b; }
+            .signature-space { height: 50px; }
+            
+            .footer-note { text-align: center; font-size: 10px; color: #94a3b8; margin-top: 25px; border-top: 1px solid #f1f5f9; padding-top: 10px; }
 
-          <!-- FOOTER: INFORMASI REKENING & TANDA TANGAN -->
-          <div class="footer-section">
-            <div class="bank-info">
-              <h5>Informasi Pembayaran / Transfer:</h5>
-              <div>Silakan lakukan pembayaran melalui rekening resmi perusahaan:</div>
-              <div class="bank-details">
-                Bank: <strong>Bank Syariah Indonesia (BSI)</strong><br>
-                No. Rekening: <strong>788-9900-112</strong><br>
-                A.N: <strong>PT. Wisata Halal Internasional</strong>
+            @media print {
+              body { padding: 0; }
+              .invoice-box { border: none; padding: 0; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="invoice-box">
+            
+            <!-- KOP PERUSAHAAN -->
+            <div class="kop-header">
+              <div>
+                <h1 class="company-logo-title">PT. WISATA HALAL INTERNASIONAL</h1>
+                <p class="company-sub">Penyelenggara Perjalanan Ibadah Umrah, Haji & Wisata Halal</p>
+                <p class="company-address">
+                  Ruko Graha Cirendeu No.1C Jl. Cirendeu Raya, Tangerang Selatan, Banten, Indonesia, 15445<br>
+                  Telp/WA: +62 812-0000-0000 | Email: admin@wisatahalalindonesia.id
+                </p>
+              </div>
+              <div>
+                <div class="invoice-type">${isLunas ? 'INVOICE' : 'PROFORMA INVOICE'}</div>
+                <div class="badge">${isLunas ? 'LUNAS / PAID' : 'BELUM LUNAS / UNPAID'}</div>
               </div>
             </div>
-            <div class="signature-box">
-              <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
-              <div class="signature-space"></div>
-              <p><strong>( PT. Wisata Halal Internasional )</strong></p>
+
+            <!-- DETAIL CUSTOMER & TAGIHAN -->
+            <div class="meta-grid">
+              <div class="meta-card">
+                <h4>Ditagihkan Kepada (Customer):</h4>
+                <p>Nama Lengkap: <strong>${booking.jamaahName || '-'}</strong></p>
+                <p>No. Telepon / WA: <strong>${booking.jamaahPhone || booking.phone || '-'}</strong></p>
+                <p>NPWP: <strong>${booking.jamaahNpwp || booking.npwp || '-'}</strong></p>
+                <p>Alamat: <strong>${booking.jamaahAddress || booking.address || '-'}</strong></p>
+              </div>
+              <div class="meta-card">
+                <h4>Rincian Dokumen:</h4>
+                <p>Kode Booking: <strong style="color: #059669; font-family: monospace;">${booking.bookingCode}</strong></p>
+                <p>Tanggal Terbit: <strong>${new Date().toLocaleDateString('id-ID')}</strong></p>
+                <p>Status Setoran: <strong>${booking.paymentStatus || 'DP Paid'}</strong></p>
+              </div>
             </div>
+
+            <!-- TABEL RINCIAN PAKET -->
+            <table>
+              <thead>
+                <tr>
+                  <th>Program Paket Travel</th>
+                  <th>Tgl Keberangkatan</th>
+                  <th>Kamar / Bus</th>
+                  <th style="text-align: right;">Jumlah Tagihan</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>${booking.packageName || '-'}</strong></td>
+                  <td>${formatDateDDMMYYYY(booking.departureDate)}</td>
+                  <td>${booking.roomType} / ${booking.busGroup}</td>
+                  <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <!-- SUMMARY PENGHITUNGAN DENGAN RINCIAN SETORAN SEJAJAR -->
+            <table class="summary-table">
+              <tr class="summary-header-row">
+                <td>Total Harga Paket:</td>
+                <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
+              </tr>
+              
+              <!-- RINCIAN TIAP SETORAN -->
+              <tr style="background-color: #f1f5f9; border-top: 1px solid #e2e8f0;">
+                <td colspan="2" style="font-weight: bold; font-size: 11px; color: #047857; text-transform: uppercase;">
+                  Rincian Setoran Pembayaran Diterima:
+                </td>
+              </tr>
+              ${paymentRowsHtml}
+
+              <tr style="border-top: 1px dashed #cbd5e1;">
+                <td style="font-weight: bold;">Total Terbayar:</td>
+                <td style="text-align: right; font-weight: bold; color: #059669; white-space: nowrap;">
+                  Rp ${totalPaid.toLocaleString('id-ID')}
+                </td>
+              </tr>
+
+              <tr class="total-row">
+                <td>Sisa Tagihan / Saldo:</td>
+                <td style="text-align: right; color: ${sisaTagihan > 0 ? '#d97706' : '#059669'}; white-space: nowrap;">
+                  Rp ${sisaTagihan.toLocaleString('id-ID')}
+                </td>
+              </tr>
+            </table>
+
+            <!-- FOOTER: INFORMASI REKENING & TANDA TANGAN -->
+            <div class="footer-section">
+              <div class="bank-info">
+                <h5>Informasi Pembayaran / Transfer:</h5>
+                <div>Silakan lakukan pembayaran melalui rekening resmi perusahaan:</div>
+                <div class="bank-details">
+                  Bank: <strong>Bank Syariah Indonesia (BSI)</strong><br>
+                  No. Rekening: <strong>788-9900-112</strong><br>
+                  A.N: <strong>PT. Wisata Halal Internasional</strong>
+                </div>
+              </div>
+              <div class="signature-box">
+                <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
+                <div class="signature-space"></div>
+                <p><strong>( PT. Wisata Halal Internasional )</strong></p>
+              </div>
+            </div>
+
+            <div class="footer-note">
+              <p>Terima kasih atas kepercayaan Anda. Dokumen ini sah dan diterbitkan secara otomatis oleh sistem ERP WHISys.</p>
+            </div>
+
           </div>
+        </body>
+      </html>
+    `;
 
-          <div class="footer-note">
-            <p>Terima kasih atas kepercayaan Anda. Dokumen ini sah dan diterbitkan secara otomatis oleh sistem ERP WHISys.</p>
-          </div>
+    // Menggunakan teknik Print Iframe agar tidak membuat tab baru (about:blank)
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
 
-        </div>
-        <script>
-          window.onload = function() {
-            window.print();
-          }
-        </script>
-      </body>
-    </html>
-  `;
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(docContent);
+    doc.close();
 
-  const iframe = document.createElement('iframe');
-  iframe.style.position = 'fixed';
-  iframe.style.right = '0';
-  iframe.style.bottom = '0';
-  iframe.style.width = '0';
-  iframe.style.height = '0';
-  iframe.style.border = '0';
-  document.body.appendChild(iframe);
+    iframe.contentWindow.focus();
+    setTimeout(() => {
+      iframe.contentWindow.print();
+      document.body.removeChild(iframe);
+    }, 500);
+  };
 
-  const doc = iframe.contentWindow.document;
-  doc.open();
-  doc.write(docContent);
-  doc.close();
-
-  iframe.contentWindow.focus();
-  setTimeout(() => {
-    iframe.contentWindow.print();
-    document.body.removeChild(iframe);
-  }, 500);
-};
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.packageId || !formData.jamaahId) {
