@@ -276,7 +276,7 @@ export default function PackagesModule() {
                   <input
   type="date"
   required
-  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:invert cursor-pointer"
+  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white cursor-pointer [&::-webkit-calendar-picker-indicator]:brightness-0 [&::-webkit-calendar-picker-indicator]:invert"
   value={formData.departureDate}
   onChange={e => setFormData({ ...formData, departureDate: e.target.value })}
 />
