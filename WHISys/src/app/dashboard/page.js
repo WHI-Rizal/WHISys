@@ -118,8 +118,10 @@ export default function DashboardPage() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
+  // FUNGSI MEMUAT DATA DASHBOARD & PENGHITUNGAN SEAT REAL-TIME
   const fetchDashboardData = async () => {
     try {
+      // 1. Ambil Data Jamaah
       const jamaahSnap = await getDocs(collection(db, 'jamaah'));
       const jamaahList = jamaahSnap.docs.map(doc => doc.data());
       
@@ -132,9 +134,32 @@ export default function DashboardPage() {
         return new Date(j.passportExpiry) < sixMonths;
       }).length;
 
+      // 2. Ambil Data All Bookings untuk Kalkulasi Sisa Seat Real-time
+      const bkSnap = await getDocs(collection(db, 'bookings'));
+      const bookingsList = bkSnap.docs.map(doc => doc.data());
+
+      // 3. Ambil Data Packages
       const pkgQuery = query(collection(db, 'packages'), orderBy('departureDate', 'asc'), limit(5));
       const pkgSnap = await getDocs(pkgQuery);
-      const pkgList = pkgSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      const pkgList = pkgSnap.docs.map(docSnap => {
+        const pkgData = docSnap.data();
+        const pkgId = docSnap.id;
+
+        // Hitung jumlah booking untuk paket ini
+        const bookedCount = bookingsList.filter(
+          b => b.packageId === pkgId || b.packageName === pkgData.name
+        ).length;
+
+        const totalQuota = Number(pkgData.quotaTotal) || 0;
+        const realRemaining = Math.max(0, totalQuota - bookedCount);
+
+        return {
+          id: pkgId,
+          ...pkgData,
+          computedRemaining: realRemaining
+        };
+      });
 
       setRealStats({
         totalJamaah: jamaahSnap.size,
@@ -325,7 +350,6 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* TOGGLE BUTTON: MODE TERANG / MODE GELAP */}
             <button
               onClick={toggleTheme}
               className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all text-xs font-semibold ${
@@ -440,7 +464,9 @@ export default function DashboardPage() {
                             </td>
                             <td className="p-3">{formatDateDDMMYYYY(pkg.departureDate)}</td>
                             <td className="p-3">{pkg.airline}</td>
-                            <td className={`p-3 font-medium ${currentTheme.accentText}`}>{pkg.quotaRemaining} / {pkg.quotaTotal}</td>
+                            <td className={`p-3 font-semibold ${currentTheme.accentText}`}>
+                              {pkg.computedRemaining} / {pkg.quotaTotal}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -479,26 +505,26 @@ export default function DashboardPage() {
         )}
 
         {/* MODUL PAKET TRAVEL & LA */}
-{activeMenu === 'packages' && <PackagesModule theme={theme} />}
+        {activeMenu === 'packages' && <PackagesModule theme={theme} />}
 
-{/* MODUL MASTER DATA JAMAAH */}
-{activeMenu === 'jamaah' && <JamaahModule theme={theme} />}
+        {/* MODUL MASTER DATA JAMAAH */}
+        {activeMenu === 'jamaah' && <JamaahModule theme={theme} />}
 
-{/* MODUL BOOKING & MANIFEST */}
-{activeMenu === 'bookings' && (
-  <BookingsModule targetBookingId={selectedBookingForModal} theme={theme} />
-)}
+        {/* MODUL BOOKING & MANIFEST */}
+        {activeMenu === 'bookings' && (
+          <BookingsModule targetBookingId={selectedBookingForModal} theme={theme} />
+        )}
 
-{/* MODUL KEUANGAN & PELUNASAN */}
-{activeMenu === 'finance' && (
-  <FinanceModule
-    theme={theme}
-    onSelectBooking={(bookingId) => {
-      setSelectedBookingForModal(bookingId);
-      changeMenu('bookings');
-    }}
-  />
-)}
+        {/* MODUL KEUANGAN & PELUNASAN */}
+        {activeMenu === 'finance' && (
+          <FinanceModule
+            theme={theme}
+            onSelectBooking={(bookingId) => {
+              setSelectedBookingForModal(bookingId);
+              changeMenu('bookings');
+            }}
+          />
+        )}
 
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
         {activeMenu !== 'dashboard' && 
