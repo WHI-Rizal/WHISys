@@ -27,6 +27,16 @@ import JamaahModule from './JamaahModule';
 import BookingsModule from './BookingsModule';
 import FinanceModule from './FinanceModule';
 
+const formatDateDDMMYYYY = (dateString) => {
+  if (!dateString || dateString === '-') return '-';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return dateString;
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
 export default function DashboardPage() {
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [userProfile, setUserProfile] = useState(null);
@@ -418,7 +428,7 @@ export default function DashboardPage() {
                               {pkg.name}
                               <span className="block text-[10px] font-normal text-slate-400">{pkg.code}</span>
                             </td>
-                            <td className="p-3">{pkg.departureDate}</td>
+                            <td className="p-3">{formatDateDDMMYYYY(pkg.departureDate)}</td>
                             <td className="p-3">{pkg.airline}</td>
                             <td className={`p-3 font-medium ${currentTheme.accentText}`}>{pkg.quotaRemaining} / {pkg.quotaTotal}</td>
                           </tr>
