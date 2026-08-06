@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where } from 'firebase/firestore';
-import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3 } from 'lucide-react';
+import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye } from 'lucide-react';
 
 // Helper Format Tanggal dd/mm/yyyy
 const formatDateDDMMYYYY = (dateString) => {
@@ -26,6 +26,10 @@ export default function FinanceModule({ onSelectBooking }) {
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [showVendorModal, setShowVendorModal] = useState(false);
   const [activeTab, setActiveTab] = useState('income');
+
+  // State Modal Detail Laba Rugi Paket
+  const [showProfitDetailModal, setShowProfitDetailModal] = useState(false);
+  const [selectedPackageForDetail, setSelectedPackageForDetail] = useState(null);
 
   const [incomeForm, setIncomeForm] = useState({
     bookingId: '',
@@ -172,6 +176,19 @@ export default function FinanceModule({ onSelectBooking }) {
   const totalVendorPaid = vendorPayments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const netCashflow = totalIncome - totalVendorPaid;
 
+  // Filter Data untuk Modal Detail Paket Terpilih
+  const selectedPkgIncomes = selectedPackageForDetail
+    ? transactions.filter(tx => tx.packageName === selectedPackageForDetail.name)
+    : [];
+
+  const selectedPkgVendorCosts = selectedPackageForDetail
+    ? vendorPayments.filter(vp => vp.packageId === selectedPackageForDetail.id || vp.packageName === selectedPackageForDetail.name)
+    : [];
+
+  const totalSelectedPkgIncome = selectedPkgIncomes.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  const totalSelectedPkgVendorCost = selectedPkgVendorCosts.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  const selectedPkgProfit = totalSelectedPkgIncome - totalSelectedPkgVendorCost;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 p-6 rounded-xl border border-slate-800">
@@ -231,16 +248,14 @@ export default function FinanceModule({ onSelectBooking }) {
         >
           Riwayat Bayar Vendor ({vendorPayments.length})
         </button>
-
-        {/* TAB BARU: LABA RUGI OPERASIONAL PAKET */}
-  <button
-    onClick={() => setActiveTab('profit_loss')}
-    className={`px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
-      activeTab === 'profit_loss' ? 'bg-slate-800 text-amber-400 border border-slate-700' : 'text-slate-400 hover:text-white'
-    }`}
-  >
-    <TrendingUp className="w-3.5 h-3.5" /> Rekap Laba Rugi per Paket
-  </button>
+        <button
+          onClick={() => setActiveTab('profit_loss')}
+          className={`px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+            activeTab === 'profit_loss' ? 'bg-slate-800 text-amber-400 border border-slate-700' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <TrendingUp className="w-3.5 h-3.5" /> Rekap Laba Rugi per Paket
+        </button>
       </div>
 
       {activeTab === 'income' && (
@@ -362,83 +377,218 @@ export default function FinanceModule({ onSelectBooking }) {
       )}
 
       {activeTab === 'profit_loss' && (
-  <div className="space-y-4">
-    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden p-4">
-      <h4 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
-        <BarChart3 className="w-4 h-4 text-amber-400" /> Analisis Margin Laba Operasional per Program Paket
-      </h4>
-      <p className="text-xs text-slate-400 mb-4">
-        Membandingkan total setoran jamaah yang masuk (Omset Real) terhadap realisasi pembayaran biaya vendor/operasional (HPP).
-      </p>
+        <div className="space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden p-4">
+            <h4 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-amber-400" /> Analisis Margin Laba Operasional per Program Paket
+            </h4>
+            <p className="text-xs text-slate-400 mb-4">
+              Membandingkan total setoran jamaah yang masuk (Omset Real) terhadap realisasi pembayaran biaya vendor/operasional (HPP).
+            </p>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-xs text-slate-300">
-          <thead className="bg-slate-800/80 text-slate-400 uppercase border-b border-slate-800">
-            <tr>
-              <th className="p-4">Nama Program Paket</th>
-              <th className="p-4 text-right">Pemasukan (Omset)</th>
-              <th className="p-4 text-right">HPP / Biaya Vendor</th>
-              <th className="p-4 text-right">Laba / Margin Bersih</th>
-              <th className="p-4 text-center">Status Margin</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800/60">
-            {packagesList.length === 0 ? (
-              <tr>
-                <td colSpan="5" className="p-8 text-center text-slate-500">Belum ada paket perjalanan terdaftar.</td>
-              </tr>
-            ) : (
-              packagesList.map((pkg) => {
-                // 1. Hitung total pemasukan setoran jamaah untuk paket ini
-                const pkgIncome = transactions
-                  .filter(tx => tx.packageName === pkg.name)
-                  .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-
-                // 2. Hitung total pengeluaran vendor (HPP) untuk paket ini
-                const pkgVendorCost = vendorPayments
-                  .filter(vp => vp.packageId === pkg.id || vp.packageName === pkg.name)
-                  .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-
-                // 3. Laba Bersih
-                const profit = pkgIncome - pkgVendorCost;
-                const isProfit = profit >= 0;
-
-                return (
-                  <tr key={pkg.id} className="hover:bg-slate-800/30">
-                    <td className="p-4 font-semibold text-white">
-                      {pkg.name}
-                      <span className="block text-[10px] text-slate-400 font-mono">{pkg.code} • Keberangkatan: {formatDateDDMMYYYY(pkg.departureDate)}</span>
-                    </td>
-                    <td className="p-4 text-right font-bold text-emerald-400">
-                      Rp {pkgIncome.toLocaleString('id-ID')}
-                    </td>
-                    <td className="p-4 text-right font-bold text-rose-400">
-                      Rp {pkgVendorCost.toLocaleString('id-ID')}
-                    </td>
-                    <td className={`p-4 text-right font-extrabold ${isProfit ? 'text-blue-400' : 'text-amber-400'}`}>
-                      Rp {profit.toLocaleString('id-ID')}
-                    </td>
-                    <td className="p-4 text-center">
-                      {isProfit ? (
-                        <span className="inline-block px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-bold text-[10px]">
-                          PROFIT
-                        </span>
-                      ) : (
-                        <span className="inline-block px-2.5 py-1 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full font-bold text-[10px]">
-                          DEFISIT
-                        </span>
-                      )}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-800/80 text-slate-400 uppercase border-b border-slate-800">
+                  <tr>
+                    <th className="p-4">Nama Program Paket</th>
+                    <th className="p-4 text-right">Pemasukan (Omset)</th>
+                    <th className="p-4 text-right">HPP / Biaya Vendor</th>
+                    <th className="p-4 text-right">Laba / Margin Bersih</th>
+                    <th className="p-4 text-center">Status Margin</th>
+                    <th className="p-4 text-center">Aksi</th>
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-)}
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {packagesList.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="p-8 text-center text-slate-500">Belum ada paket perjalanan terdaftar.</td>
+                    </tr>
+                  ) : (
+                    packagesList.map((pkg) => {
+                      const pkgIncome = transactions
+                        .filter(tx => tx.packageName === pkg.name)
+                        .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+                      const pkgVendorCost = vendorPayments
+                        .filter(vp => vp.packageId === pkg.id || vp.packageName === pkg.name)
+                        .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+                      const profit = pkgIncome - pkgVendorCost;
+                      const isProfit = profit >= 0;
+
+                      return (
+                        <tr key={pkg.id} className="hover:bg-slate-800/30">
+                          <td className="p-4 font-semibold text-white">
+                            {pkg.name}
+                            <span className="block text-[10px] text-slate-400 font-mono">{pkg.code} • Keberangkatan: {formatDateDDMMYYYY(pkg.departureDate)}</span>
+                          </td>
+                          <td className="p-4 text-right font-bold text-emerald-400">
+                            Rp {pkgIncome.toLocaleString('id-ID')}
+                          </td>
+                          <td className="p-4 text-right font-bold text-rose-400">
+                            Rp {pkgVendorCost.toLocaleString('id-ID')}
+                          </td>
+                          <td className={`p-4 text-right font-extrabold ${isProfit ? 'text-blue-400' : 'text-amber-400'}`}>
+                            Rp {profit.toLocaleString('id-ID')}
+                          </td>
+                          <td className="p-4 text-center">
+                            {isProfit ? (
+                              <span className="inline-block px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-bold text-[10px]">
+                                PROFIT
+                              </span>
+                            ) : (
+                              <span className="inline-block px-2.5 py-1 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full font-bold text-[10px]">
+                                DEFISIT
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-4 text-center">
+                            <button
+                              onClick={() => {
+                                setSelectedPackageForDetail(pkg);
+                                setShowProfitDetailModal(true);
+                              }}
+                              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded-lg transition-colors inline-flex items-center gap-1"
+                              title="Lihat Rincian Laba Rugi Paket Ini"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Detail Laba Rugi per Paket */}
+      {showProfitDetailModal && selectedPackageForDetail && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl p-6 relative max-h-[90vh] overflow-y-auto">
+            <button 
+              onClick={() => setShowProfitDetailModal(false)} 
+              className="absolute right-4 top-4 text-slate-400 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-amber-400" /> Breakdown Laba Rugi Program Paket
+            </h3>
+            <p className="text-xs text-slate-400 mb-4">
+              Paket: <strong className="text-white">{selectedPackageForDetail.name}</strong> • Kode: <span className="font-mono text-emerald-400">{selectedPackageForDetail.code}</span>
+            </p>
+
+            {/* Rangkuman Ringkas Modal */}
+            <div className="grid grid-cols-3 gap-3 mb-6">
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-center">
+                <span className="text-[10px] text-slate-400 uppercase">Total Omset (Setoran)</span>
+                <p className="text-sm font-bold text-emerald-400 mt-1">Rp {totalSelectedPkgIncome.toLocaleString('id-ID')}</p>
+              </div>
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-center">
+                <span className="text-[10px] text-slate-400 uppercase">Total Biaya Vendor (HPP)</span>
+                <p className="text-sm font-bold text-rose-400 mt-1">Rp {totalSelectedPkgVendorCost.toLocaleString('id-ID')}</p>
+              </div>
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-center">
+                <span className="text-[10px] text-slate-400 uppercase">Margin Laba Bersih</span>
+                <p className={`text-sm font-bold mt-1 ${selectedPkgProfit >= 0 ? 'text-blue-400' : 'text-amber-400'}`}>
+                  Rp {selectedPkgProfit.toLocaleString('id-ID')}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-6 text-xs">
+              {/* TABEL PEMASUKAN */}
+              <div>
+                <h5 className="font-bold text-emerald-400 mb-2 flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
+                  <ArrowDownLeft className="w-4 h-4" /> Rincian Pemasukan Setoran Jamaah ({selectedPkgIncomes.length})
+                </h5>
+                <div className="overflow-x-auto border border-slate-800 rounded-lg">
+                  <table className="w-full text-left text-slate-300">
+                    <thead className="bg-slate-800/80 text-slate-400 uppercase">
+                      <tr>
+                        <th className="p-2.5">Tanggal</th>
+                        <th className="p-2.5">Jamaah & Booking</th>
+                        <th className="p-2.5">Metode & Catatan</th>
+                        <th className="p-2.5 text-right">Nominal</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {selectedPkgIncomes.length === 0 ? (
+                        <tr><td colSpan="4" className="p-4 text-center text-slate-500">Belum ada setoran jamaah untuk paket ini.</td></tr>
+                      ) : (
+                        selectedPkgIncomes.map((tx) => (
+                          <tr key={tx.id} className="hover:bg-slate-800/30">
+                            <td className="p-2.5 text-slate-400">{formatDateDDMMYYYY(tx.createdAt)}</td>
+                            <td className="p-2.5 font-semibold text-white">
+                              {tx.jamaahName}
+                              <span className="block text-[10px] text-emerald-400 font-mono">{tx.bookingCode}</span>
+                            </td>
+                            <td className="p-2.5">
+                              <span className="bg-slate-800 px-1.5 py-0.5 rounded text-[10px] mr-1">{tx.paymentMethod}</span>
+                              <span className="text-slate-400">{tx.notes}</span>
+                            </td>
+                            <td className="p-2.5 text-right font-bold text-emerald-400">+ Rp {Number(tx.amount).toLocaleString('id-ID')}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* TABEL PENGELUARAN HPP VENDOR */}
+              <div>
+                <h5 className="font-bold text-rose-400 mb-2 flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
+                  <ArrowUpRight className="w-4 h-4" /> Rincian Pengeluaran HPP Vendor ({selectedPkgVendorCosts.length})
+                </h5>
+                <div className="overflow-x-auto border border-slate-800 rounded-lg">
+                  <table className="w-full text-left text-slate-300">
+                    <thead className="bg-slate-800/80 text-slate-400 uppercase">
+                      <tr>
+                        <th className="p-2.5">Tanggal</th>
+                        <th className="p-2.5">Vendor & Kategori</th>
+                        <th className="p-2.5">Catatan Pengeluaran</th>
+                        <th className="p-2.5 text-right">Nominal HPP</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {selectedPkgVendorCosts.length === 0 ? (
+                        <tr><td colSpan="4" className="p-4 text-center text-slate-500">Belum ada biaya vendor untuk paket ini.</td></tr>
+                      ) : (
+                        selectedPkgVendorCosts.map((vp) => (
+                          <tr key={vp.id} className="hover:bg-slate-800/30">
+                            <td className="p-2.5 text-slate-400">{formatDateDDMMYYYY(vp.createdAt)}</td>
+                            <td className="p-2.5 font-semibold text-white">
+                              {vp.vendorName}
+                              <span className="block text-[10px] text-rose-400">{vp.category}</span>
+                            </td>
+                            <td className="p-2.5 text-slate-400">{vp.notes}</td>
+                            <td className="p-2.5 text-right font-bold text-rose-400">- Rp {Number(vp.amount).toLocaleString('id-ID')}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-4 mt-6 border-t border-slate-800">
+              <button 
+                onClick={() => setShowProfitDetailModal(false)} 
+                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-lg text-xs"
+              >
+                Tutup Detail
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Income */}
       {showIncomeModal && (
