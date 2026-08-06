@@ -15,13 +15,6 @@ const formatDateDDMMYYYY = (dateString) => {
   return `${day}/${month}/${year}`;
 };
 
-// Helper Generasi Kode Unik CST (Dimulai dari CST002000)
-const generateCustomerCode = () => {
-  const number = Math.floor(2000 + Math.random() * 998000);
-  const paddedNumber = String(number).padStart(6, '0');
-  return `CST${paddedNumber}`;
-};
-
 export default function JamaahModule({ theme = 'dark' }) {
   const isDark = theme === 'dark';
 
@@ -67,10 +60,28 @@ export default function JamaahModule({ theme = 'dark' }) {
     fetchJamaah();
   }, []);
 
+  // FUNGSI RUNNING NUMBER UNIK (AUTO INCREMENT DARI CST002000)
+  const getNextCustomerCode = () => {
+    let maxNum = 1999; // Base start sebelum 2000
+
+    jamaahList.forEach((j) => {
+      if (j.customerCode && j.customerCode.startsWith('CST')) {
+        const numPart = parseInt(j.customerCode.replace('CST', ''), 10);
+        if (!isNaN(numPart) && numPart > maxNum) {
+          maxNum = numPart;
+        }
+      }
+    });
+
+    const nextNum = maxNum + 1;
+    const padded = String(nextNum).padStart(6, '0');
+    return `CST${padded}`;
+  };
+
   const handleOpenAdd = () => {
     setEditingId(null);
     setFormData({
-      customerCode: generateCustomerCode(),
+      customerCode: getNextCustomerCode(),
       fullName: '',
       nik: '',
       gender: 'L',
@@ -85,7 +96,7 @@ export default function JamaahModule({ theme = 'dark' }) {
   const handleOpenEdit = (item) => {
     setEditingId(item.id);
     setFormData({
-      customerCode: item.customerCode || generateCustomerCode(),
+      customerCode: item.customerCode || getNextCustomerCode(),
       fullName: item.fullName || '',
       nik: item.nik || '',
       gender: item.gender || 'L',
