@@ -15,11 +15,13 @@ const formatDateDDMMYYYY = (dateString) => {
   return `${day}/${month}/${year}`;
 };
 
-// Daftar Dokumen Persyaratan Standard Travel
+// Daftar Dokumen Persyaratan Standard Travel (8 Dokumen)
 const REQUIRED_DOCUMENTS = [
   { key: 'passport', label: 'Paspor Asli (Min. 6 Bln)' },
   { key: 'ktp_foto', label: 'Fotocopy KTP & Pasfoto 4x6' },
   { key: 'family_cert', label: 'Buku Nikah / Akta Lahir / KK' },
+  { key: 'sponsor_letter', label: 'Surat Sponsor' },
+  { key: 'bank_statement', label: 'Rekening Koran / Referensi Bank' },
   { key: 'vaccine_cert', label: 'Sertifikat Vaksin Meningitis' },
   { key: 'visa', label: 'Visa Umrah / Tour Issued' },
   { key: 'ticket', label: 'Tiket Pesawat (Penerbitan Issued)' }
@@ -60,6 +62,8 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
     passport: false,
     ktp_foto: false,
     family_cert: false,
+    sponsor_letter: false,
+    bank_statement: false,
     vaccine_cert: false,
     visa: false,
     ticket: false
@@ -148,13 +152,15 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
     setShowHistoryModal(true);
   };
 
-  // FUNGSI UNTUK MEMBUKA BUKTI KELENGKAPAN DOKUMEN
+  // FUNGSI MEMBUKA CHECKLIST DOKUMEN (8 ITEMS)
   const handleOpenDocModal = (item) => {
     setSelectedBookingForDoc(item);
     setDocChecklist({
       passport: item.documents?.passport || false,
       ktp_foto: item.documents?.ktp_foto || false,
       family_cert: item.documents?.family_cert || false,
+      sponsor_letter: item.documents?.sponsor_letter || false,
+      bank_statement: item.documents?.bank_statement || false,
       vaccine_cert: item.documents?.vaccine_cert || false,
       visa: item.documents?.visa || false,
       ticket: item.documents?.ticket || false
@@ -162,7 +168,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
     setShowDocModal(true);
   };
 
-  // FUNGSI MENYIMPAN STATUS CHECKLIST DOKUMEN KE FIRESTORE
+  // FUNGSI MENYIMPAN CHECKLIST DOKUMEN KE FIRESTORE
   const handleSaveDocChecklist = async () => {
     if (!selectedBookingForDoc) return;
     try {
@@ -523,6 +529,8 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
             passport: false,
             ktp_foto: false,
             family_cert: false,
+            sponsor_letter: false,
+            bank_statement: false,
             vaccine_cert: false,
             visa: false,
             ticket: false
@@ -611,7 +619,6 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
                 <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada data booking.</td></tr>
               ) : (
                 filteredBookings.map((item) => {
-                  // HITUNG PERSENTASE KELENGKAPAN DOKUMEN
                   const docs = item.documents || {};
                   const collectedCount = REQUIRED_DOCUMENTS.filter(d => docs[d.key]).length;
                   const docPercent = Math.round((collectedCount / REQUIRED_DOCUMENTS.length) * 100);
@@ -634,7 +641,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
                         <span className={`inline-block ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px]`}>{item.busGroup}</span>
                       </td>
                       
-                      {/* KOLOM MONITORING DOKUMEN */}
+                      {/* KOLOM MONITORING DOKUMEN (8 DOKUMEN) */}
                       <td className="p-4">
                         <div className="flex items-center gap-2 mb-1">
                           <span className={`text-[10px] font-bold ${isDocComplete ? 'text-emerald-500' : 'text-amber-500'}`}>
@@ -670,7 +677,6 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
                       </td>
                       <td className="p-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
-                          {/* TOMBOL MONITORING DOKUMEN */}
                           <button
                             onClick={() => handleOpenDocModal(item)}
                             className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-purple-500 rounded-lg transition-colors`}
@@ -717,10 +723,10 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
         </div>
       </div>
 
-      {/* MODAL CHECKLIST MONITORING DOKUMEN JAMAAH */}
+      {/* MODAL CHECKLIST MONITORING DOKUMEN JAMAAH (8 ITEMS) */}
       {showDocModal && selectedBookingForDoc && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowDocModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
@@ -732,14 +738,14 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
               Jamaah: <strong className={styles.textTitle}>{selectedBookingForDoc.jamaahName}</strong> • Kode: <span className="font-mono text-emerald-500">{selectedBookingForDoc.bookingCode}</span>
             </p>
 
-            <div className="space-y-3 mb-6">
+            <div className="space-y-2.5 mb-6">
               {REQUIRED_DOCUMENTS.map((docItem) => {
                 const isChecked = docChecklist[docItem.key] || false;
                 return (
                   <label
                     key={docItem.key}
                     onClick={() => setDocChecklist({ ...docChecklist, [docItem.key]: !isChecked })}
-                    className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
+                    className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-all ${
                       isChecked 
                         ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500' 
                         : `${styles.innerBg} text-slate-400`
