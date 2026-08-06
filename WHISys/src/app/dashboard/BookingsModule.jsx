@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc } from 'firebase/firestore';
-import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2 } from 'lucide-react';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where } from 'firebase/firestore';
+import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History } from 'lucide-react';
 
 export default function BookingsModule() {
   const [bookings, setBookings] = useState([]);
@@ -11,17 +11,33 @@ export default function BookingsModule() {
   const [jamaahList, setJamaahList] = useState([]);
   const [loading, setLoading] = useState(true);
   
+  // Modals
   const [showModal, setShowModal] = useState(false);
-  const [editingBookingId, setEditingBookingId] = useState(null); // ID jika mode edit
+  const [editingBookingId, setEditingBookingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Form State
+  // Modal History Pembayaran
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [selectedBookingForHistory, setSelectedBookingForHistory] = useState(null);
+  const [paymentHistory, setPaymentHistory] = useState([]);
+  const [editingPaymentId, setEditingPaymentId] = useState(null);
+
+  // Form State Booking
   const [formData, setFormData] = useState({
     packageId: '',
     jamaahId: '',
     roomType: 'Quad',
     busGroup: 'Bus 1',
-    paymentStatus: 'DP Paid',
+    initialPayment: '', // Input pembayaran awal langsung
+    paymentMethod: 'Transfer Bank',
+    paymentNotes: 'DP Pendaftaran'
+  });
+
+  // Form State Edit Payment di History
+  const [paymentEditForm, setPaymentEditForm] = useState({
+    amount: '',
+    paymentMethod: 'Transfer Bank',
+    notes: ''
   });
 
   const fetchData = async () => {
@@ -45,14 +61,82 @@ export default function BookingsModule() {
     fetchData();
   }, []);
 
-  // Buka Modal Tambah Baru
+  // Fetch History Pembayaran Khusus 1 Booking
+  const fetchPaymentHistory = async (bookingId) => {
+    try {
+      const q = query(collection(db, 'payments_income'), where('bookingId', '==', bookingId));
+      const snap = await getDocs(q);
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setPaymentHistory(list);
+      return list;
+    } catch (err) {
+      console.error("Gagal mengambil riwayat pembayaran:", err);
+      return [];
+    }
+  };
+
+  // Buka Modal History Pembayaran
+  const handleOpenHistory = async (item) => {
+    setSelectedBookingForHistory(item);
+    await fetchPaymentHistory(item.id);
+    setShowHistoryModal(true);
+  };
+
+  // Hapus Pembayaran tunggal dari History
+  const handleDeletePayment = async (payId) => {
+    if (!confirm("Apakah Anda yakin ingin menghapus catatan pembayaran ini?")) return;
+    try {
+      await deleteDoc(doc(db, 'payments_income', payId));
+      
+      // Refresh history & rekalkulasi total terbayar
+      const updatedHistory = await fetchPaymentHistory(selectedBookingForHistory.id);
+      const totalPaid = updatedHistory.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+      // Update status di booking
+      const newStatus = totalPaid >= selectedBookingForHistory.totalAmount ? 'Full Payment' : 'DP Paid';
+      await updateDoc(doc(db, 'bookings', selectedBookingForHistory.id), {
+        totalPaid: totalPaid,
+        paymentStatus: newStatus
+      });
+
+      fetchData();
+    } catch (err) {
+      alert("Gagal menghapus pembayaran: " + err.message);
+    }
+  };
+
+  // Simpan Edit Pembayaran
+  const handleSavePaymentEdit = async (payId) => {
+    try {
+      await updateDoc(doc(db, 'payments_income', payId), {
+        amount: Number(paymentEditForm.amount),
+        paymentMethod: paymentEditForm.paymentMethod,
+        notes: paymentEditForm.notes
+      });
+
+      setEditingPaymentId(null);
+      const updatedHistory = await fetchPaymentHistory(selectedBookingForHistory.id);
+      const totalPaid = updatedHistory.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+      const newStatus = totalPaid >= selectedBookingForHistory.totalAmount ? 'Full Payment' : 'DP Paid';
+      await updateDoc(doc(db, 'bookings', selectedBookingForHistory.id), {
+        totalPaid: totalPaid,
+        paymentStatus: newStatus
+      });
+
+      fetchData();
+    } catch (err) {
+      alert("Gagal memperbarui pembayaran: " + err.message);
+    }
+  };
+
+  // Open Modal Add/Edit Booking
   const handleOpenAddModal = () => {
     setEditingBookingId(null);
-    setFormData({ packageId: '', jamaahId: '', roomType: 'Quad', busGroup: 'Bus 1', paymentStatus: 'DP Paid' });
+    setFormData({ packageId: '', jamaahId: '', roomType: 'Quad', busGroup: 'Bus 1', initialPayment: '', paymentMethod: 'Transfer Bank', paymentNotes: 'DP Pendaftaran' });
     setShowModal(true);
   };
 
-  // Buka Modal Edit
   const handleOpenEditModal = (item) => {
     setEditingBookingId(item.id);
     setFormData({
@@ -60,44 +144,37 @@ export default function BookingsModule() {
       jamaahId: item.jamaahId || '',
       roomType: item.roomType || 'Quad',
       busGroup: item.busGroup || 'Bus 1',
-      paymentStatus: item.paymentStatus || 'DP Paid',
+      initialPayment: '',
+      paymentMethod: 'Transfer Bank',
+      paymentNotes: 'Setoran Tambahan'
     });
     setShowModal(true);
   };
 
-  // Hapus Booking
   const handleDeleteBooking = async (item) => {
-    if (!confirm(`Apakah Anda yakin ingin menghapus/membatalkan booking ${item.bookingCode} atas nama ${item.jamaahName}?`)) {
-      return;
-    }
-
+    if (!confirm(`Apakah Anda yakin ingin menghapus booking ${item.bookingCode}?`)) return;
     try {
-      // 1. Hapus dokumen booking
       await deleteDoc(doc(db, 'bookings', item.id));
 
-      // 2. Kembalikan Kuota Paket (+1)
       if (item.packageId) {
         const pkgRef = doc(db, 'packages', item.packageId);
         const pkgSnap = await getDoc(pkgRef);
         if (pkgSnap.exists()) {
           const currentQuota = pkgSnap.data().quotaRemaining ?? 0;
-          await updateDoc(pkgRef, {
-            quotaRemaining: Number(currentQuota) + 1
-          });
+          await updateDoc(pkgRef, { quotaRemaining: Number(currentQuota) + 1 });
         }
       }
-
       fetchData();
     } catch (err) {
       alert("Gagal menghapus booking: " + err.message);
     }
   };
 
-  // Submit Simpan (Tambah atau Edit)
+  // Submit Simpan Booking
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.packageId || !formData.jamaahId) {
-      alert("Silakan pilih Paket Travel dan Jamaah.");
+      alert("Pilih Paket Travel dan Jamaah.");
       return;
     }
 
@@ -105,67 +182,94 @@ export default function BookingsModule() {
       const selectedPkg = packagesList.find(p => p.id === formData.packageId);
       const selectedJamaah = jamaahList.find(j => j.id === formData.jamaahId);
 
-      if (!selectedPkg || !selectedJamaah) {
-        alert("Data paket atau jamaah tidak ditemukan.");
-        return;
-      }
-
-      // Hitung Total Biaya
       let price = Number(selectedPkg.priceQuad || selectedPkg.priceMain || 0);
       if (formData.roomType === 'Triple') price = Number(selectedPkg.priceTriple || price);
       if (formData.roomType === 'Double') price = Number(selectedPkg.priceDouble || price);
 
+      const paymentVal = Number(formData.initialPayment || 0);
+
       if (editingBookingId) {
-        // MODE EDIT DATA BOOKING
+        // Edit Booking
         const bookingRef = doc(db, 'bookings', editingBookingId);
+        const currentBooking = bookings.find(b => b.id === editingBookingId);
+        const newTotalPaid = (currentBooking.totalPaid || 0) + paymentVal;
+        const newStatus = newTotalPaid >= price ? 'Full Payment' : 'DP Paid';
+
         await updateDoc(bookingRef, {
           packageId: selectedPkg.id,
-          packageName: selectedPkg.name || 'Paket Travel',
-          packageCode: selectedPkg.code || '-',
-          departureDate: selectedPkg.departureDate || '-',
+          packageName: selectedPkg.name,
+          packageCode: selectedPkg.code,
+          departureDate: selectedPkg.departureDate,
           jamaahId: selectedJamaah.id,
-          jamaahName: selectedJamaah.fullName || 'Jamaah',
+          jamaahName: selectedJamaah.fullName,
           passportNumber: selectedJamaah.passportNumber || '-',
           roomType: formData.roomType,
           busGroup: formData.busGroup,
           totalAmount: price,
-          paymentStatus: formData.paymentStatus,
+          totalPaid: newTotalPaid,
+          paymentStatus: newStatus,
           updatedAt: new Date().toISOString()
         });
+
+        if (paymentVal > 0) {
+          await addDoc(collection(db, 'payments_income'), {
+            bookingId: editingBookingId,
+            bookingCode: currentBooking.bookingCode,
+            jamaahName: selectedJamaah.fullName,
+            packageName: selectedPkg.name,
+            amount: paymentVal,
+            paymentMethod: formData.paymentMethod,
+            notes: formData.paymentNotes,
+            createdAt: new Date().toISOString()
+          });
+        }
       } else {
-        // MODE TAMBAH BOOKING BARU
+        // Tambah Booking Baru
         if (Number(selectedPkg.quotaRemaining || 0) <= 0) {
           alert("Kuota paket ini sudah habis!");
           return;
         }
 
         const bookingCode = `BK-${Date.now().toString().slice(-6)}`;
+        const initialStatus = paymentVal >= price ? 'Full Payment' : 'DP Paid';
 
-        await addDoc(collection(db, 'bookings'), {
+        const newBookingRef = await addDoc(collection(db, 'bookings'), {
           bookingCode,
           packageId: selectedPkg.id,
-          packageName: selectedPkg.name || 'Paket Travel',
-          packageCode: selectedPkg.code || '-',
-          departureDate: selectedPkg.departureDate || '-',
+          packageName: selectedPkg.name,
+          packageCode: selectedPkg.code,
+          departureDate: selectedPkg.departureDate,
           jamaahId: selectedJamaah.id,
-          jamaahName: selectedJamaah.fullName || 'Jamaah',
+          jamaahName: selectedJamaah.fullName,
           passportNumber: selectedJamaah.passportNumber || '-',
           roomType: formData.roomType,
           busGroup: formData.busGroup,
           totalAmount: price,
-          paymentStatus: formData.paymentStatus,
+          totalPaid: paymentVal,
+          paymentStatus: initialStatus,
           createdAt: new Date().toISOString()
         });
 
-        // Potong Kuota Package di Firestore (-1)
+        // Catat Transaksi Keuangan jika ada setoran awal
+        if (paymentVal > 0) {
+          await addDoc(collection(db, 'payments_income'), {
+            bookingId: newBookingRef.id,
+            bookingCode: bookingCode,
+            jamaahName: selectedJamaah.fullName,
+            packageName: selectedPkg.name,
+            amount: paymentVal,
+            paymentMethod: formData.paymentMethod,
+            notes: formData.paymentNotes,
+            createdAt: new Date().toISOString()
+          });
+        }
+
+        // Potong Kuota
         const pkgRef = doc(db, 'packages', selectedPkg.id);
-        await updateDoc(pkgRef, {
-          quotaRemaining: Number(selectedPkg.quotaRemaining || 1) - 1
-        });
+        await updateDoc(pkgRef, { quotaRemaining: Number(selectedPkg.quotaRemaining || 1) - 1 });
       }
 
       setShowModal(false);
-      setEditingBookingId(null);
       fetchData();
     } catch (err) {
       alert("Gagal memproses booking: " + err.message);
@@ -180,13 +284,12 @@ export default function BookingsModule() {
 
   return (
     <div className="space-y-6">
-      {/* Header Bar */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 p-6 rounded-xl border border-slate-800">
         <div>
           <h3 className="text-xl font-bold text-white flex items-center gap-2">
             <BookOpen className="w-5 h-5 text-emerald-400" /> Booking & Manifest Group
           </h3>
-          <p className="text-xs text-slate-400 mt-1">Plotting jamaah ke paket keberangkatan, alokasi bus, dan status manifes.</p>
+          <p className="text-xs text-slate-400 mt-1">Plotting jamaah, alokasi bus, dan pembayaran setoran langsung.</p>
         </div>
         <button
           onClick={handleOpenAddModal}
@@ -196,7 +299,6 @@ export default function BookingsModule() {
         </button>
       </div>
 
-      {/* Filter Search */}
       <div className="flex items-center gap-4 bg-slate-900 p-4 rounded-xl border border-slate-800">
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
@@ -210,30 +312,25 @@ export default function BookingsModule() {
         </div>
       </div>
 
-      {/* Tabel Data Manifest */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-300">
             <thead className="bg-slate-800/60 text-slate-400 uppercase tracking-wider border-b border-slate-800">
               <tr>
                 <th className="p-4">Kode / Jamaah</th>
-                <th className="p-4">Paket & Keberangkatan</th>
-                <th className="p-4">No. Paspor</th>
+                <th className="p-4">Paket & Tgl</th>
                 <th className="p-4">Kamar & Bus</th>
-                <th className="p-4">Total Biaya</th>
+                <th className="p-4">Total Tagihan</th>
+                <th className="p-4">Total Terbayar</th>
                 <th className="p-4">Status Pembayaran</th>
                 <th className="p-4 text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
               {loading ? (
-                <tr>
-                  <td colSpan="7" className="p-8 text-center text-slate-400">Memuat data manifest...</td>
-                </tr>
+                <tr><td colSpan="7" className="p-8 text-center text-slate-400">Memuat data manifest...</td></tr>
               ) : filteredBookings.length === 0 ? (
-                <tr>
-                  <td colSpan="7" className="p-8 text-center text-slate-400">Belum ada booking terdaftar. Klik 'Tambah Booking Baru' untuk mendaftar.</td>
-                </tr>
+                <tr><td colSpan="7" className="p-8 text-center text-slate-400">Belum ada data booking.</td></tr>
               ) : (
                 filteredBookings.map((item) => (
                   <tr key={item.id} className="hover:bg-slate-800/30 transition-colors">
@@ -245,13 +342,15 @@ export default function BookingsModule() {
                       {item.packageName || '-'}
                       <span className="block text-[10px] text-slate-400">{item.departureDate}</span>
                     </td>
-                    <td className="p-4 font-mono">{item.passportNumber || '-'}</td>
                     <td className="p-4">
                       <span className="inline-block bg-slate-800 px-2 py-0.5 rounded text-[10px] mr-1">{item.roomType}</span>
                       <span className="inline-block bg-slate-800 px-2 py-0.5 rounded text-[10px]">{item.busGroup}</span>
                     </td>
                     <td className="p-4 font-bold text-slate-100">
                       Rp {item.totalAmount ? Number(item.totalAmount).toLocaleString('id-ID') : '0'}
+                    </td>
+                    <td className="p-4 font-bold text-emerald-400">
+                      Rp {item.totalPaid ? Number(item.totalPaid).toLocaleString('id-ID') : '0'}
                     </td>
                     <td className="p-4">
                       {item.paymentStatus === 'Full Payment' ? (
@@ -267,6 +366,13 @@ export default function BookingsModule() {
                     <td className="p-4 text-center">
                       <div className="flex items-center justify-center gap-2">
                         <button
+                          onClick={() => handleOpenHistory(item)}
+                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-blue-400 rounded-lg transition-colors"
+                          title="Riwayat & Setoran Pembayaran"
+                        >
+                          <Wallet className="w-4 h-4" />
+                        </button>
+                        <button
                           onClick={() => handleOpenEditModal(item)}
                           className="p-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-lg transition-colors"
                           title="Edit Booking"
@@ -276,7 +382,7 @@ export default function BookingsModule() {
                         <button
                           onClick={() => handleDeleteBooking(item)}
                           className="p-1.5 bg-slate-800 hover:bg-slate-700 text-rose-400 rounded-lg transition-colors"
-                          title="Hapus / Batal Booking"
+                          title="Hapus Booking"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -290,16 +396,16 @@ export default function BookingsModule() {
         </div>
       </div>
 
-      {/* Modal Form Booking (Tambah / Edit) */}
+      {/* Modal Form Booking (Input Setoran Terintegrasi) */}
       {showModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 relative">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto">
             <button onClick={() => setShowModal(false)} className="absolute right-4 top-4 text-slate-400 hover:text-white">
               <X className="w-5 h-5" />
             </button>
 
             <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-              <BookOpen className="w-5 h-5 text-emerald-400" /> {editingBookingId ? 'Edit Data Booking Jamaah' : 'Registrasi Booking Jamaah'}
+              <BookOpen className="w-5 h-5 text-emerald-400" /> {editingBookingId ? 'Edit Booking & Tambah Setoran' : 'Registrasi Booking Baru'}
             </h3>
 
             <form onSubmit={handleSubmit} className="space-y-4 text-xs text-slate-300">
@@ -364,16 +470,43 @@ export default function BookingsModule() {
                 </div>
               </div>
 
-              <div>
-                <label className="block mb-1 font-medium">Status Pembayaran Awal</label>
-                <select
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
-                  value={formData.paymentStatus}
-                  onChange={e => setFormData({ ...formData, paymentStatus: e.target.value })}
-                >
-                  <option value="DP Paid">DP Paid (Uang Muka)</option>
-                  <option value="Full Payment">Full Payment (Lunas)</option>
-                </select>
+              {/* INPUT SETORAN PEMBAYARAN */}
+              <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 space-y-3">
+                <p className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Wallet className="w-3.5 h-3.5" /> Pembayaran / Setoran {editingBookingId ? 'Tambahan' : 'Awal'}
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block mb-1 font-medium">Nominal Bayar (Rp)</label>
+                    <input
+                      type="number" placeholder="5000000 (Kosongkan jika 0)"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white"
+                      value={formData.initialPayment}
+                      onChange={e => setFormData({ ...formData, initialPayment: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 font-medium">Metode Bayar</label>
+                    <select
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white"
+                      value={formData.paymentMethod}
+                      onChange={e => setFormData({ ...formData, paymentMethod: e.target.value })}
+                    >
+                      <option value="Transfer Bank">Transfer Bank</option>
+                      <option value="Cash / Tunai">Cash / Tunai</option>
+                      <option value="EDC / Kartu">EDC / Kartu</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Catatan Pembayaran</label>
+                  <input
+                    type="text" placeholder="Catatan setoran..."
+                    className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white"
+                    value={formData.paymentNotes}
+                    onChange={e => setFormData({ ...formData, paymentNotes: e.target.value })}
+                  />
+                </div>
               </div>
 
               <div className="pt-4 flex justify-end gap-3 border-t border-slate-800">
@@ -385,6 +518,116 @@ export default function BookingsModule() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal History & Edit Pembayaran */}
+      {showHistoryModal && selectedBookingForHistory && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl p-6 relative">
+            <button onClick={() => setShowHistoryModal(false)} className="absolute right-4 top-4 text-slate-400 hover:text-white">
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
+              <History className="w-5 h-5 text-emerald-400" /> Riwayat Pembayaran Jamaah
+            </h3>
+            <p className="text-xs text-slate-400 mb-4">
+              Jamaah: <strong className="text-white">{selectedBookingForHistory.jamaahName}</strong> • Kode: <span className="font-mono text-emerald-400">{selectedBookingForHistory.bookingCode}</span>
+            </p>
+
+            <div className="overflow-x-auto max-h-60 overflow-y-auto mb-4 border border-slate-800 rounded-lg">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-800/80 text-slate-400 uppercase">
+                  <tr>
+                    <th className="p-3">Tanggal</th>
+                    <th className="p-3">Metode & Catatan</th>
+                    <th className="p-3">Nominal</th>
+                    <th className="p-3 text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {paymentHistory.length === 0 ? (
+                    <tr><td colSpan="4" className="p-6 text-center text-slate-500">Belum ada riwayat setoran pembayaran.</td></tr>
+                  ) : (
+                    paymentHistory.map(pay => (
+                      <tr key={pay.id} className="hover:bg-slate-800/30">
+                        {editingPaymentId === pay.id ? (
+                          <>
+                            <td className="p-2" colSpan="3">
+                              <div className="grid grid-cols-3 gap-2">
+                                <input
+                                  type="number"
+                                  className="bg-slate-950 border border-slate-700 p-1.5 rounded text-white"
+                                  value={paymentEditForm.amount}
+                                  onChange={e => setPaymentEditForm({ ...paymentEditForm, amount: e.target.value })}
+                                />
+                                <select
+                                  className="bg-slate-950 border border-slate-700 p-1.5 rounded text-white"
+                                  value={paymentEditForm.paymentMethod}
+                                  onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentMethod: e.target.value })}
+                                >
+                                  <option value="Transfer Bank">Transfer Bank</option>
+                                  <option value="Cash / Tunai">Cash / Tunai</option>
+                                  <option value="EDC / Kartu">EDC / Kartu</option>
+                                </select>
+                                <input
+                                  type="text"
+                                  className="bg-slate-950 border border-slate-700 p-1.5 rounded text-white"
+                                  value={paymentEditForm.notes}
+                                  onChange={e => setPaymentEditForm({ ...paymentEditForm, notes: e.target.value })}
+                                />
+                              </div>
+                            </td>
+                            <td className="p-2 text-center">
+                              <button onClick={() => handleSavePaymentEdit(pay.id)} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded mr-1">
+                                Simpan
+                              </button>
+                              <button onClick={() => setEditingPaymentId(null)} className="px-2 py-1 bg-slate-800 text-slate-300 text-[10px] rounded">
+                                Batal
+                              </button>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="p-3 text-slate-400">{new Date(pay.createdAt).toLocaleDateString('id-ID')}</td>
+                            <td className="p-3">
+                              <span className="bg-slate-800 px-1.5 py-0.5 rounded text-[10px] mr-1">{pay.paymentMethod}</span>
+                              <span className="text-slate-400">{pay.notes}</span>
+                            </td>
+                            <td className="p-3 font-bold text-emerald-400">
+                              Rp {Number(pay.amount).toLocaleString('id-ID')}
+                            </td>
+                            <td className="p-3 text-center">
+                              <button
+                                onClick={() => {
+                                  setEditingPaymentId(pay.id);
+                                  setPaymentEditForm({ amount: pay.amount, paymentMethod: pay.paymentMethod, notes: pay.notes });
+                                }}
+                                className="text-emerald-400 hover:underline mr-2"
+                              >
+                                Edit
+                              </button>
+                              <button onClick={() => handleDeletePayment(pay.id)} className="text-rose-400 hover:underline">
+                                Hapus
+                              </button>
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex justify-between items-center pt-3 border-t border-slate-800 text-xs">
+              <span className="text-slate-400">Total Tagihan: <strong className="text-white">Rp {Number(selectedBookingForHistory.totalAmount).toLocaleString('id-ID')}</strong></span>
+              <button onClick={() => setShowHistoryModal(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-lg">
+                Tutup
+              </button>
+            </div>
           </div>
         </div>
       )}
