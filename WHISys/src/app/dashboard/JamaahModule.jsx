@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
-import { Users, Plus, Search, Edit, Trash2, X, FileText, Calendar } from 'lucide-react';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { Users, Plus, Search, Edit, Trash2, X, AlertCircle } from 'lucide-react';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -15,36 +15,42 @@ const formatDateDDMMYYYY = (dateString) => {
   return `${day}/${month}/${year}`;
 };
 
-export default function JamaahModule() {
+export default function JamaahModule({ theme = 'dark' }) {
+  const isDark = theme === 'dark';
+
+  const styles = {
+    cardBg: isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm',
+    innerBg: isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200',
+    tableHeaderBg: isDark ? 'bg-slate-800/60 text-slate-400' : 'bg-slate-100 text-slate-500',
+    textTitle: isDark ? 'text-white' : 'text-slate-900',
+    textSub: isDark ? 'text-slate-400' : 'text-slate-500',
+    tableRowBorder: isDark ? 'divide-slate-800/60' : 'divide-slate-200',
+    inputBg: isDark ? 'bg-slate-950 text-slate-200 border-slate-800' : 'bg-white text-slate-800 border-slate-300',
+  };
+
   const [jamaahList, setJamaahList] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editingJamaahId, setEditingJamaahId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState(null);
 
   const [formData, setFormData] = useState({
     fullName: '',
     nik: '',
-    gender: 'Laki-laki',
-    birthPlace: '',
-    birthDate: '',
+    gender: 'L',
     phone: '',
-    address: '',
     passportNumber: '',
-    passportName: '',
     passportExpiry: '',
-    passportIssuingOffice: ''
+    address: '',
   });
 
   const fetchJamaah = async () => {
     setLoading(true);
     try {
-      const q = query(collection(db, 'jamaah'), orderBy('createdAt', 'desc'));
-      const snap = await getDocs(q);
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setJamaahList(list);
+      const snap = await getDocs(collection(db, 'jamaah'));
+      setJamaahList(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     } catch (err) {
-      console.error("Gagal mengambil data jamaah:", err);
+      console.error('Gagal mengambil data jamaah:', err);
     }
     setLoading(false);
   };
@@ -53,96 +59,90 @@ export default function JamaahModule() {
     fetchJamaah();
   }, []);
 
-  const handleOpenAddModal = () => {
-    setEditingJamaahId(null);
-    resetForm();
-    setShowModal(true);
-  };
-
-  const handleOpenEditModal = (item) => {
-    setEditingJamaahId(item.id);
+  const handleOpenAdd = () => {
+    setEditingId(null);
     setFormData({
-      fullName: item.fullName || '',
-      nik: item.nik || '',
-      gender: item.gender || 'Laki-laki',
-      birthPlace: item.birthPlace || '',
-      birthDate: item.birthDate || '',
-      phone: item.phone || '',
-      address: item.address || '',
-      passportNumber: item.passportNumber || '',
-      passportName: item.passportName || '',
-      passportExpiry: item.passportExpiry || '',
-      passportIssuingOffice: item.passportIssuingOffice || ''
+      fullName: '',
+      nik: '',
+      gender: 'L',
+      phone: '',
+      passportNumber: '',
+      passportExpiry: '',
+      address: '',
     });
     setShowModal(true);
   };
 
-  const handleDeleteJamaah = async (id, name) => {
-    if (!confirm(`Apakah Anda yakin ingin menghapus data jamaah ${name}?`)) return;
+  const handleOpenEdit = (item) => {
+    setEditingId(item.id);
+    setFormData({
+      fullName: item.fullName || '',
+      nik: item.nik || '',
+      gender: item.gender || 'L',
+      phone: item.phone || '',
+      passportNumber: item.passportNumber || '',
+      passportExpiry: item.passportExpiry || '',
+      address: item.address || '',
+    });
+    setShowModal(true);
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('Apakah Anda yakin ingin menghapus data jamaah ini?')) return;
     try {
       await deleteDoc(doc(db, 'jamaah', id));
       fetchJamaah();
     } catch (err) {
-      alert("Gagal menghapus jamaah: " + err.message);
+      alert('Gagal menghapus jamaah: ' + err.message);
     }
-  };
-
-  const resetForm = () => {
-    setFormData({
-      fullName: '', nik: '', gender: 'Laki-laki', birthPlace: '', birthDate: '',
-      phone: '', address: '', passportNumber: '', passportName: '', passportExpiry: '', passportIssuingOffice: ''
-    });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      if (editingJamaahId) {
-        // Update data jamaah eksisting
-        await updateDoc(doc(db, 'jamaah', editingJamaahId), {
+      if (editingId) {
+        await updateDoc(doc(db, 'jamaah', editingId), {
           ...formData,
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date().toISOString(),
         });
       } else {
-        // Tambah jamaah baru
         await addDoc(collection(db, 'jamaah'), {
           ...formData,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
         });
       }
-
       setShowModal(false);
-      resetForm();
       fetchJamaah();
     } catch (err) {
-      alert("Gagal menyimpan data jamaah: " + err.message);
+      alert('Gagal menyimpan jamaah: ' + err.message);
     }
   };
 
-  const filteredJamaah = jamaahList.filter(j =>
-    j.fullName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    j.nik?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    j.passportNumber?.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredList = jamaahList.filter(
+    (j) =>
+      (j.fullName && j.fullName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (j.nik && j.nik.includes(searchTerm)) ||
+      (j.passportNumber && j.passportNumber.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 p-6 rounded-xl border border-slate-800">
+      <div className={`flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${styles.cardBg} p-6 rounded-xl border`}>
         <div>
-          <h3 className="text-xl font-bold text-white flex items-center gap-2">
-            <Users className="w-5 h-5 text-emerald-400" /> Master Data Jamaah
+          <h3 className={`text-xl font-bold ${styles.textTitle} flex items-center gap-2`}>
+            <Users className="w-5 h-5 text-emerald-500" /> Data Master Jamaah
           </h3>
-          <p className="text-xs text-slate-400 mt-1">Database identitas KTP, kontak, dan dokumen paspor jamaah.</p>
+          <p className={`text-xs ${styles.textSub} mt-1`}>Database identitas KTP, kontak, dan dokumen paspor jamaah.</p>
         </div>
         <button
-          onClick={handleOpenAddModal}
-          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg shadow-emerald-900/30"
+          onClick={handleOpenAdd}
+          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg"
         >
           <Plus className="w-4 h-4" /> Registrasi Jamaah Baru
         </button>
       </div>
 
-      <div className="flex items-center gap-4 bg-slate-900 p-4 rounded-xl border border-slate-800">
+      <div className={`${styles.cardBg} p-4 rounded-xl border flex items-center gap-4`}>
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
           <input
@@ -150,209 +150,175 @@ export default function JamaahModule() {
             placeholder="Cari Nama Jamaah, NIK, atau Nomor Paspor..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-950 text-slate-200 pl-9 pr-4 py-2 rounded-lg border border-slate-800 text-xs focus:outline-none focus:border-emerald-500"
+            className={`w-full ${styles.inputBg} pl-9 pr-4 py-2 rounded-lg text-xs focus:outline-none focus:border-emerald-500`}
           />
         </div>
       </div>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+      <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-800/60 text-slate-400 uppercase tracking-wider border-b border-slate-800">
+          <table className="w-full text-left text-xs">
+            <thead className={`${styles.tableHeaderBg} uppercase tracking-wider border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <tr>
                 <th className="p-4">Nama & NIK</th>
                 <th className="p-4">Gender & Kontak</th>
-                <th className="p-4">TTL</th>
-                <th className="p-4">Paspor & Nama Paspor</th>
-                <th className="p-4">Expired Paspor</th>
+                <th className="p-4">Paspor & Expiry</th>
+                <th className="p-4">Alamat</th>
                 <th className="p-4 text-center">Aksi</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60">
+            <tbody className={`divide-y ${styles.tableRowBorder}`}>
               {loading ? (
-                <tr><td colSpan="6" className="p-8 text-center text-slate-400">Memuat database jamaah...</td></tr>
-              ) : filteredJamaah.length === 0 ? (
-                <tr><td colSpan="6" className="p-8 text-center text-slate-400">Belum ada data jamaah.</td></tr>
+                <tr>
+                  <td colSpan="5" className={`p-8 text-center ${styles.textSub}`}>Memuat data jamaah...</td>
+                </tr>
+              ) : filteredList.length === 0 ? (
+                <tr>
+                  <td colSpan="5" className={`p-8 text-center ${styles.textSub}`}>Belum ada data jamaah.</td>
+                </tr>
               ) : (
-                filteredJamaah.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="p-4 font-semibold text-white">
-                      {item.fullName}
-                      <span className="block text-[10px] text-slate-400 font-mono">NIK: {item.nik || '-'}</span>
-                    </td>
-                    <td className="p-4">
-                      <span className="inline-block bg-slate-800 px-2 py-0.5 rounded text-[10px] mr-1">{item.gender}</span>
-                      <span className="block text-[10px] text-slate-400">{item.phone || '-'}</span>
-                    </td>
-                    <td className="p-4">
-                      {item.birthPlace ? `${item.birthPlace}, ` : ''}{formatDateDDMMYYYY(item.birthDate)}
-                    </td>
-                    <td className="p-4">
-  <span className="block font-bold text-white mb-0.5">
-    {item.passportName || '-'}
-  </span>
-  <span className="block font-mono text-[10px] text-emerald-400">
-    {item.passportNumber || 'Belum Ada Paspor'}
-  </span>
-</td>
-                    <td className="p-4 text-slate-400">
-                      {formatDateDDMMYYYY(item.passportExpiry)}
-                    </td>
-                    <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <button
-                          onClick={() => handleOpenEditModal(item)}
-                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-lg transition-colors"
-                          title="Edit Jamaah"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteJamaah(item.id, item.fullName)}
-                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-rose-400 rounded-lg transition-colors"
-                          title="Hapus Jamaah"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                filteredList.map((item) => {
+                  const isExpiringSoon = item.passportExpiry && new Date(item.passportExpiry) < new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+                  return (
+                    <tr key={item.id} className={`${isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'} transition-colors`}>
+                      <td className={`p-4 font-semibold ${styles.textTitle}`}>
+                        {item.fullName}
+                        <span className={`block text-[10px] ${styles.textSub} font-mono`}>NIK: {item.nik || '-'}</span>
+                      </td>
+                      <td className="p-4">
+                        <span className={`inline-block ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] mr-2 font-bold`}>
+                          {item.gender === 'L' ? 'L' : 'P'}
+                        </span>
+                        <span className={styles.textSub}>{item.phone || '-'}</span>
+                      </td>
+                      <td className="p-4">
+                        <span className="font-semibold text-emerald-500 font-mono block">{item.passportNumber || 'Belum Ada'}</span>
+                        {item.passportExpiry && (
+                          <span className={`text-[10px] flex items-center gap-1 ${isExpiringSoon ? 'text-amber-500 font-bold' : styles.textSub}`}>
+                            {isExpiringSoon && <AlertCircle className="w-3 h-3" />}
+                            Exp: {formatDateDDMMYYYY(item.passportExpiry)}
+                          </span>
+                        )}
+                      </td>
+                      <td className={`p-4 ${styles.textSub}`}>{item.address || '-'}</td>
+                      <td className="p-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => handleOpenEdit(item)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                            title="Edit Data Jamaah"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(item.id)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                            title="Hapus Jamaah"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Modal Form Tambah/Edit Jamaah */}
       {showModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl p-6 relative max-h-[90vh] overflow-y-auto">
-            <button onClick={() => setShowModal(false)} className="absolute right-4 top-4 text-slate-400 hover:text-white">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative`}>
+            <button onClick={() => setShowModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
-
-            <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-              <Users className="w-5 h-5 text-emerald-400" /> {editingJamaahId ? 'Edit Data Jamaah' : 'Registrasi Jamaah Baru'}
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-4 flex items-center gap-2`}>
+              <Users className="w-5 h-5 text-emerald-500" /> {editingId ? 'Edit Data Jamaah' : 'Registrasi Jamaah Baru'}
             </h3>
 
-            <form onSubmit={handleSubmit} className="space-y-4 text-xs text-slate-300">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block mb-1 font-medium">Nama Lengkap (Sesuai KTP)</label>
-                  <input
-                    type="text" required placeholder="Ahmad Abdullah"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
-                    value={formData.fullName} onChange={e => setFormData({ ...formData, fullName: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1 font-medium">NIK (16 Digit)</label>
-                  <input
-                    type="text" required placeholder="3271234567890001"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
-                    value={formData.nik} onChange={e => setFormData({ ...formData, nik: e.target.value })}
-                  />
-                </div>
+            <form onSubmit={handleSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div>
+                <label className="block mb-1 font-medium">Nama Lengkap (sesuai KTP/Paspor)</label>
+                <input
+                  type="text" required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={formData.fullName}
+                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                />
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1 font-medium">NIK (KTP)</label>
+                  <input
+                    type="text"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5 font-mono`}
+                    value={formData.nik}
+                    onChange={(e) => setFormData({ ...formData, nik: e.target.value })}
+                  />
+                </div>
                 <div>
                   <label className="block mb-1 font-medium">Jenis Kelamin</label>
                   <select
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
-                    value={formData.gender} onChange={e => setFormData({ ...formData, gender: e.target.value })}
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={formData.gender}
+                    onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
                   >
-                    <option value="Laki-laki">Laki-laki</option>
-                    <option value="Perempuan">Perempuan</option>
+                    <option value="L">Laki-Laki</option>
+                    <option value="P">Perempuan</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block mb-1 font-medium">Tempat Lahir</label>
-                  <input
-                    type="text" placeholder="Jakarta"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
-                    value={formData.birthPlace} onChange={e => setFormData({ ...formData, birthPlace: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1 font-medium">Tanggal Lahir</label>
-                  <input
-                    type="date"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white cursor-pointer [&::-webkit-calendar-picker-indicator]:brightness-0 [&::-webkit-calendar-picker-indicator]:invert"
-                    value={formData.birthDate} onChange={e => setFormData({ ...formData, birthDate: e.target.value })}
-                  />
-                </div>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">No. Telepon / WhatsApp</label>
+                <input
+                  type="text" required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block mb-1 font-medium">No. Telepon / WhatsApp</label>
+                  <label className="block mb-1 font-medium">Nomor Paspor</label>
                   <input
-                    type="text" placeholder="08123456789"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
-                    value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })}
+                    type="text"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5 font-mono`}
+                    value={formData.passportNumber}
+                    onChange={(e) => setFormData({ ...formData, passportNumber: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label className="block mb-1 font-medium">Alamat Tinggal</label>
+                  <label className="block mb-1 font-medium">Tanggal Expired Paspor</label>
                   <input
-                    type="text" placeholder="Jl. Merdeka No. 10"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
-                    value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })}
+                    type="date"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5 [color-scheme:${theme}]`}
+                    value={formData.passportExpiry}
+                    onChange={(e) => setFormData({ ...formData, passportExpiry: e.target.value })}
                   />
                 </div>
               </div>
 
-              {/* SECTION PASPOR */}
-              <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-3">
-                <p className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5" /> Dokumen Paspor (Opsional / Bisa Menyusul)
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block mb-1 font-medium">Nomor Paspor</label>
-                    <input
-                      type="text" placeholder="X1234567"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white font-mono"
-                      value={formData.passportNumber} onChange={e => setFormData({ ...formData, passportNumber: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="block mb-1 font-medium">Nama Paspor (3 Kata)</label>
-                    <input
-                      type="text" placeholder="AHMAD ABDULLAH HASAN"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white"
-                      value={formData.passportName} onChange={e => setFormData({ ...formData, passportName: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block mb-1 font-medium">Tgl Kadaluarsa Paspor</label>
-                    <input
-                      type="date"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white cursor-pointer [&::-webkit-calendar-picker-indicator]:brightness-0 [&::-webkit-calendar-picker-indicator]:invert"
-                      value={formData.passportExpiry} onChange={e => setFormData({ ...formData, passportExpiry: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="block mb-1 font-medium">Kantor Imigrasi Penerbit</label>
-                    <input
-                      type="text" placeholder="Imigrasi Jakarta Selatan"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white"
-                      value={formData.passportIssuingOffice} onChange={e => setFormData({ ...formData, passportIssuingOffice: e.target.value })}
-                    />
-                  </div>
-                </div>
+              <div>
+                <label className="block mb-1 font-medium">Alamat Tempat Tinggal</label>
+                <textarea
+                  rows="2"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                ></textarea>
               </div>
 
-              <div className="pt-4 flex justify-end gap-3 border-t border-slate-800">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-lg">
+              <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
                 <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
-                  {editingJamaahId ? 'Simpan Perubahan' : 'Simpan Jamaah'}
+                  {editingId ? 'Simpan Perubahan' : 'Simpan Jamaah'}
                 </button>
               </div>
             </form>
