@@ -281,7 +281,7 @@ export default function BookingsModule({ targetBookingId }) {
               <p>Nama Lengkap: <strong>${booking.jamaahName || '-'}</strong></p>
               <p>No. Telepon / WA: <strong>${booking.jamaahPhone || booking.phone || '-'}</strong></p>
               <p>NPWP: <strong>${booking.jamaahNpwp || booking.npwp || '-'}</strong></p>
-              <p>No. Paspor: <strong>${booking.passportNumber || '-'}</strong></p>
+              <p>Alamat: <strong>${booking.jamaahAddress || booking.address || '-'}</strong></p>
             </div>
             <div class="meta-card">
               <h4>Rincian Dokumen:</h4>
