@@ -191,9 +191,13 @@ export default function FinanceModule({ onSelectBooking }) {
                     <tr key={tx.id} className="hover:bg-slate-800/30">
                       <td className="p-4 font-semibold text-white">
                         {tx.jamaahName}
-                        {/* LINK KLIK KODE BOOKING */}
                         <button
-                          onClick={() => onSelectBooking && onSelectBooking(tx.bookingId)}
+                          type="button"
+                          onClick={() => {
+                            if (onSelectBooking && tx.bookingId) {
+                              onSelectBooking(tx.bookingId);
+                            }
+                          }}
                           className="block text-[10px] text-emerald-400 font-mono hover:underline text-left cursor-pointer"
                           title="Klik untuk membuka riwayat booking ini"
                         >
