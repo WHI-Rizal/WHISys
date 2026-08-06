@@ -35,6 +35,9 @@ export default function DashboardPage() {
   // Dynamic Theme State ('emerald', 'gold', 'indigo')
   const [theme, setTheme] = useState('emerald');
 
+  // TARUH KODE DI SINI (State untuk navigasi antar modul):
+  const [selectedBookingForModal, setSelectedBookingForModal] = useState(null);
+
   // Load saved theme from LocalStorage on mount
   useEffect(() => {
     const savedTheme = localStorage.getItem('whisys_theme');
@@ -462,10 +465,19 @@ export default function DashboardPage() {
         {activeMenu === 'jamaah' && <JamaahModule />}
 
         {/* MODUL BOOKING & MANIFEST */}
-        {activeMenu === 'bookings' && <BookingsModule />}
+        {activeMenu === 'bookings' && (
+         <BookingsModule targetBookingId={selectedBookingForModal} />
+        )}
 
         {/* MODUL KEUANGAN & PELUNASAN */}
-        {activeMenu === 'finance' && <FinanceModule />}
+        {activeMenu === 'finance' && (
+  <FinanceModule
+    onSelectBooking={(bookingId) => {
+      setSelectedBookingForModal(bookingId);
+      changeMenu('bookings');
+    }}
+  />
+)}
 
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
         {activeMenu !== 'dashboard' && 
