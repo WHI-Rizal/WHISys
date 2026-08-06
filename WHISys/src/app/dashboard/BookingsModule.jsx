@@ -196,123 +196,174 @@ export default function BookingsModule({ targetBookingId }) {
   };
 
   const handlePrintInvoice = (booking) => {
-    const isLunas = booking.paymentStatus === 'Full Payment';
-    const totalAmount = Number(booking.totalAmount) || 0;
-    const totalPaid = Number(booking.totalPaid) || 0;
-    const sisaTagihan = totalAmount - totalPaid;
+  const isLunas = booking.paymentStatus === 'Full Payment';
+  const totalAmount = Number(booking.totalAmount) || 0;
+  const totalPaid = Number(booking.totalPaid) || 0;
+  const sisaTagihan = totalAmount - totalPaid;
 
-    const printWindow = window.open('', '_blank');
-    const docContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>${isLunas ? 'INVOICE' : 'PROFORMA INVOICE'} - ${booking.bookingCode}</title>
-          <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📄</text></svg>">
+  const printWindow = window.open('', '_blank');
+  const docContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>${isLunas ? 'INVOICE' : 'PROFORMA INVOICE'} - ${booking.bookingCode}</title>
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📄</text></svg>">
+        
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; margin: 0; padding: 40px; background-color: #fff; }
+          .invoice-box { max-width: 800px; margin: auto; border: 1px solid #e2e8f0; padding: 35px; border-radius: 12px; }
           
-          <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; margin: 0; padding: 40px; background-color: #fff; }
-            .invoice-box { max-width: 800px; margin: auto; border: 1px solid #e2e8f0; padding: 30px; border-radius: 12px; }
-            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #059669; padding-bottom: 20px; margin-bottom: 30px; }
-            .company-title { font-size: 24px; font-weight: bold; color: #065f46; margin: 0; }
-            .invoice-type { font-size: 20px; font-weight: 800; text-transform: uppercase; color: ${isLunas ? '#059669' : '#d97706'}; text-align: right; }
-            .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; margin-top: 5px; background-color: ${isLunas ? '#d1fae5' : '#fef3c7'}; color: ${isLunas ? '#065f46' : '#92400e'}; }
-            .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
-            .meta-card { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #f1f5f9; }
-            .meta-card h4 { margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; }
-            .meta-card p { margin: 2px 0; font-size: 13px; font-weight: 600; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-            th { background-color: #f1f5f9; text-align: left; padding: 12px; font-size: 12px; text-transform: uppercase; color: #475569; border-bottom: 2px solid #cbd5e1; }
-            td { padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
-            .summary-table { width: 300px; margin-left: auto; margin-bottom: 40px; }
-            .summary-table td { padding: 6px 12px; }
-            .summary-table .total-row { font-size: 16px; font-weight: bold; color: #0f172a; border-top: 2px solid #0284c7; }
-            .footer { text-align: center; border-top: 1px solid #e2e8f0; pt-20px; padding-top: 20px; font-size: 11px; color: #94a3b8; }
-            @media print {
-              body { padding: 0; }
-              .invoice-box { border: none; padding: 0; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="invoice-box">
-            <div class="header">
-              <div>
-                <h1 class="company-title">WHISys Executive Travel</h1>
-                <p style="margin: 3px 0 0 0; font-size: 12px; color: #64748b;">Layanan Penyelenggara Umrah, Haji & Wisata Halal</p>
-              </div>
-              <div>
-                <div class="invoice-type">${isLunas ? 'INVOICE' : 'PROFORMA INVOICE'}</div>
-                <div class="badge">${isLunas ? 'LUNAS / PAID' : 'BELUM LUNAS / UNPAID'}</div>
-              </div>
+          /* KOP SURAT PERUSAHAAN */
+          .kop-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px double #059669; padding-bottom: 20px; margin-bottom: 25px; }
+          .company-logo-title { font-size: 22px; font-weight: 800; color: #065f46; letter-spacing: -0.5px; margin: 0; }
+          .company-sub { font-size: 11px; color: #047857; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin: 2px 0 8px 0; }
+          .company-address { font-size: 11px; color: #475569; line-height: 1.5; margin: 0; }
+          
+          .invoice-type { font-size: 20px; font-weight: 800; text-transform: uppercase; color: ${isLunas ? '#059669' : '#d97706'}; text-align: right; }
+          .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: bold; margin-top: 5px; background-color: ${isLunas ? '#d1fae5' : '#fef3c7'}; color: ${isLunas ? '#065f46' : '#92400e'}; }
+          
+          /* META CUSTOMER & TAGIHAN */
+          .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px; }
+          .meta-card { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #f1f5f9; }
+          .meta-card h4 { margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; color: #059669; letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+          .meta-card p { margin: 3px 0; font-size: 12px; color: #334155; }
+          .meta-card strong { color: #0f172a; }
+
+          /* TABEL TIKET / PACKAGES */
+          table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
+          th { background-color: #f1f5f9; text-align: left; padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #475569; border-bottom: 2px solid #cbd5e1; }
+          td { padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; }
+          
+          .summary-table { width: 320px; margin-left: auto; margin-bottom: 30px; }
+          .summary-table td { padding: 6px 12px; }
+          .summary-table .total-row { font-size: 15px; font-weight: bold; color: #0f172a; border-top: 2px solid #0284c7; }
+
+          /* FOOTER INFO PEMBAYARAN & REKENING */
+          .footer-section { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 20px; border-top: 1px solid #e2e8f0; padding-top: 20px; margin-top: 10px; }
+          .bank-info { background-color: #f0fdf4; border: 1px dashed #a7f3d0; padding: 12px 15px; border-radius: 8px; font-size: 11px; color: #065f46; }
+          .bank-info h5 { margin: 0 0 6px 0; font-size: 12px; color: #047857; text-transform: uppercase; letter-spacing: 0.5px; }
+          .bank-details { font-family: monospace; font-size: 12px; color: #0f172a; margin-top: 4px; }
+          
+          .signature-box { text-align: center; font-size: 11px; color: #64748b; }
+          .signature-space { height: 50px; }
+          
+          .footer-note { text-align: center; font-size: 10px; color: #94a3b8; margin-top: 25px; border-top: 1px solid #f1f5f9; padding-top: 10px; }
+
+          @media print {
+            body { padding: 0; }
+            .invoice-box { border: none; padding: 0; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="invoice-box">
+          
+          <!-- KOP PERUSAHAAN -->
+          <div class="kop-header">
+            <div>
+              <h1 class="company-logo-title">PT. WISATA HALAL INTERNASIONAL</h1>
+              <p class="company-sub">Penyelenggara Perjalanan Ibadah Umrah, Haji & Wisata Halal</p>
+              <p class="company-address">
+                Jl. Raya Utama No. 88, Jakarta Selatan, Indonesia<br>
+                Telp/WA: +62 812-3456-7890 | Email: info@wisatahalal.co.id
+              </p>
             </div>
-
-            <div class="meta-grid">
-              <div class="meta-card">
-                <h4>Ditagihkan Kepada:</h4>
-                <p style="font-size: 15px; color: #0f172a;">${booking.jamaahName || '-'}</p>
-                <p style="color: #64748b; font-weight: normal;">No. Paspor: ${booking.passportNumber || '-'}</p>
-              </div>
-              <div class="meta-card">
-                <h4>Rincian Tagihan:</h4>
-                <p>Kode Booking: <span style="color: #059669; font-family: monospace;">${booking.bookingCode}</span></p>
-                <p>Tanggal Diterbitkan: ${new Date().toLocaleDateString('id-ID')}</p>
-              </div>
-            </div>
-
-            <table>
-              <thead>
-                <tr>
-                  <th>Program Paket Travel</th>
-                  <th>Tgl Keberangkatan</th>
-                  <th>Kamar / Bus</th>
-                  <th style="text-align: right;">Jumlah Tagihan</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><strong>${booking.packageName || '-'}</strong></td>
-                  <td>${formatDateDDMMYYYY(booking.departureDate)}</td>
-                  <td>${booking.roomType} / ${booking.busGroup}</td>
-                  <td style="text-align: right; font-weight: bold;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
-                </tr>
-              </tbody>
-            </table>
-
-            <table class="summary-table">
-              <tr>
-                <td>Total Tagihan:</td>
-                <td style="text-align: right; font-weight: bold;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
-              </tr>
-              <tr>
-                <td>Total Diterima (DP):</td>
-                <td style="text-align: right; font-weight: bold; color: #059669;">Rp ${totalPaid.toLocaleString('id-ID')}</td>
-              </tr>
-              <tr class="total-row">
-                <td>Sisa Pembayaran:</td>
-                <td style="text-align: right; color: ${sisaTagihan > 0 ? '#d97706' : '#059669'};">
-                  Rp ${sisaTagihan.toLocaleString('id-ID')}
-                </td>
-              </tr>
-            </table>
-
-            <div class="footer">
-              <p>Terima kasih atas kepercayaan Anda memilih jasa perjalanan ibadah bersama kami.</p>
-              <p>Dokumen ini dicetak otomatis oleh sistem ERP WHISys pada ${new Date().toLocaleString('id-ID')}.</p>
+            <div>
+              <div class="invoice-type">${isLunas ? 'INVOICE' : 'PROFORMA INVOICE'}</div>
+              <div class="badge">${isLunas ? 'LUNAS / PAID' : 'BELUM LUNAS / UNPAID'}</div>
             </div>
           </div>
-          <script>
-            window.onload = function() {
-              window.print();
-            }
-          </script>
-        </body>
-      </html>
-    `;
 
-    printWindow.document.write(docContent);
-    printWindow.document.close();
-  };
+          <!-- DETAIL CUSTOMER & TAGIHAN -->
+          <div class="meta-grid">
+            <div class="meta-card">
+              <h4>Ditagihkan Kepada (Customer):</h4>
+              <p>Nama Lengkap: <strong>${booking.jamaahName || '-'}</strong></p>
+              <p>No. Telepon / WA: <strong>${booking.jamaahPhone || booking.phone || '-'}</strong></p>
+              <p>NPWP: <strong>${booking.jamaahNpwp || booking.npwp || '-'}</strong></p>
+              <p>No. Paspor: <strong>${booking.passportNumber || '-'}</strong></p>
+            </div>
+            <div class="meta-card">
+              <h4>Rincian Dokumen:</h4>
+              <p>Kode Booking: <strong style="color: #059669; font-family: monospace;">${booking.bookingCode}</strong></p>
+              <p>Tanggal Terbit: <strong>${new Date().toLocaleDateString('id-ID')}</strong></p>
+              <p>Status Setoran: <strong>${booking.paymentStatus || 'DP Paid'}</strong></p>
+            </div>
+          </div>
 
+          <!-- TABEL RINCIAN PAKET -->
+          <table>
+            <thead>
+              <tr>
+                <th>Program Paket Travel</th>
+                <th>Tgl Keberangkatan</th>
+                <th>Kamar / Bus</th>
+                <th style="text-align: right;">Jumlah Tagihan</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>${booking.packageName || '-'}</strong></td>
+                <td>${formatDateDDMMYYYY(booking.departureDate)}</td>
+                <td>${booking.roomType} / ${booking.busGroup}</td>
+                <td style="text-align: right; font-weight: bold;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <!-- SUMMARY PENGHITUNGAN -->
+          <table class="summary-table">
+            <tr>
+              <td>Total Tagihan:</td>
+              <td style="text-align: right; font-weight: bold;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
+            </tr>
+            <tr>
+              <td>Total Diterima (Setoran):</td>
+              <td style="text-align: right; font-weight: bold; color: #059669;">Rp ${totalPaid.toLocaleString('id-ID')}</td>
+            </tr>
+            <tr class="total-row">
+              <td>Sisa Tagihan:</td>
+              <td style="text-align: right; color: ${sisaTagihan > 0 ? '#d97706' : '#059669'};">
+                Rp ${sisaTagihan.toLocaleString('id-ID')}
+              </td>
+            </tr>
+          </table>
+
+          <!-- FOOTER: INFORMASI REKENING & TANDA TANGAN -->
+          <div class="footer-section">
+            <div class="bank-info">
+              <h5>Informasi Pembayaran / Transfer:</h5>
+              <div>Silakan lakukan pembayaran melalui rekening resmi perusahaan:</div>
+              <div class="bank-details">
+                Bank: <strong>Bank Syariah Indonesia (BSI)</strong><br>
+                No. Rekening: <strong>788-9900-112</strong><br>
+                A.N: <strong>PT. Wisata Halal Internasional</strong>
+              </div>
+            </div>
+            <div class="signature-box">
+              <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
+              <div class="signature-space"></div>
+              <p><strong>( PT. Wisata Halal Internasional )</strong></p>
+            </div>
+          </div>
+
+          <div class="footer-note">
+            <p>Terima kasih atas kepercayaan Anda. Dokumen ini sah dan diterbitkan secara otomatis oleh sistem ERP WHISys.</p>
+          </div>
+
+        </div>
+        <script>
+          window.onload = function() {
+            window.print();
+          }
+        </script>
+      </body>
+    </html>
+  `;
+
+  printWindow.document.write(docContent);
+  printWindow.document.close();
+};
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.packageId || !formData.jamaahId) {
