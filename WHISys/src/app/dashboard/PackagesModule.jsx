@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { Package, Plus, Search, Calendar, Users, Edit, Trash2, Filter, Plane, MapPin, RefreshCw, X } from 'lucide-react';
+import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, RefreshCw, X } from 'lucide-react';
 
 // Helper Format Tanggal dd/mm/yyyy
 const formatDateDDMMYYYY = (dateString) => {
@@ -16,7 +16,7 @@ const formatDateDDMMYYYY = (dateString) => {
   return `${day}/${month}/${year}`;
 };
 
-// Helper Format Bulan & Tahun (contoh: Januari 2027)
+// Helper Format Bulan & Tahun
 const formatMonthYear = (dateString) => {
   if (!dateString) return '';
   const date = new Date(dateString);
@@ -46,10 +46,14 @@ export default function PackagesModule() {
     airline: 'Saudi Arabian Airlines',
     hotelMakkah: 'Pullman Zamzam',
     hotelMadinah: 'Front Taiba',
+    destinationCity: 'Korea Selatan (Seoul & Nami)',
+    hotelTour: 'Hotel Bintang 4 / Setaraf',
+    laScope: 'Bus, Mutawwif, Handling, Visas',
     quotaTotal: 45,
-    priceQuad: '',
+    priceMain: '', // Harga Utama / Dewasa / Quad
     priceTriple: '',
-    priceDouble: ''
+    priceDouble: '',
+    priceChild: ''
   });
 
   const fetchPackages = async () => {
@@ -79,10 +83,14 @@ export default function PackagesModule() {
       airline: 'Saudi Arabian Airlines',
       hotelMakkah: 'Pullman Zamzam',
       hotelMadinah: 'Front Taiba',
+      destinationCity: 'Korea Selatan / Jepang',
+      hotelTour: 'Hotel Bintang 4 / Setaraf',
+      laScope: 'Transport, Hotel, Handling LA',
       quotaTotal: 45,
-      priceQuad: '',
+      priceMain: '',
       priceTriple: '',
-      priceDouble: ''
+      priceDouble: '',
+      priceChild: ''
     });
     setShowModal(true);
   };
@@ -98,10 +106,14 @@ export default function PackagesModule() {
       airline: pkg.airline || '',
       hotelMakkah: pkg.hotelMakkah || '',
       hotelMadinah: pkg.hotelMadinah || '',
+      destinationCity: pkg.destinationCity || '',
+      hotelTour: pkg.hotelTour || '',
+      laScope: pkg.laScope || '',
       quotaTotal: pkg.quotaTotal || 45,
-      priceQuad: pkg.priceQuad || '',
+      priceMain: pkg.priceMain || pkg.priceQuad || '',
       priceTriple: pkg.priceTriple || '',
-      priceDouble: pkg.priceDouble || ''
+      priceDouble: pkg.priceDouble || '',
+      priceChild: pkg.priceChild || ''
     });
     setShowModal(true);
   };
@@ -128,13 +140,16 @@ export default function PackagesModule() {
         airline: formData.airline,
         hotelMakkah: formData.hotelMakkah,
         hotelMadinah: formData.hotelMadinah,
+        destinationCity: formData.destinationCity,
+        hotelTour: formData.hotelTour,
+        laScope: formData.laScope,
         quotaTotal: Number(formData.quotaTotal),
-        quotaRemaining: editingPackageId 
-          ? Number(formData.quotaTotal)
-          : Number(formData.quotaTotal),
-        priceQuad: Number(formData.priceQuad || 0),
+        quotaRemaining: editingPackageId ? Number(formData.quotaTotal) : Number(formData.quotaTotal),
+        priceMain: Number(formData.priceMain || 0),
+        priceQuad: Number(formData.priceMain || 0), // kompatibilitas ke sistem booking lama
         priceTriple: Number(formData.priceTriple || 0),
         priceDouble: Number(formData.priceDouble || 0),
+        priceChild: Number(formData.priceChild || 0),
         updatedAt: new Date().toISOString()
       };
 
@@ -152,23 +167,16 @@ export default function PackagesModule() {
     }
   };
 
-  // Dapatkan daftar unik Maskapai
-  const availableAirlines = Array.from(
-    new Set(packagesList.map(p => p.airline).filter(Boolean))
-  );
-
-  // Dapatkan daftar unik Periode
-  const availablePeriods = Array.from(
-    new Set(packagesList.map(p => formatMonthYear(p.departureDate)).filter(Boolean))
-  );
+  // Extract Maskapai & Periode
+  const availableAirlines = Array.from(new Set(packagesList.map(p => p.airline).filter(Boolean)));
+  const availablePeriods = Array.from(new Set(packagesList.map(p => formatMonthYear(p.departureDate)).filter(Boolean)));
 
   // Logika Filter
   const filteredPackages = packagesList.filter((pkg) => {
     const matchesSearch = 
       (pkg.name && pkg.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (pkg.code && pkg.code.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (pkg.hotelMakkah && pkg.hotelMakkah.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (pkg.hotelMadinah && pkg.hotelMadinah.toLowerCase().includes(searchTerm.toLowerCase()));
+      (pkg.destinationCity && pkg.destinationCity.toLowerCase().includes(searchTerm.toLowerCase()));
 
     const pkgPeriod = formatMonthYear(pkg.departureDate);
     const matchesPeriod = !selectedPeriod || pkgPeriod === selectedPeriod;
@@ -185,6 +193,9 @@ export default function PackagesModule() {
     setSelectedAirline('');
   };
 
+  const isTourOrLA = formData.type === 'Wisata Halal Internasional' || formData.type === 'Land Arrangement (LA) Only';
+  const isLAOnly = formData.type === 'Land Arrangement (LA) Only';
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -193,7 +204,7 @@ export default function PackagesModule() {
           <h3 className="text-xl font-bold text-white flex items-center gap-2">
             <Package className="w-5 h-5 text-emerald-400" /> Katalog Paket Travel & LA
           </h3>
-          <p className="text-xs text-slate-400 mt-1">Kelola program keberangkatan, harga kamar, hotel, dan kuota seat.</p>
+          <p className="text-xs text-slate-400 mt-1">Kelola program keberangkatan, akomodasi, dan harga paket secara adaptif.</p>
         </div>
         <button
           onClick={handleOpenAdd}
@@ -203,36 +214,31 @@ export default function PackagesModule() {
         </button>
       </div>
 
-      {/* FILTER & SEARCH BAR */}
+      {/* FILTER BAR */}
       <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
         <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
           <span className="text-xs font-bold text-white flex items-center gap-1.5">
             <Filter className="w-4 h-4 text-emerald-400" /> Filter Data Keberangkatan
           </span>
           {(searchTerm || selectedPeriod || selectedDestination || selectedAirline) && (
-            <button
-              onClick={resetFilters}
-              className="text-[11px] text-rose-400 hover:underline flex items-center gap-1"
-            >
+            <button onClick={resetFilters} className="text-[11px] text-rose-400 hover:underline flex items-center gap-1">
               <RefreshCw className="w-3 h-3" /> Reset Filter
             </button>
           )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {/* Search Box */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
             <input
               type="text"
-              placeholder="Cari Nama / Kode / Hotel..."
+              placeholder="Cari Nama / Kode / Destinasi..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-slate-950 text-slate-200 pl-9 pr-3 py-2 rounded-lg border border-slate-800 text-xs focus:outline-none focus:border-emerald-500"
             />
           </div>
 
-          {/* Filter Periode Keberangkatan */}
           <div className="relative">
             <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
             <select
@@ -247,7 +253,6 @@ export default function PackagesModule() {
             </select>
           </div>
 
-          {/* Filter Destinasi / Jenis Paket */}
           <div className="relative">
             <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
             <select
@@ -264,7 +269,6 @@ export default function PackagesModule() {
             </select>
           </div>
 
-          {/* Filter Maskapai */}
           <div className="relative">
             <Plane className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
             <select
@@ -290,8 +294,8 @@ export default function PackagesModule() {
                 <th className="p-4">Kode & Nama Paket</th>
                 <th className="p-4">Jenis & Maskapai</th>
                 <th className="p-4">Tgl Keberangkatan</th>
-                <th className="p-4">Akomodasi Hotel</th>
-                <th className="p-4">Harga Quad</th>
+                <th className="p-4">Akomodasi / Destinasi</th>
+                <th className="p-4">Harga Utama / Pax</th>
                 <th className="p-4 text-center">Sisa Seat</th>
                 <th className="p-4 text-center">Aksi</th>
               </tr>
@@ -302,64 +306,76 @@ export default function PackagesModule() {
               ) : filteredPackages.length === 0 ? (
                 <tr><td colSpan="7" className="p-8 text-center text-slate-500">Tidak ada paket yang sesuai dengan filter pencarian.</td></tr>
               ) : (
-                filteredPackages.map((pkg) => (
-                  <tr key={pkg.id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="p-4 font-semibold text-white">
-                      {pkg.name}
-                      <span className="block text-[10px] text-emerald-400 font-mono">{pkg.code} • {pkg.durationDays || '9 Hari'}</span>
-                    </td>
-                    <td className="p-4">
-                      <span className="bg-slate-800 px-2 py-0.5 rounded text-[10px] block w-fit mb-1 text-slate-300">{pkg.type}</span>
-                      <span className="text-slate-400 text-[11px] flex items-center gap-1">
-                        <Plane className="w-3 h-3 text-blue-400" /> {pkg.airline || '-'}
-                      </span>
-                    </td>
-                    <td className="p-4 text-slate-300 font-medium">
-                      {formatDateDDMMYYYY(pkg.departureDate)}
-                    </td>
-                    <td className="p-4 text-slate-400 text-[11px]">
-                      <div>Makkah: <span className="text-white">{pkg.hotelMakkah || '-'}</span></div>
-                      <div>Madinah: <span className="text-white">{pkg.hotelMadinah || '-'}</span></div>
-                    </td>
-                    <td className="p-4 font-bold text-emerald-400">
-                      Rp {pkg.priceQuad ? Number(pkg.priceQuad).toLocaleString('id-ID') : '0'}
-                    </td>
-                    <td className="p-4 text-center">
-                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                        (pkg.quotaRemaining ?? pkg.quotaTotal) > 5 
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                          : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                      }`}>
-                        {pkg.quotaRemaining ?? pkg.quotaTotal} / {pkg.quotaTotal} Seat
-                      </span>
-                    </td>
-                    <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <button
-                          onClick={() => handleOpenEdit(pkg)}
-                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-lg transition-colors"
-                          title="Edit Paket"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(pkg)}
-                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-rose-400 rounded-lg transition-colors"
-                          title="Hapus Paket"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                filteredPackages.map((pkg) => {
+                  const isTourPkg = pkg.type === 'Wisata Halal Internasional' || pkg.type === 'Land Arrangement (LA) Only';
+                  return (
+                    <tr key={pkg.id} className="hover:bg-slate-800/30 transition-colors">
+                      <td className="p-4 font-semibold text-white">
+                        {pkg.name}
+                        <span className="block text-[10px] text-emerald-400 font-mono">{pkg.code} • {pkg.durationDays || '9 Hari'}</span>
+                      </td>
+                      <td className="p-4">
+                        <span className="bg-slate-800 px-2 py-0.5 rounded text-[10px] block w-fit mb-1 text-slate-300">{pkg.type}</span>
+                        <span className="text-slate-400 text-[11px] flex items-center gap-1">
+                          <Plane className="w-3 h-3 text-blue-400" /> {pkg.airline || '-'}
+                        </span>
+                      </td>
+                      <td className="p-4 text-slate-300 font-medium">
+                        {formatDateDDMMYYYY(pkg.departureDate)}
+                      </td>
+                      <td className="p-4 text-slate-400 text-[11px]">
+                        {isTourPkg ? (
+                          <>
+                            <div>Destinasi: <span className="text-white font-medium">{pkg.destinationCity || '-'}</span></div>
+                            <div>Fasilitas: <span className="text-white">{pkg.hotelTour || pkg.laScope || '-'}</span></div>
+                          </>
+                        ) : (
+                          <>
+                            <div>Makkah: <span className="text-white">{pkg.hotelMakkah || '-'}</span></div>
+                            <div>Madinah: <span className="text-white">{pkg.hotelMadinah || '-'}</span></div>
+                          </>
+                        )}
+                      </td>
+                      <td className="p-4 font-bold text-emerald-400">
+                        Rp {(pkg.priceMain || pkg.priceQuad) ? Number(pkg.priceMain || pkg.priceQuad).toLocaleString('id-ID') : '0'}
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                          (pkg.quotaRemaining ?? pkg.quotaTotal) > 5 
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                            : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                        }`}>
+                          {pkg.quotaRemaining ?? pkg.quotaTotal} / {pkg.quotaTotal} Seat
+                        </span>
+                      </td>
+                      <td className="p-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => handleOpenEdit(pkg)}
+                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-lg transition-colors"
+                            title="Edit Paket"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(pkg)}
+                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-rose-400 rounded-lg transition-colors"
+                            title="Hapus Paket"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Modal Form Tambah / Edit Paket */}
+      {/* MODAL ADAPTIF (UMROH / WISATA HALAL / LA) */}
       {showModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto">
@@ -385,7 +401,7 @@ export default function PackagesModule() {
                 <div>
                   <label className="block mb-1 font-medium">Jenis / Kategori Program</label>
                   <select
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white font-semibold text-emerald-400"
                     value={formData.type}
                     onChange={e => setFormData({ ...formData, type: e.target.value })}
                   >
@@ -401,7 +417,8 @@ export default function PackagesModule() {
               <div>
                 <label className="block mb-1 font-medium">Nama Program Paket</label>
                 <input
-                  type="text" required placeholder="Contoh: Umroh Regular 9D Januari 2027"
+                  type="text" required 
+                  placeholder={isTourOrLA ? "Contoh: Korea School Holiday 30 Juni - 06 Juli 2027" : "Contoh: Umroh Regular 9D Januari 2027"}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
                   value={formData.name}
                   onChange={e => setFormData({ ...formData, name: e.target.value })}
@@ -421,7 +438,7 @@ export default function PackagesModule() {
                 <div>
                   <label className="block mb-1 font-medium">Durasi Program</label>
                   <input
-                    type="text" placeholder="9 Hari"
+                    type="text" placeholder="7 Hari / 9 Hari"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
                     value={formData.durationDays}
                     onChange={e => setFormData({ ...formData, durationDays: e.target.value })}
@@ -430,7 +447,7 @@ export default function PackagesModule() {
                 <div>
                   <label className="block mb-1 font-medium">Total Kuota Seat</label>
                   <input
-                    type="number" required placeholder="45"
+                    type="number" required placeholder="30"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
                     value={formData.quotaTotal}
                     onChange={e => setFormData({ ...formData, quotaTotal: e.target.value })}
@@ -439,69 +456,123 @@ export default function PackagesModule() {
               </div>
 
               <div>
-                <label className="block mb-1 font-medium">Maskapai Penerbangan</label>
+                <label className="block mb-1 font-medium">Maskapai Penerbangan / Transportasi</label>
                 <input
-                  type="text" placeholder="Saudi Arabian Airlines / Batik Air / Oman Air"
+                  type="text" placeholder="Garuda Indonesia / Korean Air / Land Transport"
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
                   value={formData.airline}
                   onChange={e => setFormData({ ...formData, airline: e.target.value })}
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block mb-1 font-medium">Hotel Makkah</label>
-                  <input
-                    type="text" placeholder="Pullman Zamzam / Setaraf"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
-                    value={formData.hotelMakkah}
-                    onChange={e => setFormData({ ...formData, hotelMakkah: e.target.value })}
-                  />
+              {/* DYNAMIC FIELD BERDASARKAN KATEGORI */}
+              {isTourOrLA ? (
+                /* INPUTAN UNTUK WISATA HALAL & LA */
+                <div className="grid grid-cols-2 gap-4 bg-slate-950/50 p-3 rounded-xl border border-slate-800">
+                  <div>
+                    <label className="block mb-1 font-medium text-emerald-400">Destinasi / Kota Tujuan</label>
+                    <input
+                      type="text" placeholder="Contoh: Korea Selatan (Seoul & Nami)"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white"
+                      value={formData.destinationCity}
+                      onChange={e => setFormData({ ...formData, destinationCity: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 font-medium text-emerald-400">
+                      {isLAOnly ? "Cakupan Layanan LA" : "Akomodasi Hotel Tour"}
+                    </label>
+                    <input
+                      type="text" placeholder={isLAOnly ? "Bus, Visa, Handling, Guide" : "Hotel Bintang 4 / Setaraf"}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white"
+                      value={isLAOnly ? formData.laScope : formData.hotelTour}
+                      onChange={e => isLAOnly 
+                        ? setFormData({ ...formData, laScope: e.target.value })
+                        : setFormData({ ...formData, hotelTour: e.target.value })}
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block mb-1 font-medium">Hotel Madinah</label>
-                  <input
-                    type="text" placeholder="Front Taiba / Setaraf"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
-                    value={formData.hotelMadinah}
-                    onChange={e => setFormData({ ...formData, hotelMadinah: e.target.value })}
-                  />
+              ) : (
+                /* INPUTAN UNTUK UMROH / HAJI */
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block mb-1 font-medium">Hotel Makkah</label>
+                    <input
+                      type="text" placeholder="Pullman Zamzam / Setaraf"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
+                      value={formData.hotelMakkah}
+                      onChange={e => setFormData({ ...formData, hotelMakkah: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 font-medium">Hotel Madinah</label>
+                    <input
+                      type="text" placeholder="Front Taiba / Setaraf"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
+                      value={formData.hotelMadinah}
+                      onChange={e => setFormData({ ...formData, hotelMadinah: e.target.value })}
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
+              {/* DYNAMIC HARGA PAKET */}
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
                 <p className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">
-                  Harga Paket per Jamaah (Rp)
+                  Harga Paket per Pax (Rp)
                 </p>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="block mb-1 font-medium">Harga Quad (4 Orang)</label>
-                    <input
-                      type="number" required placeholder="29900000"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white"
-                      value={formData.priceQuad}
-                      onChange={e => setFormData({ ...formData, priceQuad: e.target.value })}
-                    />
+                {isTourOrLA ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block mb-1 font-medium">Harga Utama / Dewasa</label>
+                      <input
+                        type="number" required placeholder="25000000"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white font-bold"
+                        value={formData.priceMain}
+                        onChange={e => setFormData({ ...formData, priceMain: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="block mb-1 font-medium">Harga Anak (Child)</label>
+                      <input
+                        type="number" placeholder="22000000 (Opsional)"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white"
+                        value={formData.priceChild}
+                        onChange={e => setFormData({ ...formData, priceChild: e.target.value })}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block mb-1 font-medium">Harga Triple (3 Orang)</label>
-                    <input
-                      type="number" placeholder="31500000"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white"
-                      value={formData.priceTriple}
-                      onChange={e => setFormData({ ...formData, priceTriple: e.target.value })}
-                    />
+                ) : (
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block mb-1 font-medium">Harga Quad (4 Orang)</label>
+                      <input
+                        type="number" required placeholder="29900000"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white"
+                        value={formData.priceMain}
+                        onChange={e => setFormData({ ...formData, priceMain: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="block mb-1 font-medium">Harga Triple (3 Orang)</label>
+                      <input
+                        type="number" placeholder="31500000"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white"
+                        value={formData.priceTriple}
+                        onChange={e => setFormData({ ...formData, priceTriple: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="block mb-1 font-medium">Harga Double (2 Orang)</label>
+                      <input
+                        type="number" placeholder="33500000"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white"
+                        value={formData.priceDouble}
+                        onChange={e => setFormData({ ...formData, priceDouble: e.target.value })}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block mb-1 font-medium">Harga Double (2 Orang)</label>
-                    <input
-                      type="number" placeholder="33500000"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white"
-                      value={formData.priceDouble}
-                      onChange={e => setFormData({ ...formData, priceDouble: e.target.value })}
-                    />
-                  </div>
-                </div>
+                )}
               </div>
 
               <div className="pt-4 flex justify-end gap-3 border-t border-slate-800">
