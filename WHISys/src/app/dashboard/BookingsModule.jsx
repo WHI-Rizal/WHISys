@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where } from 'firebase/firestore';
-import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer } from 'lucide-react';
+import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle } from 'lucide-react';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -14,6 +14,16 @@ const formatDateDDMMYYYY = (dateString) => {
   const year = date.getFullYear();
   return `${day}/${month}/${year}`;
 };
+
+// Daftar Dokumen Persyaratan Standard Travel
+const REQUIRED_DOCUMENTS = [
+  { key: 'passport', label: 'Paspor Asli (Min. 6 Bln)' },
+  { key: 'ktp_foto', label: 'Fotocopy KTP & Pasfoto 4x6' },
+  { key: 'family_cert', label: 'Buku Nikah / Akta Lahir / KK' },
+  { key: 'vaccine_cert', label: 'Sertifikat Vaksin Meningitis' },
+  { key: 'visa', label: 'Visa Umrah / Tour Issued' },
+  { key: 'ticket', label: 'Tiket Pesawat (Penerbitan Issued)' }
+];
 
 export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
   const isDark = theme === 'dark';
@@ -37,10 +47,23 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
   const [editingBookingId, setEditingBookingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
+  // State Riwayat Setoran
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedBookingForHistory, setSelectedBookingForHistory] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [editingPaymentId, setEditingPaymentId] = useState(null);
+
+  // State Monitoring Dokumen
+  const [showDocModal, setShowDocModal] = useState(false);
+  const [selectedBookingForDoc, setSelectedBookingForDoc] = useState(null);
+  const [docChecklist, setDocChecklist] = useState({
+    passport: false,
+    ktp_foto: false,
+    family_cert: false,
+    vaccine_cert: false,
+    visa: false,
+    ticket: false
+  });
 
   const [formData, setFormData] = useState({
     packageId: '',
@@ -123,6 +146,35 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
     await fetchPaymentHistory(item.id);
     await syncBookingTotalPaid(item.id, item.totalAmount);
     setShowHistoryModal(true);
+  };
+
+  // FUNGSI UNTUK MEMBUKA BUKTI KELENGKAPAN DOKUMEN
+  const handleOpenDocModal = (item) => {
+    setSelectedBookingForDoc(item);
+    setDocChecklist({
+      passport: item.documents?.passport || false,
+      ktp_foto: item.documents?.ktp_foto || false,
+      family_cert: item.documents?.family_cert || false,
+      vaccine_cert: item.documents?.vaccine_cert || false,
+      visa: item.documents?.visa || false,
+      ticket: item.documents?.ticket || false
+    });
+    setShowDocModal(true);
+  };
+
+  // FUNGSI MENYIMPAN STATUS CHECKLIST DOKUMEN KE FIRESTORE
+  const handleSaveDocChecklist = async () => {
+    if (!selectedBookingForDoc) return;
+    try {
+      await updateDoc(doc(db, 'bookings', selectedBookingForDoc.id), {
+        documents: docChecklist,
+        updatedAt: new Date().toISOString()
+      });
+      setShowDocModal(false);
+      fetchData();
+    } catch (err) {
+      alert("Gagal memperbarui status dokumen: " + err.message);
+    }
   };
 
   const handleDeletePayment = async (payId) => {
@@ -467,6 +519,14 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
           totalAmount: price,
           totalPaid: paymentVal,
           paymentStatus: paymentVal >= price ? 'Full Payment' : 'DP Paid',
+          documents: {
+            passport: false,
+            ktp_foto: false,
+            family_cert: false,
+            vaccine_cert: false,
+            visa: false,
+            ticket: false
+          },
           createdAt: new Date().toISOString()
         });
 
@@ -507,7 +567,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
           <h3 className={`text-xl font-bold ${styles.textTitle} flex items-center gap-2`}>
             <BookOpen className="w-5 h-5 text-emerald-500" /> Booking & Manifest Group
           </h3>
-          <p className={`text-xs ${styles.textSub} mt-1`}>Plotting jamaah, alokasi bus, dan pembayaran setoran langsung.</p>
+          <p className={`text-xs ${styles.textSub} mt-1`}>Plotting jamaah, kelengkapan berkas/dokumen, dan setoran pembayaran.</p>
         </div>
         <button
           onClick={handleOpenAddModal}
@@ -538,9 +598,9 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
                 <th className="p-4">Kode / Jamaah</th>
                 <th className="p-4">Paket & Tgl</th>
                 <th className="p-4">Kamar & Bus</th>
-                <th className="p-4">Total Tagihan</th>
-                <th className="p-4">Total Terbayar</th>
-                <th className="p-4">Status Pembayaran</th>
+                <th className="p-4">Kelengkapan Dokumen</th>
+                <th className="p-4">Tagihan & Setor</th>
+                <th className="p-4">Status Bayar</th>
                 <th className="p-4 text-center">Aksi</th>
               </tr>
             </thead>
@@ -550,79 +610,176 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
               ) : filteredBookings.length === 0 ? (
                 <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada data booking.</td></tr>
               ) : (
-                filteredBookings.map((item) => (
-                  <tr key={item.id} className={`${isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'} transition-colors`}>
-                    <td className={`p-4 font-semibold ${styles.textTitle}`}>
-                      {item.jamaahName || '-'}
-                      <span className="block text-[10px] text-emerald-500 font-mono">{item.bookingCode}</span>
-                    </td>
-                    <td className="p-4">
-                      <span className={styles.textTitle}>{item.packageName || '-'}</span>
-                      <span className={`block text-[10px] ${styles.textSub}`}>
-                        {formatDateDDMMYYYY(item.departureDate)}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <span className={`inline-block ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] mr-1`}>{item.roomType}</span>
-                      <span className={`inline-block ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px]`}>{item.busGroup}</span>
-                    </td>
-                    <td className={`p-4 font-bold ${styles.textTitle}`}>
-                      Rp {item.totalAmount ? Number(item.totalAmount).toLocaleString('id-ID') : '0'}
-                    </td>
-                    <td className="p-4 font-bold text-emerald-500">
-                      Rp {item.totalPaid ? Number(item.totalPaid).toLocaleString('id-ID') : '0'}
-                    </td>
-                    <td className="p-4">
-                      {item.paymentStatus === 'Full Payment' ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-full font-semibold">
-                          <CheckCircle className="w-3 h-3" /> Lunas
+                filteredBookings.map((item) => {
+                  // HITUNG PERSENTASE KELENGKAPAN DOKUMEN
+                  const docs = item.documents || {};
+                  const collectedCount = REQUIRED_DOCUMENTS.filter(d => docs[d.key]).length;
+                  const docPercent = Math.round((collectedCount / REQUIRED_DOCUMENTS.length) * 100);
+                  const isDocComplete = collectedCount === REQUIRED_DOCUMENTS.length;
+
+                  return (
+                    <tr key={item.id} className={`${isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'} transition-colors`}>
+                      <td className={`p-4 font-semibold ${styles.textTitle}`}>
+                        {item.jamaahName || '-'}
+                        <span className="block text-[10px] text-emerald-500 font-mono">{item.bookingCode}</span>
+                      </td>
+                      <td className="p-4">
+                        <span className={styles.textTitle}>{item.packageName || '-'}</span>
+                        <span className={`block text-[10px] ${styles.textSub}`}>
+                          {formatDateDDMMYYYY(item.departureDate)}
                         </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-full font-semibold">
-                          <Clock className="w-3 h-3" /> DP / Cicilan
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <button
-                          onClick={() => handleOpenHistory(item)}
-                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
-                          title="Riwayat & Setoran Pembayaran"
-                        >
-                          <Wallet className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handlePrintInvoice(item)}
-                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-amber-500 rounded-lg transition-colors`}
-                          title="Cetak Invoice / Proforma Invoice"
-                        >
-                          <Printer className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleOpenEditModal(item)}
-                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
-                          title="Edit Booking"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteBooking(item)}
-                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                          title="Hapus Booking"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="p-4">
+                        <span className={`inline-block ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] mr-1`}>{item.roomType}</span>
+                        <span className={`inline-block ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px]`}>{item.busGroup}</span>
+                      </td>
+                      
+                      {/* KOLOM MONITORING DOKUMEN */}
+                      <td className="p-4">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`text-[10px] font-bold ${isDocComplete ? 'text-emerald-500' : 'text-amber-500'}`}>
+                            {collectedCount}/{REQUIRED_DOCUMENTS.length} Berkas ({docPercent}%)
+                          </span>
+                        </div>
+                        <div className={`w-28 h-1.5 ${isDark ? 'bg-slate-800' : 'bg-slate-200'} rounded-full overflow-hidden`}>
+                          <div 
+                            className={`h-full ${isDocComplete ? 'bg-emerald-500' : 'bg-amber-500'} transition-all`} 
+                            style={{ width: `${docPercent}%` }}
+                          />
+                        </div>
+                      </td>
+
+                      <td className="p-4">
+                        <div className={`font-bold ${styles.textTitle}`}>
+                          Rp {item.totalAmount ? Number(item.totalAmount).toLocaleString('id-ID') : '0'}
+                        </div>
+                        <div className="text-[10px] font-bold text-emerald-500">
+                          Setor: Rp {item.totalPaid ? Number(item.totalPaid).toLocaleString('id-ID') : '0'}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        {item.paymentStatus === 'Full Payment' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-full font-semibold">
+                            <CheckCircle className="w-3 h-3" /> Lunas
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-full font-semibold">
+                            <Clock className="w-3 h-3" /> DP / Cicilan
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-4 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          {/* TOMBOL MONITORING DOKUMEN */}
+                          <button
+                            onClick={() => handleOpenDocModal(item)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-purple-500 rounded-lg transition-colors`}
+                            title="Monitoring Kelengkapan Berkas Dokumen"
+                          >
+                            <FileCheck className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenHistory(item)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                            title="Riwayat & Setoran Pembayaran"
+                          >
+                            <Wallet className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handlePrintInvoice(item)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-amber-500 rounded-lg transition-colors`}
+                            title="Cetak Invoice / Proforma Invoice"
+                          >
+                            <Printer className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenEditModal(item)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                            title="Edit Booking"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteBooking(item)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                            title="Hapus Booking"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
 
+      {/* MODAL CHECKLIST MONITORING DOKUMEN JAMAAH */}
+      {showDocModal && selectedBookingForDoc && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative`}>
+            <button onClick={() => setShowDocModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <FileCheck className="w-5 h-5 text-purple-500" /> Checklist Dokumen Jamaah
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>
+              Jamaah: <strong className={styles.textTitle}>{selectedBookingForDoc.jamaahName}</strong> • Kode: <span className="font-mono text-emerald-500">{selectedBookingForDoc.bookingCode}</span>
+            </p>
+
+            <div className="space-y-3 mb-6">
+              {REQUIRED_DOCUMENTS.map((docItem) => {
+                const isChecked = docChecklist[docItem.key] || false;
+                return (
+                  <label
+                    key={docItem.key}
+                    onClick={() => setDocChecklist({ ...docChecklist, [docItem.key]: !isChecked })}
+                    className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
+                      isChecked 
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500' 
+                        : `${styles.innerBg} text-slate-400`
+                    }`}
+                  >
+                    <span className="text-xs font-semibold">{docItem.label}</span>
+                    <div className={`w-5 h-5 rounded-md flex items-center justify-center border transition-all ${
+                      isChecked ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-500'
+                    }`}>
+                      {isChecked && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className={`pt-4 flex justify-between items-center border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-500" /> Centang berkas yang telah diserahkan
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowDocModal(false)}
+                  className={`px-3.5 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg text-xs`}
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={handleSaveDocChecklist}
+                  className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-medium"
+                >
+                  Simpan Status Dokumen
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL FORM BOOKING */}
       {showModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto`}>
@@ -747,6 +904,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
         </div>
       )}
 
+      {/* MODAL RIWAYAT PEMBAYARAN */}
       {showHistoryModal && selectedBookingForHistory && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className={`${styles.cardBg} border rounded-2xl w-full max-w-2xl p-6 relative`}>
