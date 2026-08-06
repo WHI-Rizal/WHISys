@@ -164,10 +164,22 @@ export default function BookingsModule({ targetBookingId }) {
   };
 
   const handleDeleteBooking = async (item) => {
-    if (!confirm(`Apakah Anda yakin ingin menghapus booking ${item.bookingCode}?`)) return;
     try {
+      // 1. Cek ketersediaan riwayat pembayaran untuk booking ini
+      const q = query(collection(db, 'payments_income'), where('bookingId', '==', item.id));
+      const paySnap = await getDocs(q);
+
+      if (!paySnap.empty) {
+        alert(`Booking ${item.bookingCode} tidak dapat dihapus karena masih memiliki ${paySnap.size} riwayat transaksi pembayaran di Arus Kas.\n\nSilakan hapus semua riwayat pembayaran jamaah ini terlebih dahulu di menu Arus Kas/Riwayat Setoran.`);
+        return;
+      }
+
+      // 2. Jika riwayat pembayaran sudah kosong, jalankan konfirmasi dan hapus booking
+      if (!confirm(`Apakah Anda yakin ingin menghapus booking ${item.bookingCode}?`)) return;
+
       await deleteDoc(doc(db, 'bookings', item.id));
 
+      // 3. Kembalikan kuota seat paket
       if (item.packageId) {
         const pkgRef = doc(db, 'packages', item.packageId);
         const pkgSnap = await getDoc(pkgRef);
@@ -176,6 +188,7 @@ export default function BookingsModule({ targetBookingId }) {
           await updateDoc(pkgRef, { quotaRemaining: Number(currentQuota) + 1 });
         }
       }
+
       fetchData();
     } catch (err) {
       alert("Gagal menghapus booking: " + err.message);
@@ -183,122 +196,122 @@ export default function BookingsModule({ targetBookingId }) {
   };
 
   const handlePrintInvoice = (booking) => {
-  const isLunas = booking.paymentStatus === 'Full Payment';
-  const totalAmount = Number(booking.totalAmount) || 0;
-  const totalPaid = Number(booking.totalPaid) || 0;
-  const sisaTagihan = totalAmount - totalPaid;
+    const isLunas = booking.paymentStatus === 'Full Payment';
+    const totalAmount = Number(booking.totalAmount) || 0;
+    const totalPaid = Number(booking.totalPaid) || 0;
+    const sisaTagihan = totalAmount - totalPaid;
 
-  const printWindow = window.open('', '_blank');
-  const docContent = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>${isLunas ? 'INVOICE' : 'PROFORMA INVOICE'} - ${booking.bookingCode}</title>
-        <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📄</text></svg>">
-        
-        <style>
-          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; margin: 0; padding: 40px; background-color: #fff; }
-          .invoice-box { max-width: 800px; margin: auto; border: 1px solid #e2e8f0; padding: 30px; border-radius: 12px; }
-          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #059669; padding-bottom: 20px; margin-bottom: 30px; }
-          .company-title { font-size: 24px; font-weight: bold; color: #065f46; margin: 0; }
-          .invoice-type { font-size: 20px; font-weight: 800; text-transform: uppercase; color: ${isLunas ? '#059669' : '#d97706'}; text-align: right; }
-          .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; margin-top: 5px; background-color: ${isLunas ? '#d1fae5' : '#fef3c7'}; color: ${isLunas ? '#065f46' : '#92400e'}; }
-          .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
-          .meta-card { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #f1f5f9; }
-          .meta-card h4 { margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; }
-          .meta-card p { margin: 2px 0; font-size: 13px; font-weight: 600; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-          th { background-color: #f1f5f9; text-align: left; padding: 12px; font-size: 12px; text-transform: uppercase; color: #475569; border-bottom: 2px solid #cbd5e1; }
-          td { padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
-          .summary-table { width: 300px; margin-left: auto; margin-bottom: 40px; }
-          .summary-table td { padding: 6px 12px; }
-          .summary-table .total-row { font-size: 16px; font-weight: bold; color: #0f172a; border-top: 2px solid #0284c7; }
-          .footer { text-align: center; border-top: 1px solid #e2e8f0; pt-20px; padding-top: 20px; font-size: 11px; color: #94a3b8; }
-          @media print {
-            body { padding: 0; }
-            .invoice-box { border: none; padding: 0; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="invoice-box">
-          <div class="header">
-            <div>
-              <h1 class="company-title">WHISys Executive Travel</h1>
-              <p style="margin: 3px 0 0 0; font-size: 12px; color: #64748b;">Layanan Penyelenggara Umrah, Haji & Wisata Halal</p>
+    const printWindow = window.open('', '_blank');
+    const docContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${isLunas ? 'INVOICE' : 'PROFORMA INVOICE'} - ${booking.bookingCode}</title>
+          <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📄</text></svg>">
+          
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; margin: 0; padding: 40px; background-color: #fff; }
+            .invoice-box { max-width: 800px; margin: auto; border: 1px solid #e2e8f0; padding: 30px; border-radius: 12px; }
+            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #059669; padding-bottom: 20px; margin-bottom: 30px; }
+            .company-title { font-size: 24px; font-weight: bold; color: #065f46; margin: 0; }
+            .invoice-type { font-size: 20px; font-weight: 800; text-transform: uppercase; color: ${isLunas ? '#059669' : '#d97706'}; text-align: right; }
+            .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; margin-top: 5px; background-color: ${isLunas ? '#d1fae5' : '#fef3c7'}; color: ${isLunas ? '#065f46' : '#92400e'}; }
+            .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+            .meta-card { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #f1f5f9; }
+            .meta-card h4 { margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; }
+            .meta-card p { margin: 2px 0; font-size: 13px; font-weight: 600; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            th { background-color: #f1f5f9; text-align: left; padding: 12px; font-size: 12px; text-transform: uppercase; color: #475569; border-bottom: 2px solid #cbd5e1; }
+            td { padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+            .summary-table { width: 300px; margin-left: auto; margin-bottom: 40px; }
+            .summary-table td { padding: 6px 12px; }
+            .summary-table .total-row { font-size: 16px; font-weight: bold; color: #0f172a; border-top: 2px solid #0284c7; }
+            .footer { text-align: center; border-top: 1px solid #e2e8f0; pt-20px; padding-top: 20px; font-size: 11px; color: #94a3b8; }
+            @media print {
+              body { padding: 0; }
+              .invoice-box { border: none; padding: 0; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="invoice-box">
+            <div class="header">
+              <div>
+                <h1 class="company-title">WHISys Executive Travel</h1>
+                <p style="margin: 3px 0 0 0; font-size: 12px; color: #64748b;">Layanan Penyelenggara Umrah, Haji & Wisata Halal</p>
+              </div>
+              <div>
+                <div class="invoice-type">${isLunas ? 'INVOICE' : 'PROFORMA INVOICE'}</div>
+                <div class="badge">${isLunas ? 'LUNAS / PAID' : 'BELUM LUNAS / UNPAID'}</div>
+              </div>
             </div>
-            <div>
-              <div class="invoice-type">${isLunas ? 'INVOICE' : 'PROFORMA INVOICE'}</div>
-              <div class="badge">${isLunas ? 'LUNAS / PAID' : 'BELUM LUNAS / UNPAID'}</div>
-            </div>
-          </div>
 
-          <div class="meta-grid">
-            <div class="meta-card">
-              <h4>Ditagihkan Kepada:</h4>
-              <p style="font-size: 15px; color: #0f172a;">${booking.jamaahName || '-'}</p>
-              <p style="color: #64748b; font-weight: normal;">No. Paspor: ${booking.passportNumber || '-'}</p>
+            <div class="meta-grid">
+              <div class="meta-card">
+                <h4>Ditagihkan Kepada:</h4>
+                <p style="font-size: 15px; color: #0f172a;">${booking.jamaahName || '-'}</p>
+                <p style="color: #64748b; font-weight: normal;">No. Paspor: ${booking.passportNumber || '-'}</p>
+              </div>
+              <div class="meta-card">
+                <h4>Rincian Tagihan:</h4>
+                <p>Kode Booking: <span style="color: #059669; font-family: monospace;">${booking.bookingCode}</span></p>
+                <p>Tanggal Diterbitkan: ${new Date().toLocaleDateString('id-ID')}</p>
+              </div>
             </div>
-            <div class="meta-card">
-              <h4>Rincian Tagihan:</h4>
-              <p>Kode Booking: <span style="color: #059669; font-family: monospace;">${booking.bookingCode}</span></p>
-              <p>Tanggal Diterbitkan: ${new Date().toLocaleDateString('id-ID')}</p>
-            </div>
-          </div>
 
-          <table>
-            <thead>
+            <table>
+              <thead>
+                <tr>
+                  <th>Program Paket Travel</th>
+                  <th>Tgl Keberangkatan</th>
+                  <th>Kamar / Bus</th>
+                  <th style="text-align: right;">Jumlah Tagihan</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>${booking.packageName || '-'}</strong></td>
+                  <td>${formatDateDDMMYYYY(booking.departureDate)}</td>
+                  <td>${booking.roomType} / ${booking.busGroup}</td>
+                  <td style="text-align: right; font-weight: bold;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <table class="summary-table">
               <tr>
-                <th>Program Paket Travel</th>
-                <th>Tgl Keberangkatan</th>
-                <th>Kamar / Bus</th>
-                <th style="text-align: right;">Jumlah Tagihan</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>${booking.packageName || '-'}</strong></td>
-                <td>${formatDateDDMMYYYY(booking.departureDate)}</td>
-                <td>${booking.roomType} / ${booking.busGroup}</td>
+                <td>Total Tagihan:</td>
                 <td style="text-align: right; font-weight: bold;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
               </tr>
-            </tbody>
-          </table>
+              <tr>
+                <td>Total Diterima (DP):</td>
+                <td style="text-align: right; font-weight: bold; color: #059669;">Rp ${totalPaid.toLocaleString('id-ID')}</td>
+              </tr>
+              <tr class="total-row">
+                <td>Sisa Pembayaran:</td>
+                <td style="text-align: right; color: ${sisaTagihan > 0 ? '#d97706' : '#059669'};">
+                  Rp ${sisaTagihan.toLocaleString('id-ID')}
+                </td>
+              </tr>
+            </table>
 
-          <table class="summary-table">
-            <tr>
-              <td>Total Tagihan:</td>
-              <td style="text-align: right; font-weight: bold;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
-            </tr>
-            <tr>
-              <td>Total Diterima (DP):</td>
-              <td style="text-align: right; font-weight: bold; color: #059669;">Rp ${totalPaid.toLocaleString('id-ID')}</td>
-            </tr>
-            <tr class="total-row">
-              <td>Sisa Pembayaran:</td>
-              <td style="text-align: right; color: ${sisaTagihan > 0 ? '#d97706' : '#059669'};">
-                Rp ${sisaTagihan.toLocaleString('id-ID')}
-              </td>
-            </tr>
-          </table>
-
-          <div class="footer">
-            <p>Terima kasih atas kepercayaan Anda memilih jasa perjalanan ibadah bersama kami.</p>
-            <p>Dokumen ini dicetak otomatis oleh sistem ERP WHISys pada ${new Date().toLocaleString('id-ID')}.</p>
+            <div class="footer">
+              <p>Terima kasih atas kepercayaan Anda memilih jasa perjalanan ibadah bersama kami.</p>
+              <p>Dokumen ini dicetak otomatis oleh sistem ERP WHISys pada ${new Date().toLocaleString('id-ID')}.</p>
+            </div>
           </div>
-        </div>
-        <script>
-          window.onload = function() {
-            window.print();
-          }
-        </script>
-      </body>
-    </html>
-  `;
+          <script>
+            window.onload = function() {
+              window.print();
+            }
+          </script>
+        </body>
+      </html>
+    `;
 
-  printWindow.document.write(docContent);
-  printWindow.document.close();
-};
+    printWindow.document.write(docContent);
+    printWindow.document.close();
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -489,31 +502,27 @@ export default function BookingsModule({ targetBookingId }) {
                     </td>
                     <td className="p-4 text-center">
                       <div className="flex items-center justify-center gap-2">
-                       <button
-  onClick={() => handleOpenHistory(item)}
-  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-blue-400 rounded-lg transition-colors"
-  title="Riwayat & Setoran Pembayaran"
->
-  <Wallet className="w-4 h-4" />
-</button>
-
-{/* === SISIPKAN TOMBOL CETAK DI SINI (BARIS BARU) === */}
-<button
-  onClick={() => handlePrintInvoice(item)}
-  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded-lg transition-colors"
-  title="Cetak Invoice / Proforma Invoice"
->
-  <Printer className="w-4 h-4" />
-</button>
-{/* ================================================= */}
-
-<button
-  onClick={() => handleOpenEditModal(item)}
-  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-lg transition-colors"
-  title="Edit Booking"
->
-  <Edit className="w-4 h-4" />
-</button>
+                        <button
+                          onClick={() => handleOpenHistory(item)}
+                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-blue-400 rounded-lg transition-colors"
+                          title="Riwayat & Setoran Pembayaran"
+                        >
+                          <Wallet className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handlePrintInvoice(item)}
+                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded-lg transition-colors"
+                          title="Cetak Invoice / Proforma Invoice"
+                        >
+                          <Printer className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleOpenEditModal(item)}
+                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-lg transition-colors"
+                          title="Edit Booking"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
                         <button
                           onClick={() => handleDeleteBooking(item)}
                           className="p-1.5 bg-slate-800 hover:bg-slate-700 text-rose-400 rounded-lg transition-colors"
