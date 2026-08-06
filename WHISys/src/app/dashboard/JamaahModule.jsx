@@ -60,9 +60,9 @@ export default function JamaahModule({ theme = 'dark' }) {
     fetchJamaah();
   }, []);
 
-  // FUNGSI RUNNING NUMBER UNIK (AUTO INCREMENT DARI CST002000)
+  // FUNGSI RUNNING NUMBER UNIK (AUTO INCREMENT DIMULAI DARI CST002001)
   const getNextCustomerCode = () => {
-    let maxNum = 1999; // Base start sebelum 2000
+    let maxNum = 2000; // Base start di angka 2000
 
     jamaahList.forEach((j) => {
       if (j.customerCode && j.customerCode.startsWith('CST')) {
@@ -205,7 +205,7 @@ export default function JamaahModule({ theme = 'dark' }) {
                   return (
                     <tr key={item.id} className={`${isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'} transition-colors`}>
                       <td className="p-4 font-mono font-bold text-emerald-500">
-                        {item.customerCode || 'CST002000'}
+                        {item.customerCode || 'CST002001'}
                       </td>
                       <td className={`p-4 font-semibold ${styles.textTitle}`}>
                         {item.fullName}
