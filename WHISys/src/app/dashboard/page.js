@@ -6,7 +6,9 @@ import {
   Plane, 
   Users, 
   BookOpen, 
-  Wallet, 
+  Wallet,
+  Sun,
+  Moon,
   PackageCheck, 
   UserCheck, 
   Sparkles,
@@ -14,8 +16,7 @@ import {
   Plus, 
   Calendar,
   AlertCircle,
-  ShieldCheck,
-  Palette
+  ShieldCheck
 } from 'lucide-react';
 import { auth, db } from '../../lib/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -42,53 +43,51 @@ export default function DashboardPage() {
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Dynamic Theme State ('emerald', 'gold', 'indigo')
-  const [theme, setTheme] = useState('emerald');
+  // Toggle Theme State (2 Mode: 'dark' atau 'light')
+  const [theme, setTheme] = useState('dark');
 
-  // TARUH KODE DI SINI (State untuk navigasi antar modul):
+  // State untuk navigasi antar modul
   const [selectedBookingForModal, setSelectedBookingForModal] = useState(null);
 
-  // Load saved theme from LocalStorage on mount
+  // Load saved theme dari LocalStorage saat pertama kali dimuat
   useEffect(() => {
     const savedTheme = localStorage.getItem('whisys_theme');
-    if (savedTheme) {
+    if (savedTheme === 'light' || savedTheme === 'dark') {
       setTheme(savedTheme);
     }
   }, []);
 
-  const handleThemeChange = (newTheme) => {
+  const toggleTheme = () => {
+    const newTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(newTheme);
     localStorage.setItem('whisys_theme', newTheme);
   };
 
-  // Dynamic Theme Config
+  // Configuration Style untuk Dark Mode & Light Mode
   const themeStyles = {
-    emerald: {
+    dark: {
       bg: 'bg-slate-950 text-slate-100',
       sidebar: 'bg-slate-900 border-slate-800',
       card: 'bg-slate-900 border-slate-800',
+      headingText: 'text-white',
+      subText: 'text-slate-400',
       accentText: 'text-emerald-400',
       accentBg: 'bg-emerald-600 hover:bg-emerald-500',
-      accentBorder: 'border-emerald-500/20',
       activeMenu: 'bg-emerald-600 text-white shadow-emerald-900/20',
+      border: 'border-slate-800',
+      inputBg: 'bg-slate-950 text-slate-200 border-slate-800'
     },
-    gold: {
-      bg: 'bg-[#090a0f] text-zinc-100',
-      sidebar: 'bg-[#12141d] border-zinc-800',
-      card: 'bg-[#12141d] border-zinc-800',
-      accentText: 'text-amber-400',
-      accentBg: 'bg-amber-600 hover:bg-amber-500',
-      accentBorder: 'border-amber-500/20',
-      activeMenu: 'bg-amber-600 text-white shadow-amber-950/30',
-    },
-    indigo: {
-      bg: 'bg-[#0f172a] text-slate-100',
-      sidebar: 'bg-[#1e293b] border-slate-700/60',
-      card: 'bg-[#1e293b] border-slate-700/60',
-      accentText: 'text-indigo-400',
-      accentBg: 'bg-indigo-600 hover:bg-indigo-500',
-      accentBorder: 'border-indigo-500/20',
-      activeMenu: 'bg-indigo-600 text-white shadow-indigo-950/30',
+    light: {
+      bg: 'bg-slate-100 text-slate-800',
+      sidebar: 'bg-white border-slate-200',
+      card: 'bg-white border-slate-200 shadow-sm',
+      headingText: 'text-slate-900',
+      subText: 'text-slate-500',
+      accentText: 'text-emerald-600',
+      accentBg: 'bg-emerald-600 hover:bg-emerald-500',
+      activeMenu: 'bg-emerald-600 text-white shadow-emerald-600/20',
+      border: 'border-slate-200',
+      inputBg: 'bg-white text-slate-800 border-slate-300'
     }
   };
 
@@ -190,7 +189,7 @@ export default function DashboardPage() {
       <div className={`flex h-screen ${currentTheme.bg} items-center justify-center font-sans`}>
         <div className="flex items-center gap-3">
           <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-slate-400 text-sm">Memverifikasi Sesi & Memuat Dashboard...</p>
+          <p className={`${currentTheme.subText} text-sm`}>Memverifikasi Sesi & Memuat Dashboard...</p>
         </div>
       </div>
     );
@@ -202,13 +201,13 @@ export default function DashboardPage() {
       {/* 1. SIDEBAR NAVIGASI ERP */}
       <aside className={`w-64 ${currentTheme.sidebar} border-r flex flex-col justify-between p-4 shrink-0 transition-colors duration-300`}>
         <div>
-          <div className="flex items-center gap-3 px-3 py-4 mb-6 border-b border-slate-800/80">
+          <div className={`flex items-center gap-3 px-3 py-4 mb-6 border-b ${currentTheme.border}`}>
             <div className={`p-2 ${currentTheme.accentBg} rounded-lg text-white`}>
               <Plane className="w-6 h-6" />
             </div>
             <div>
               <h1 className={`font-bold text-lg ${currentTheme.accentText} leading-none`}>WHISys</h1>
-              <span className="text-xs text-slate-400">Travel & Halal ERP</span>
+              <span className={`text-xs ${currentTheme.subText}`}>Travel & Halal ERP</span>
             </div>
           </div>
 
@@ -220,6 +219,7 @@ export default function DashboardPage() {
               label="Dashboard Utama" 
               active={activeMenu === 'dashboard'} 
               activeClass={currentTheme.activeMenu}
+              subTextClass={currentTheme.subText}
               onClick={() => { changeMenu('dashboard'); fetchDashboardData(); }} 
             />
             
@@ -228,6 +228,7 @@ export default function DashboardPage() {
               label="Paket Travel & LA" 
               active={activeMenu === 'packages'} 
               activeClass={currentTheme.activeMenu}
+              subTextClass={currentTheme.subText}
               onClick={() => changeMenu('packages')} 
             />
 
@@ -236,6 +237,7 @@ export default function DashboardPage() {
               label="Data Master Jamaah" 
               active={activeMenu === 'jamaah'} 
               activeClass={currentTheme.activeMenu}
+              subTextClass={currentTheme.subText}
               onClick={() => changeMenu('jamaah')} 
             />
 
@@ -244,6 +246,7 @@ export default function DashboardPage() {
               label="Booking & Manifest" 
               active={activeMenu === 'bookings'} 
               activeClass={currentTheme.activeMenu}
+              subTextClass={currentTheme.subText}
               onClick={() => changeMenu('bookings')} 
             />
 
@@ -254,6 +257,7 @@ export default function DashboardPage() {
               label="Keuangan & Pelunasan" 
               active={activeMenu === 'finance'} 
               activeClass={currentTheme.activeMenu}
+              subTextClass={currentTheme.subText}
               onClick={() => changeMenu('finance')} 
             />
 
@@ -262,6 +266,7 @@ export default function DashboardPage() {
               label="Perlengkapan Jamaah" 
               active={activeMenu === 'equipment'} 
               activeClass={currentTheme.activeMenu}
+              subTextClass={currentTheme.subText}
               onClick={() => changeMenu('equipment')} 
             />
 
@@ -270,6 +275,7 @@ export default function DashboardPage() {
               label="Mitra & Agen" 
               active={activeMenu === 'agents'} 
               activeClass={currentTheme.activeMenu}
+              subTextClass={currentTheme.subText}
               onClick={() => changeMenu('agents')} 
             />
 
@@ -280,26 +286,27 @@ export default function DashboardPage() {
               label="AI Business Intelligence" 
               active={activeMenu === 'ai-analyzer'} 
               activeClass={currentTheme.activeMenu}
+              subTextClass={currentTheme.subText}
               onClick={() => changeMenu('ai-analyzer')} 
             />
           </nav>
         </div>
 
-        <div className="border-t border-slate-800/80 pt-4 flex items-center justify-between px-2">
+        <div className={`border-t ${currentTheme.border} pt-4 flex items-center justify-between px-2`}>
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className={`w-8 h-8 rounded-full ${currentTheme.accentText} bg-white/5 flex items-center justify-center font-bold text-xs uppercase shrink-0`}>
+            <div className={`w-8 h-8 rounded-full ${currentTheme.accentText} bg-emerald-500/10 flex items-center justify-center font-bold text-xs uppercase shrink-0`}>
               {userProfile?.role?.[0] || 'A'}
             </div>
             <div className="truncate">
-              <p className="text-sm font-medium text-slate-200 truncate">{userProfile?.fullName || userProfile?.email}</p>
-              <span className={`inline-flex items-center gap-1 text-[10px] ${currentTheme.accentText} font-semibold uppercase bg-white/5 px-1.5 py-0.5 rounded border border-white/10`}>
+              <p className={`text-sm font-medium ${currentTheme.headingText} truncate`}>{userProfile?.fullName || userProfile?.email}</p>
+              <span className={`inline-flex items-center gap-1 text-[10px] ${currentTheme.accentText} font-semibold uppercase bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20`}>
                 <ShieldCheck className="w-3 h-3" /> {userProfile?.role || 'Admin'}
               </span>
             </div>
           </div>
           <button 
             onClick={handleLogout} 
-            className="text-slate-400 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-slate-800"
+            className="text-slate-400 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-slate-800/10"
             title="Keluar / Logout"
           >
             <LogOut className="w-5 h-5" />
@@ -310,33 +317,36 @@ export default function DashboardPage() {
       {/* 2. AREA KONTEN UTAMA */}
       <main className="flex-1 overflow-y-auto p-8">
         
-        {/* HEADER BAR & SWITCHER WARNA */}
+        {/* HEADER BAR & SWITCHER MODE TERANG/GELAP */}
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
-            <h2 className="text-2xl font-bold text-white">WHISys ERP Executive Board</h2>
-            <p className="text-slate-400 text-sm">Sistem terpadu operasional Umrah, Haji, & Wisata Halal.</p>
+            <h2 className={`text-2xl font-bold ${currentTheme.headingText}`}>WHISys ERP Executive Board</h2>
+            <p className={`${currentTheme.subText} text-sm`}>Sistem terpadu operasional Umrah, Haji, & Wisata Halal.</p>
           </div>
 
           <div className="flex items-center gap-3">
-            {/* SWITCHER TEMA KECIL */}
-            <div className="flex items-center gap-1.5 bg-black/40 border border-white/10 p-1 rounded-lg">
-              <Palette className="w-3.5 h-3.5 text-slate-400 ml-1.5 mr-0.5" />
-              <button
-                onClick={() => handleThemeChange('emerald')}
-                title="Tema Emerald Executive"
-                className={`w-5 h-5 rounded-md bg-emerald-500 border transition-all ${theme === 'emerald' ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'}`}
-              />
-              <button
-                onClick={() => handleThemeChange('gold')}
-                title="Tema Royal Gold VIP"
-                className={`w-5 h-5 rounded-md bg-amber-500 border transition-all ${theme === 'gold' ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'}`}
-              />
-              <button
-                onClick={() => handleThemeChange('indigo')}
-                title="Tema Deep Tech Indigo"
-                className={`w-5 h-5 rounded-md bg-indigo-500 border transition-all ${theme === 'indigo' ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'}`}
-              />
-            </div>
+            {/* TOGGLE BUTTON: MODE TERANG / MODE GELAP */}
+            <button
+              onClick={toggleTheme}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all text-xs font-semibold ${
+                theme === 'dark' 
+                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-800' 
+                  : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300 shadow-sm'
+              }`}
+              title={theme === 'dark' ? 'Ganti ke Mode Terang (Light Mode)' : 'Ganti ke Mode Gelap (Dark Mode)'}
+            >
+              {theme === 'dark' ? (
+                <>
+                  <Sun className="w-4 h-4 text-amber-400" />
+                  <span>Mode Terang</span>
+                </>
+              ) : (
+                <>
+                  <Moon className="w-4 h-4 text-indigo-600" />
+                  <span>Mode Gelap</span>
+                </>
+              )}
+            </button>
 
             <button 
               onClick={() => changeMenu('jamaah')}
@@ -353,8 +363,8 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
               <div className={`${currentTheme.card} p-5 rounded-xl flex items-center justify-between border transition-colors`}>
                 <div>
-                  <p className="text-xs font-medium text-slate-400 mb-1">Total Jamaah Terdaftar</p>
-                  <h3 className="text-2xl font-bold text-white">{realStats.totalJamaah} Orang</h3>
+                  <p className={`text-xs font-medium ${currentTheme.subText} mb-1`}>Total Jamaah Terdaftar</p>
+                  <h3 className={`text-2xl font-bold ${currentTheme.headingText}`}>{realStats.totalJamaah} Orang</h3>
                 </div>
                 <div className="p-3 rounded-lg bg-blue-500/10 text-blue-400">
                   <Users className="w-6 h-6" />
@@ -363,17 +373,17 @@ export default function DashboardPage() {
 
               <div className={`${currentTheme.card} p-5 rounded-xl flex items-center justify-between border transition-colors`}>
                 <div>
-                  <p className="text-xs font-medium text-slate-400 mb-1">Group & Paket Keberangkatan</p>
+                  <p className={`text-xs font-medium ${currentTheme.subText} mb-1`}>Group & Paket Keberangkatan</p>
                   <h3 className={`text-2xl font-bold ${currentTheme.accentText}`}>{realStats.totalPackages} Program</h3>
                 </div>
-                <div className={`p-3 rounded-lg bg-white/5 ${currentTheme.accentText}`}>
+                <div className={`p-3 rounded-lg bg-emerald-500/10 ${currentTheme.accentText}`}>
                   <Plane className="w-6 h-6" />
                 </div>
               </div>
 
               <div className={`${currentTheme.card} p-5 rounded-xl flex items-center justify-between border transition-colors`}>
                 <div>
-                  <p className="text-xs font-medium text-slate-400 mb-1">Paspor &lt; 6 Bulan Expired</p>
+                  <p className={`text-xs font-medium ${currentTheme.subText} mb-1`}>Paspor &lt; 6 Bulan Expired</p>
                   <h3 className="text-2xl font-bold text-amber-400">{realStats.expiringPassportsCount} Paspor</h3>
                 </div>
                 <div className="p-3 rounded-lg bg-amber-500/10 text-amber-400">
@@ -383,7 +393,7 @@ export default function DashboardPage() {
 
               <div className={`${currentTheme.card} p-5 rounded-xl flex items-center justify-between border transition-colors`}>
                 <div>
-                  <p className="text-xs font-medium text-slate-400 mb-1">Status Sistem</p>
+                  <p className={`text-xs font-medium ${currentTheme.subText} mb-1`}>Status Sistem</p>
                   <h3 className={`text-lg font-bold ${currentTheme.accentText}`}>Firestore Connected</h3>
                 </div>
                 <div className="p-3 rounded-lg bg-purple-500/10 text-purple-400">
@@ -396,10 +406,10 @@ export default function DashboardPage() {
               <div className={`lg:col-span-2 ${currentTheme.card} border rounded-xl p-6 transition-colors`}>
                 <div className="flex items-center justify-between mb-6">
                   <div>
-                    <h3 className="font-bold text-white flex items-center gap-2">
+                    <h3 className={`font-bold ${currentTheme.headingText} flex items-center gap-2`}>
                       <Calendar className={`w-5 h-5 ${currentTheme.accentText}`} /> Program Keberangkatan Mendatang
                     </h3>
-                    <p className="text-xs text-slate-400">Data terhubung langsung dari modul Paket Travel</p>
+                    <p className={`text-xs ${currentTheme.subText}`}>Data terhubung langsung dari modul Paket Travel</p>
                   </div>
                   <button onClick={() => changeMenu('packages')} className={`text-xs ${currentTheme.accentText} hover:underline`}>
                     + Buat Paket Baru
@@ -408,12 +418,12 @@ export default function DashboardPage() {
 
                 <div className="overflow-x-auto">
                   {upcomingPackages.length === 0 ? (
-                    <div className="p-8 text-center text-slate-500 text-xs border border-dashed border-slate-800 rounded-lg">
+                    <div className={`p-8 text-center ${currentTheme.subText} text-xs border border-dashed ${currentTheme.border} rounded-lg`}>
                       Belum ada paket travel terdaftar di database.
                     </div>
                   ) : (
-                    <table className="w-full text-left text-sm text-slate-300">
-                      <thead className="bg-white/5 text-slate-400 text-xs uppercase">
+                    <table className={`w-full text-left text-sm ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                      <thead className={`${theme === 'dark' ? 'bg-white/5' : 'bg-slate-100'} ${currentTheme.subText} text-xs uppercase`}>
                         <tr>
                           <th className="p-3 rounded-l-lg">Kode / Paket</th>
                           <th className="p-3">Tanggal</th>
@@ -421,12 +431,12 @@ export default function DashboardPage() {
                           <th className="p-3 rounded-r-lg">Sisa Seat</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-white/5 text-xs">
+                      <tbody className={`divide-y ${theme === 'dark' ? 'divide-white/5' : 'divide-slate-200'} text-xs`}>
                         {upcomingPackages.map((pkg) => (
-                          <tr key={pkg.id} className="hover:bg-white/5 transition-colors">
-                            <td className="p-3 font-semibold text-white">
+                          <tr key={pkg.id} className={`${theme === 'dark' ? 'hover:bg-white/5' : 'hover:bg-slate-50'} transition-colors`}>
+                            <td className={`p-3 font-semibold ${currentTheme.headingText}`}>
                               {pkg.name}
-                              <span className="block text-[10px] font-normal text-slate-400">{pkg.code}</span>
+                              <span className={`block text-[10px] font-normal ${currentTheme.subText}`}>{pkg.code}</span>
                             </td>
                             <td className="p-3">{formatDateDDMMYYYY(pkg.departureDate)}</td>
                             <td className="p-3">{pkg.airline}</td>
@@ -441,27 +451,27 @@ export default function DashboardPage() {
 
               <div className={`${currentTheme.card} border rounded-xl p-6 flex flex-col justify-between transition-colors`}>
                 <div>
-                  <h3 className="font-bold text-white mb-4 flex items-center gap-2">
+                  <h3 className={`font-bold ${currentTheme.headingText} mb-4 flex items-center gap-2`}>
                     <AlertCircle className="w-5 h-5 text-amber-400" /> Peringatan Sistem
                   </h3>
                   
                   <div className="space-y-4">
                     {realStats.expiringPassportsCount > 0 ? (
                       <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs">
-                        <p className="font-semibold text-amber-400 mb-1">{realStats.expiringPassportsCount} Paspor Perlu Perpanjangan</p>
-                        <p className="text-slate-300">Ada paspor jamaah yang akan expired kurang dari 6 bulan.</p>
+                        <p className="font-semibold text-amber-500 mb-1">{realStats.expiringPassportsCount} Paspor Perlu Perpanjangan</p>
+                        <p className={currentTheme.subText}>Ada paspor jamaah yang akan expired kurang dari 6 bulan.</p>
                       </div>
                     ) : (
                       <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-xs">
-                        <p className="font-semibold text-emerald-400 mb-1">Masa Berlaku Paspor Aman</p>
-                        <p className="text-slate-300">Tidak ada paspor jamaah yang mendekati masa kadaluarsa.</p>
+                        <p className="font-semibold text-emerald-500 mb-1">Masa Berlaku Paspor Aman</p>
+                        <p className={currentTheme.subText}>Tidak ada paspor jamaah yang mendekati masa kadaluarsa.</p>
                       </div>
                     )}
                   </div>
                 </div>
 
-                <div className="mt-6 pt-4 border-t border-slate-800 text-center">
-                  <span className="text-xs text-slate-500">WHISys ERP Platform • Live Firestore DB</span>
+                <div className={`mt-6 pt-4 border-t ${currentTheme.border} text-center`}>
+                  <span className={`text-xs ${currentTheme.subText}`}>WHISys ERP Platform • Live Firestore DB</span>
                 </div>
               </div>
             </div>
@@ -476,18 +486,18 @@ export default function DashboardPage() {
 
         {/* MODUL BOOKING & MANIFEST */}
         {activeMenu === 'bookings' && (
-         <BookingsModule targetBookingId={selectedBookingForModal} />
+          <BookingsModule targetBookingId={selectedBookingForModal} />
         )}
 
         {/* MODUL KEUANGAN & PELUNASAN */}
         {activeMenu === 'finance' && (
-  <FinanceModule
-    onSelectBooking={(bookingId) => {
-      setSelectedBookingForModal(bookingId);
-      changeMenu('bookings');
-    }}
-  />
-)}
+          <FinanceModule
+            onSelectBooking={(bookingId) => {
+              setSelectedBookingForModal(bookingId);
+              changeMenu('bookings');
+            }}
+          />
+        )}
 
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
         {activeMenu !== 'dashboard' && 
@@ -496,11 +506,11 @@ export default function DashboardPage() {
          activeMenu !== 'bookings' && 
          activeMenu !== 'finance' && (
           <div className={`${currentTheme.card} border rounded-xl p-12 text-center`}>
-            <div className="p-4 bg-white/5 text-slate-300 w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center">
+            <div className={`p-4 ${theme === 'dark' ? 'bg-white/5' : 'bg-slate-100'} ${currentTheme.subText} w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center`}>
               <Plane className="w-8 h-8" />
             </div>
-            <h3 className="text-xl font-bold text-white mb-2">Modul {activeMenu.toUpperCase()}</h3>
-            <p className="text-slate-400 text-sm max-w-md mx-auto">
+            <h3 className={`text-xl font-bold ${currentTheme.headingText} mb-2`}>Modul {activeMenu.toUpperCase()}</h3>
+            <p className={`${currentTheme.subText} text-sm max-w-md mx-auto`}>
               Fitur ERP ini sedang disiapkan untuk menghubungkan data langsung ke koleksi Firebase Firestore WHISys.
             </p>
           </div>
@@ -511,14 +521,14 @@ export default function DashboardPage() {
   );
 }
 
-function SidebarItem({ icon: Icon, label, active, activeClass, onClick }) {
+function SidebarItem({ icon: Icon, label, active, activeClass, subTextClass, onClick }) {
   return (
     <button
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
         active 
           ? `${activeClass} shadow-md` 
-          : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+          : `${subTextClass} hover:bg-emerald-500/10 hover:text-emerald-500`
       }`}
     >
       <Icon className="w-4 h-4" />
