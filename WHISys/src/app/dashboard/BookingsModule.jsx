@@ -155,10 +155,10 @@ Terima kasih telah mendaftar program perjalanan ibadah bersama kami. Berikut rin
 • *Status Pembayaran:* ${isLunas ? '✅ LUNAS' : '⏳ DP Paid'}
 
 📌 *CATATAN BERKAS DOKUMEN:*
-Mohon melengkapi 8 berkas dokumen (Paspor, KTP/Foto, Buku Nikah, Surat Sponsor, Rekening Koran, Vaksin Meningitis, Visa (Jika sudah ada), & Tiket (Jika sudah ada)).
+Mohon melengkapi 8 berkas dokumen (Paspor, KTP/Foto, Buku Nikah, Surat Sponsor, Rekening Koran, Vaksin Meningitis, Visa, & Tiket).
 
 Apabila ada pertanyaan lebih lanjut, silakan hubungi tim kami.
-Terima kasih.';
+Terima kasih.`;
 
     const encodedMessage = encodeURIComponent(message);
     window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMessage}`, '_blank');
