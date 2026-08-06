@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, RefreshCw, X } from 'lucide-react';
 
 // Helper Format Tanggal dd/mm/yyyy
@@ -26,6 +26,7 @@ const formatMonthYear = (dateString) => {
 
 export default function PackagesModule() {
   const [packagesList, setPackagesList] = useState([]);
+  const [bookingsList, setBookingsList] = useState([]);
   const [loading, setLoading] = useState(true);
   
   // State Filter & Search
@@ -56,12 +57,19 @@ export default function PackagesModule() {
     priceChild: ''
   });
 
-  const fetchPackages = async () => {
+  const fetchData = async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'packages'));
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setPackagesList(list);
+      // 1. Ambil Data Paket
+      const pkgSnap = await getDocs(collection(db, 'packages'));
+      const pkgs = pkgSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      // 2. Ambil Data Booking untuk Penghitungan Sisa Seat Akurat
+      const bkSnap = await getDocs(collection(db, 'bookings'));
+      const bks = bkSnap.docs.map(d => d.data());
+
+      setBookingsList(bks);
+      setPackagesList(pkgs);
     } catch (err) {
       console.error("Gagal mengambil data paket:", err);
     }
@@ -69,7 +77,7 @@ export default function PackagesModule() {
   };
 
   useEffect(() => {
-    fetchPackages();
+    fetchData();
   }, []);
 
   const handleOpenAdd = () => {
@@ -122,7 +130,7 @@ export default function PackagesModule() {
     if (!confirm(`Apakah Anda yakin ingin menghapus paket "${pkg.name}"?`)) return;
     try {
       await deleteDoc(doc(db, 'packages', pkg.id));
-      fetchPackages();
+      fetchData();
     } catch (err) {
       alert("Gagal menghapus paket: " + err.message);
     }
@@ -144,7 +152,6 @@ export default function PackagesModule() {
         hotelTour: formData.hotelTour,
         laScope: formData.laScope,
         quotaTotal: Number(formData.quotaTotal),
-        quotaRemaining: editingPackageId ? Number(formData.quotaTotal) : Number(formData.quotaTotal),
         priceMain: Number(formData.priceMain || 0),
         priceQuad: Number(formData.priceMain || 0),
         priceTriple: Number(formData.priceTriple || 0),
@@ -161,7 +168,7 @@ export default function PackagesModule() {
       }
 
       setShowModal(false);
-      fetchPackages();
+      fetchData();
     } catch (err) {
       alert("Gagal menyimpan paket: " + err.message);
     }
@@ -308,6 +315,15 @@ export default function PackagesModule() {
               ) : (
                 filteredPackages.map((pkg) => {
                   const isTourPkg = pkg.type === 'Wisata Halal Internasional' || pkg.type === 'Land Arrangement (LA) Only';
+                  
+                  // HITUNG TERPAKAI SECARA REAL-TIME DARI DATA BOOKINGS
+                  const bookedSeatsCount = bookingsList.filter(
+                    b => b.packageId === pkg.id || b.packageName === pkg.name
+                  ).length;
+
+                  const totalQuota = Number(pkg.quotaTotal) || 0;
+                  const remainingQuota = Math.max(0, totalQuota - bookedSeatsCount);
+
                   return (
                     <tr key={pkg.id} className="hover:bg-slate-800/30 transition-colors">
                       <td className="p-4 font-semibold text-white">
@@ -340,12 +356,12 @@ export default function PackagesModule() {
                         Rp {(pkg.priceMain || pkg.priceQuad) ? Number(pkg.priceMain || pkg.priceQuad).toLocaleString('id-ID') : '0'}
                       </td>
                       <td className="p-4 text-center">
-                        <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold inline-block ${
-                          (pkg.quotaRemaining ?? pkg.quotaTotal) > 5 
+                        <span className={`px-3 py-1 rounded-full text-[11px] font-bold whitespace-nowrap inline-block ${
+                          remainingQuota > 5 
                             ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
                             : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
                         }`}>
-                          {pkg.quotaRemaining ?? pkg.quotaTotal} / {pkg.quotaTotal}
+                          {remainingQuota} / {totalQuota}
                         </span>
                       </td>
                       <td className="p-4 text-center">
