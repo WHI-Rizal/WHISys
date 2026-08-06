@@ -195,11 +195,44 @@ export default function BookingsModule({ targetBookingId }) {
     }
   };
 
-  const handlePrintInvoice = (booking) => {
+  const handlePrintInvoice = async (booking) => {
   const isLunas = booking.paymentStatus === 'Full Payment';
   const totalAmount = Number(booking.totalAmount) || 0;
-  const totalPaid = Number(booking.totalPaid) || 0;
+  
+  // 1. Ambil riwayat pembayaran dari Firestore
+  let payments = [];
+  try {
+    const q = query(collection(db, 'payments_income'), where('bookingId', '==', booking.id));
+    const snap = await getDocs(q);
+    payments = snap.docs.map(d => d.data());
+  } catch (err) {
+    console.error("Gagal mengambil riwayat setoran untuk invoice:", err);
+  }
+
+  // Hitung total terbayar dari riwayat asli
+  const totalPaid = payments.length > 0 
+    ? payments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
+    : (Number(booking.totalPaid) || 0);
+    
   const sisaTagihan = totalAmount - totalPaid;
+
+  // Generate baris HTML untuk rincian tiap setoran
+  const paymentRowsHtml = payments.length > 0
+    ? payments.map((pay, idx) => `
+        <tr style="background-color: #f8fafc; font-size: 11px; color: #475569;">
+          <td style="padding: 4px 12px; border-bottom: 1px border-slate-100;">
+            • Setoran #${idx + 1} (${formatDateDDMMYYYY(pay.createdAt)}) - <span style="font-style: italic;">${pay.paymentMethod || 'Transfer'} (${pay.notes || 'Setoran'})</span>
+          </td>
+          <td style="text-align: right; padding: 4px 12px; font-weight: 600; color: #059669; border-bottom: 1px border-slate-100;">
+            + Rp ${Number(pay.amount || 0).toLocaleString('id-ID')}
+          </td>
+        </tr>
+      `).join('')
+    : `
+        <tr style="background-color: #f8fafc; font-size: 11px; color: #94a3b8;">
+          <td style="padding: 4px 12px;" colspan="2">• Belum ada catatan setoran masuk</td>
+        </tr>
+      `;
 
   const printWindow = window.open('', '_blank');
   const docContent = `
@@ -230,13 +263,14 @@ export default function BookingsModule({ targetBookingId }) {
           .meta-card strong { color: #0f172a; }
 
           /* TABEL TIKET / PACKAGES */
-          table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
           th { background-color: #f1f5f9; text-align: left; padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #475569; border-bottom: 2px solid #cbd5e1; }
           td { padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; }
           
-          .summary-table { width: 320px; margin-left: auto; margin-bottom: 30px; }
-          .summary-table td { padding: 6px 12px; }
-          .summary-table .total-row { font-size: 15px; font-weight: bold; color: #0f172a; border-top: 2px solid #0284c7; }
+          .summary-table { width: 100%; max-width: 450px; margin-left: auto; margin-bottom: 30px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+          .summary-table td { padding: 8px 12px; }
+          .summary-header-row { background-color: #f1f5f9; font-weight: bold; }
+          .summary-table .total-row { font-size: 14px; font-weight: bold; color: #0f172a; background-color: #f8fafc; border-top: 2px solid #cbd5e1; }
 
           /* FOOTER INFO PEMBAYARAN & REKENING */
           .footer-section { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 20px; border-top: 1px solid #e2e8f0; padding-top: 20px; margin-top: 10px; }
@@ -311,18 +345,30 @@ export default function BookingsModule({ targetBookingId }) {
             </tbody>
           </table>
 
-          <!-- SUMMARY PENGHITUNGAN -->
+          <!-- SUMMARY PENGHITUNGAN DENGAN RINCIAN SETORAN -->
           <table class="summary-table">
-            <tr>
-              <td>Total Tagihan:</td>
+            <tr class="summary-header-row">
+              <td>Total Harga Paket:</td>
               <td style="text-align: right; font-weight: bold;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
             </tr>
-            <tr>
-              <td>Total Diterima (Setoran):</td>
-              <td style="text-align: right; font-weight: bold; color: #059669;">Rp ${totalPaid.toLocaleString('id-ID')}</td>
+            
+            <!-- RINCIAN TIAP SETORAN -->
+            <tr style="background-color: #f1f5f9; border-top: 1px solid #e2e8f0;">
+              <td colspan="2" style="font-weight: bold; font-size: 11px; color: #047857; text-transform: uppercase;">
+                Rincian Setoran Pembayaran Diterima:
+              </td>
             </tr>
+            ${paymentRowsHtml}
+
+            <tr style="border-top: 1px dashed #cbd5e1;">
+              <td style="font-weight: bold;">Total Terbayar:</td>
+              <td style="text-align: right; font-weight: bold; color: #059669;">
+                Rp ${totalPaid.toLocaleString('id-ID')}
+              </td>
+            </tr>
+
             <tr class="total-row">
-              <td>Sisa Tagihan:</td>
+              <td>Sisa Tagihan / Saldo:</td>
               <td style="text-align: right; color: ${sisaTagihan > 0 ? '#d97706' : '#059669'};">
                 Rp ${sisaTagihan.toLocaleString('id-ID')}
               </td>
