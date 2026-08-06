@@ -361,6 +361,85 @@ export default function FinanceModule({ onSelectBooking }) {
         </div>
       )}
 
+      {activeTab === 'profit_loss' && (
+  <div className="space-y-4">
+    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden p-4">
+      <h4 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
+        <BarChart3 className="w-4 h-4 text-amber-400" /> Analisis Margin Laba Operasional per Program Paket
+      </h4>
+      <p className="text-xs text-slate-400 mb-4">
+        Membandingkan total setoran jamaah yang masuk (Omset Real) terhadap realisasi pembayaran biaya vendor/operasional (HPP).
+      </p>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs text-slate-300">
+          <thead className="bg-slate-800/80 text-slate-400 uppercase border-b border-slate-800">
+            <tr>
+              <th className="p-4">Nama Program Paket</th>
+              <th className="p-4 text-right">Pemasukan (Omset)</th>
+              <th className="p-4 text-right">HPP / Biaya Vendor</th>
+              <th className="p-4 text-right">Laba / Margin Bersih</th>
+              <th className="p-4 text-center">Status Margin</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800/60">
+            {packagesList.length === 0 ? (
+              <tr>
+                <td colSpan="5" className="p-8 text-center text-slate-500">Belum ada paket perjalanan terdaftar.</td>
+              </tr>
+            ) : (
+              packagesList.map((pkg) => {
+                // 1. Hitung total pemasukan setoran jamaah untuk paket ini
+                const pkgIncome = transactions
+                  .filter(tx => tx.packageName === pkg.name)
+                  .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+                // 2. Hitung total pengeluaran vendor (HPP) untuk paket ini
+                const pkgVendorCost = vendorPayments
+                  .filter(vp => vp.packageId === pkg.id || vp.packageName === pkg.name)
+                  .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+                // 3. Laba Bersih
+                const profit = pkgIncome - pkgVendorCost;
+                const isProfit = profit >= 0;
+
+                return (
+                  <tr key={pkg.id} className="hover:bg-slate-800/30">
+                    <td className="p-4 font-semibold text-white">
+                      {pkg.name}
+                      <span className="block text-[10px] text-slate-400 font-mono">{pkg.code} • Keberangkatan: {formatDateDDMMYYYY(pkg.departureDate)}</span>
+                    </td>
+                    <td className="p-4 text-right font-bold text-emerald-400">
+                      Rp {pkgIncome.toLocaleString('id-ID')}
+                    </td>
+                    <td className="p-4 text-right font-bold text-rose-400">
+                      Rp {pkgVendorCost.toLocaleString('id-ID')}
+                    </td>
+                    <td className={`p-4 text-right font-extrabold ${isProfit ? 'text-blue-400' : 'text-amber-400'}`}>
+                      Rp {profit.toLocaleString('id-ID')}
+                    </td>
+                    <td className="p-4 text-center">
+                      {isProfit ? (
+                        <span className="inline-block px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-bold text-[10px]">
+                          PROFIT
+                        </span>
+                      ) : (
+                        <span className="inline-block px-2.5 py-1 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full font-bold text-[10px]">
+                          DEFISIT
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+)}
+
       {/* Modal Income */}
       {showIncomeModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
