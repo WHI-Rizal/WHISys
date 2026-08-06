@@ -479,25 +479,26 @@ export default function DashboardPage() {
         )}
 
         {/* MODUL PAKET TRAVEL & LA */}
-        {activeMenu === 'packages' && <PackagesModule />}
+{activeMenu === 'packages' && <PackagesModule theme={theme} />}
 
-        {/* MODUL MASTER DATA JAMAAH */}
-        {activeMenu === 'jamaah' && <JamaahModule />}
+{/* MODUL MASTER DATA JAMAAH */}
+{activeMenu === 'jamaah' && <JamaahModule theme={theme} />}
 
-        {/* MODUL BOOKING & MANIFEST */}
-        {activeMenu === 'bookings' && (
-          <BookingsModule targetBookingId={selectedBookingForModal} />
-        )}
+{/* MODUL BOOKING & MANIFEST */}
+{activeMenu === 'bookings' && (
+  <BookingsModule targetBookingId={selectedBookingForModal} theme={theme} />
+)}
 
-        {/* MODUL KEUANGAN & PELUNASAN */}
-        {activeMenu === 'finance' && (
-          <FinanceModule
-            onSelectBooking={(bookingId) => {
-              setSelectedBookingForModal(bookingId);
-              changeMenu('bookings');
-            }}
-          />
-        )}
+{/* MODUL KEUANGAN & PELUNASAN */}
+{activeMenu === 'finance' && (
+  <FinanceModule
+    theme={theme}
+    onSelectBooking={(bookingId) => {
+      setSelectedBookingForModal(bookingId);
+      changeMenu('bookings');
+    }}
+  />
+)}
 
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
         {activeMenu !== 'dashboard' && 
