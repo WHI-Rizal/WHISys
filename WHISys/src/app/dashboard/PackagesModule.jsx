@@ -179,7 +179,7 @@ export default function PackagesModule() {
                 <div className="space-y-2 text-xs text-slate-300 border-t border-slate-800/80 pt-3 mb-4">
                   <div className="flex items-center gap-2">
                     <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Keberangkatan: <strong className="text-white">{item.departureDate}</strong></span>
+                    <span>Keberangkatan: <strong className="text-white">{formatDateDDMMYYYY(item.departureDate)}</strong></span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Plane className="w-3.5 h-3.5 text-slate-400" />
