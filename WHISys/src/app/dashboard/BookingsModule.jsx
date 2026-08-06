@@ -137,7 +137,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
     const message = `*KONFIRMASI BOOKING PROGRAM TRAVEL*
 *PT. WISATA HALAL INTERNASIONAL*
 --------------------------------------------------
-Assalamu'alaikum Warahmatullahi Wabarakatuh.
+Assalamu'alaikum Wr. Wb.
 Yth. Bpk/Ibu *${booking.jamaahName}* (${jamaahData.customerCode || 'CST'}),
 
 Terima kasih telah mendaftar program perjalanan ibadah bersama kami. Berikut rincian booking Anda:
@@ -155,10 +155,9 @@ Terima kasih telah mendaftar program perjalanan ibadah bersama kami. Berikut rin
 • *Status Pembayaran:* ${isLunas ? '✅ LUNAS' : '⏳ DP Paid'}
 
 📌 *CATATAN BERKAS DOKUMEN:*
-Mohon melengkapi 8 berkas dokumen (Paspor, KTP/Foto, Buku Nikah, Surat Sponsor, Rekening Koran, Vaksin Meningitis, Visa (Jika sudah ada), & Tiket (Jika sudah ada)).
+Mohon melengkapi 8 berkas dokumen (Paspor, KTP/Foto, Buku Nikah, Surat Sponsor, Rekening Koran, Vaksin Meningitis, Visa, & Tiket).
 
 Apabila ada pertanyaan lebih lanjut, silakan hubungi tim kami.
-
 Terima kasih.`;
 
     const encodedMessage = encodeURIComponent(message);
@@ -689,18 +688,25 @@ Terima kasih.`;
                         <span className={`inline-block ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px]`}>{item.busGroup}</span>
                       </td>
                       
+                      {/* KOLOM KELENGKAPAN DOKUMEN (INTERAKTIF BISA DIKLIK) */}
                       <td className="p-4">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`text-[10px] font-bold ${isDocComplete ? 'text-emerald-500' : 'text-amber-500'}`}>
-                            {collectedCount}/{REQUIRED_DOCUMENTS.length} Berkas ({docPercent}%)
-                          </span>
-                        </div>
-                        <div className={`w-28 h-1.5 ${isDark ? 'bg-slate-800' : 'bg-slate-200'} rounded-full overflow-hidden`}>
-                          <div 
-                            className={`h-full ${isDocComplete ? 'bg-emerald-500' : 'bg-amber-500'} transition-all`} 
-                            style={{ width: `${docPercent}%` }}
-                          />
-                        </div>
+                        <button
+                          onClick={() => handleOpenDocModal(item)}
+                          className="group text-left p-1.5 -ml-1.5 rounded-lg hover:bg-slate-800/40 transition-all cursor-pointer"
+                          title="Klik untuk kelola checklist dokumen"
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`text-[10px] font-bold group-hover:underline ${isDocComplete ? 'text-emerald-500' : 'text-amber-500'}`}>
+                              {collectedCount}/{REQUIRED_DOCUMENTS.length} Berkas ({docPercent}%) ↗
+                            </span>
+                          </div>
+                          <div className={`w-28 h-1.5 ${isDark ? 'bg-slate-800' : 'bg-slate-200'} rounded-full overflow-hidden`}>
+                            <div 
+                              className={`h-full ${isDocComplete ? 'bg-emerald-500' : 'bg-amber-500'} transition-all`} 
+                              style={{ width: `${docPercent}%` }}
+                            />
+                          </div>
+                        </button>
                       </td>
 
                       <td className="p-4">
@@ -731,15 +737,6 @@ Terima kasih.`;
                             title="Kirim Konfirmasi via WhatsApp"
                           >
                             <MessageSquare className="w-4 h-4" />
-                          </button>
-
-                          {/* TOMBOL MONITORING DOKUMEN */}
-                          <button
-                            onClick={() => handleOpenDocModal(item)}
-                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-purple-500 rounded-lg transition-colors`}
-                            title="Monitoring Kelengkapan Berkas Dokumen"
-                          >
-                            <FileCheck className="w-4 h-4" />
                           </button>
                           
                           {/* TOMBOL RIWAYAT PEMBAYARAN */}
