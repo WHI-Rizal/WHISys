@@ -209,28 +209,28 @@ export default function BookingsModule({ targetBookingId }) {
     console.error("Gagal mengambil riwayat setoran untuk invoice:", err);
   }
 
-  // Hitung total terbayar dari riwayat asli
+  // Hitung total terbayar dari riwayat
   const totalPaid = payments.length > 0 
     ? payments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
     : (Number(booking.totalPaid) || 0);
     
   const sisaTagihan = totalAmount - totalPaid;
 
-  // Generate baris HTML untuk rincian tiap setoran
+  // Generate baris HTML untuk rincian tiap setoran dengan `white-space: nowrap`
   const paymentRowsHtml = payments.length > 0
     ? payments.map((pay, idx) => `
         <tr style="background-color: #f8fafc; font-size: 11px; color: #475569;">
-          <td style="padding: 4px 12px; border-bottom: 1px border-slate-100;">
+          <td style="padding: 6px 12px; border-bottom: 1px solid #f1f5f9;">
             • Setoran #${idx + 1} (${formatDateDDMMYYYY(pay.createdAt)}) - <span style="font-style: italic;">${pay.paymentMethod || 'Transfer'} (${pay.notes || 'Setoran'})</span>
           </td>
-          <td style="text-align: right; padding: 4px 12px; font-weight: 600; color: #059669; border-bottom: 1px border-slate-100;">
+          <td style="text-align: right; padding: 6px 12px; font-weight: 600; color: #059669; border-bottom: 1px solid #f1f5f9; white-space: nowrap;">
             + Rp ${Number(pay.amount || 0).toLocaleString('id-ID')}
           </td>
         </tr>
       `).join('')
     : `
         <tr style="background-color: #f8fafc; font-size: 11px; color: #94a3b8;">
-          <td style="padding: 4px 12px;" colspan="2">• Belum ada catatan setoran masuk</td>
+          <td style="padding: 6px 12px;" colspan="2">• Belum ada catatan setoran masuk</td>
         </tr>
       `;
 
@@ -267,7 +267,8 @@ export default function BookingsModule({ targetBookingId }) {
           th { background-color: #f1f5f9; text-align: left; padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #475569; border-bottom: 2px solid #cbd5e1; }
           td { padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; }
           
-          .summary-table { width: 100%; max-width: 450px; margin-left: auto; margin-bottom: 30px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+          /* SUMMARY TABLE RAPI & SEJAJAR */
+          .summary-table { width: 100%; max-width: 500px; margin-left: auto; margin-bottom: 30px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
           .summary-table td { padding: 8px 12px; }
           .summary-header-row { background-color: #f1f5f9; font-weight: bold; }
           .summary-table .total-row { font-size: 14px; font-weight: bold; color: #0f172a; background-color: #f8fafc; border-top: 2px solid #cbd5e1; }
@@ -340,16 +341,16 @@ export default function BookingsModule({ targetBookingId }) {
                 <td><strong>${booking.packageName || '-'}</strong></td>
                 <td>${formatDateDDMMYYYY(booking.departureDate)}</td>
                 <td>${booking.roomType} / ${booking.busGroup}</td>
-                <td style="text-align: right; font-weight: bold;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
+                <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
               </tr>
             </tbody>
           </table>
 
-          <!-- SUMMARY PENGHITUNGAN DENGAN RINCIAN SETORAN -->
+          <!-- SUMMARY PENGHITUNGAN DENGAN RINCIAN SETORAN SEJAJAR -->
           <table class="summary-table">
             <tr class="summary-header-row">
               <td>Total Harga Paket:</td>
-              <td style="text-align: right; font-weight: bold;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
+              <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
             </tr>
             
             <!-- RINCIAN TIAP SETORAN -->
@@ -362,14 +363,14 @@ export default function BookingsModule({ targetBookingId }) {
 
             <tr style="border-top: 1px dashed #cbd5e1;">
               <td style="font-weight: bold;">Total Terbayar:</td>
-              <td style="text-align: right; font-weight: bold; color: #059669;">
+              <td style="text-align: right; font-weight: bold; color: #059669; white-space: nowrap;">
                 Rp ${totalPaid.toLocaleString('id-ID')}
               </td>
             </tr>
 
             <tr class="total-row">
               <td>Sisa Tagihan / Saldo:</td>
-              <td style="text-align: right; color: ${sisaTagihan > 0 ? '#d97706' : '#059669'};">
+              <td style="text-align: right; color: ${sisaTagihan > 0 ? '#d97706' : '#059669'}; white-space: nowrap;">
                 Rp ${sisaTagihan.toLocaleString('id-ID')}
               </td>
             </tr>
