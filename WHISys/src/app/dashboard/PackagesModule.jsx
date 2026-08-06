@@ -274,10 +274,12 @@ export default function PackagesModule() {
                 <div>
                   <label className="block mb-1 font-medium">Tgl Keberangkatan</label>
                   <input
-                    type="date" required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white scheme-dark cursor-pointer"
-                    value={formData.departureDate} onChange={e => setFormData({ ...formData, departureDate: e.target.value })}
-                  />
+  type="date"
+  required
+  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:invert cursor-pointer"
+  value={formData.departureDate}
+  onChange={e => setFormData({ ...formData, departureDate: e.target.value })}
+/>
                 </div>
                 <div>
                   <label className="block mb-1 font-medium">Maskapai Penerbangan</label>
