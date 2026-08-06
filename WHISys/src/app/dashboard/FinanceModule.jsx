@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs } from 'firebase/firestore';
-import { Wallet, ArrowDownLeft, ArrowUpRight, X } from 'lucide-react';
+import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where } from 'firebase/firestore';
+import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2 } from 'lucide-react';
 
 // Helper Format Tanggal dd/mm/yyyy
 const formatDateDDMMYYYY = (dateString) => {
@@ -66,22 +66,76 @@ export default function FinanceModule({ onSelectBooking }) {
     fetchData();
   }, []);
 
+  // Helper untuk sinkronisasi total terbayar booking jika transaksi dihapus
+  const syncBookingTotalPaid = async (bookingId) => {
+    if (!bookingId) return;
+    try {
+      const q = query(collection(db, 'payments_income'), where('bookingId', '==', bookingId));
+      const snap = await getDocs(q);
+      const totalPaidReal = snap.docs.reduce((acc, curr) => acc + (Number(curr.data().amount) || 0), 0);
+
+      const bkSnap = await getDocs(collection(db, 'bookings'));
+      const targetBk = bkSnap.docs.find(d => d.id === bookingId);
+      
+      if (targetBk) {
+        const totalAmount = Number(targetBk.data().totalAmount) || 0;
+        const status = totalPaidReal >= totalAmount ? 'Full Payment' : 'DP Paid';
+
+        await updateDoc(doc(db, 'bookings', bookingId), {
+          totalPaid: totalPaidReal,
+          paymentStatus: status
+        });
+      }
+    } catch (err) {
+      console.error("Gagal sinkronisasi data booking:", err);
+    }
+  };
+
+  // Fungsi Hapus Transaksi Setoran Jamaah
+  const handleDeleteIncome = async (txId, bookingId) => {
+    if (!confirm("Apakah Anda yakin ingin menghapus catatan transaksi setoran ini?")) return;
+    try {
+      await deleteDoc(doc(db, 'payments_income', txId));
+      if (bookingId) {
+        await syncBookingTotalPaid(bookingId);
+      }
+      fetchData();
+    } catch (err) {
+      alert("Gagal menghapus transaksi: " + err.message);
+    }
+  };
+
+  // Fungsi Hapus Transaksi Pembayaran Vendor
+  const handleDeleteVendorPayment = async (vpId) => {
+    if (!confirm("Apakah Anda yakin ingin menghapus catatan pengeluaran vendor ini?")) return;
+    try {
+      await deleteDoc(doc(db, 'payments_vendor', vpId));
+      fetchData();
+    } catch (err) {
+      alert("Gagal menghapus pembayaran vendor: " + err.message);
+    }
+  };
+
   const handleIncomeSubmit = async (e) => {
     e.preventDefault();
     try {
       const selectedBooking = bookingsList.find(b => b.id === incomeForm.bookingId);
       if (!selectedBooking) return;
 
+      const amountVal = Number(incomeForm.amount);
+
       await addDoc(collection(db, 'payments_income'), {
         bookingId: selectedBooking.id,
         bookingCode: selectedBooking.bookingCode,
         jamaahName: selectedBooking.jamaahName,
         packageName: selectedBooking.packageName,
-        amount: Number(incomeForm.amount),
+        amount: amountVal,
         paymentMethod: incomeForm.paymentMethod,
         notes: incomeForm.notes,
         createdAt: new Date().toISOString()
       });
+
+      await syncBookingTotalPaid(selectedBooking.id);
 
       setShowIncomeModal(false);
       setIncomeForm({ bookingId: '', amount: '', paymentMethod: 'Transfer Bank', notes: 'DP Keberangkatan' });
@@ -190,12 +244,13 @@ export default function FinanceModule({ onSelectBooking }) {
                   <th className="p-4">Metode & Catatan</th>
                   <th className="p-4">Tanggal Setor</th>
                   <th className="p-4 text-right">Nominal Masuk</th>
+                  <th className="p-4 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
                 {transactions.length === 0 ? (
                   <tr>
-                    <td colSpan="5" className="p-8 text-center text-slate-500">Belum ada transaksi setoran jamaah.</td>
+                    <td colSpan="6" className="p-8 text-center text-slate-500">Belum ada transaksi setoran jamaah.</td>
                   </tr>
                 ) : (
                   transactions.map((tx) => (
@@ -224,6 +279,15 @@ export default function FinanceModule({ onSelectBooking }) {
                       <td className="p-4 text-right font-bold text-emerald-400">
                         + Rp {Number(tx.amount).toLocaleString('id-ID')}
                       </td>
+                      <td className="p-4 text-center">
+                        <button
+                          onClick={() => handleDeleteIncome(tx.id, tx.bookingId)}
+                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-rose-400 rounded-lg transition-colors"
+                          title="Hapus Transaksi Setoran"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -244,12 +308,13 @@ export default function FinanceModule({ onSelectBooking }) {
                   <th className="p-4">Paket Terkait</th>
                   <th className="p-4">Catatan & Tanggal</th>
                   <th className="p-4 text-right">Nominal Dibayar</th>
+                  <th className="p-4 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
                 {vendorPayments.length === 0 ? (
                   <tr>
-                    <td colSpan="5" className="p-8 text-center text-slate-500">Belum ada riwayat pembayaran vendor.</td>
+                    <td colSpan="6" className="p-8 text-center text-slate-500">Belum ada riwayat pembayaran vendor.</td>
                   </tr>
                 ) : (
                   vendorPayments.map((vp) => (
@@ -267,6 +332,15 @@ export default function FinanceModule({ onSelectBooking }) {
                       </td>
                       <td className="p-4 text-right font-bold text-rose-400">
                         - Rp {Number(vp.amount).toLocaleString('id-ID')}
+                      </td>
+                      <td className="p-4 text-center">
+                        <button
+                          onClick={() => handleDeleteVendorPayment(vp.id)}
+                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-rose-400 rounded-lg transition-colors"
+                          title="Hapus Pembayaran Vendor"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </td>
                     </tr>
                   ))
