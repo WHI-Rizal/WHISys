@@ -30,7 +30,7 @@ export default function BookingsModule({ targetBookingId }) {
     busGroup: 'Bus 1',
     initialPayment: '',
     paymentMethod: 'Transfer Bank',
-    paymentNotes: 'DP Pendaftaran'
+    paymentNotes: 'Setoran Pembayaran'
   });
 
   // Form State Edit Payment
@@ -71,6 +71,25 @@ export default function BookingsModule({ targetBookingId }) {
     }
   }, [targetBookingId, bookings]);
 
+  // Fungsi khusus untuk sinkronisasi ulang total terbayar dari Firestore
+  const syncBookingTotalPaid = async (bookingId, totalTagihan) => {
+    try {
+      const q = query(collection(db, 'payments_income'), where('bookingId', '==', bookingId));
+      const snap = await getDocs(q);
+      const totalPaidReal = snap.docs.reduce((acc, curr) => acc + (Number(curr.data().amount) || 0), 0);
+      
+      const status = totalPaidReal >= totalTagihan ? 'Full Payment' : 'DP Paid';
+
+      await updateDoc(doc(db, 'bookings', bookingId), {
+        totalPaid: totalPaidReal,
+        paymentStatus: status
+      });
+      return { totalPaidReal, status };
+    } catch (err) {
+      console.error("Gagal sinkronisasi pembayaran:", err);
+    }
+  };
+
   // Fetch History Pembayaran Khusus 1 Booking
   const fetchPaymentHistory = async (bookingId) => {
     try {
@@ -89,31 +108,24 @@ export default function BookingsModule({ targetBookingId }) {
   const handleOpenHistory = async (item) => {
     setSelectedBookingForHistory(item);
     await fetchPaymentHistory(item.id);
+    await syncBookingTotalPaid(item.id, item.totalAmount);
     setShowHistoryModal(true);
   };
 
-  // Hapus Pembayaran tunggal dari History
+  // Hapus Pembayaran dari History
   const handleDeletePayment = async (payId) => {
     if (!confirm("Apakah Anda yakin ingin menghapus catatan pembayaran ini?")) return;
     try {
       await deleteDoc(doc(db, 'payments_income', payId));
-      
-      const updatedHistory = await fetchPaymentHistory(selectedBookingForHistory.id);
-      const totalPaid = updatedHistory.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-
-      const newStatus = totalPaid >= selectedBookingForHistory.totalAmount ? 'Full Payment' : 'DP Paid';
-      await updateDoc(doc(db, 'bookings', selectedBookingForHistory.id), {
-        totalPaid: totalPaid,
-        paymentStatus: newStatus
-      });
-
+      await syncBookingTotalPaid(selectedBookingForHistory.id, selectedBookingForHistory.totalAmount);
+      await fetchPaymentHistory(selectedBookingForHistory.id);
       fetchData();
     } catch (err) {
       alert("Gagal menghapus pembayaran: " + err.message);
     }
   };
 
-  // Simpan Edit Pembayaran
+  // Simpan Edit Pembayaran dari Modal History
   const handleSavePaymentEdit = async (payId) => {
     try {
       await updateDoc(doc(db, 'payments_income', payId), {
@@ -123,15 +135,8 @@ export default function BookingsModule({ targetBookingId }) {
       });
 
       setEditingPaymentId(null);
-      const updatedHistory = await fetchPaymentHistory(selectedBookingForHistory.id);
-      const totalPaid = updatedHistory.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-
-      const newStatus = totalPaid >= selectedBookingForHistory.totalAmount ? 'Full Payment' : 'DP Paid';
-      await updateDoc(doc(db, 'bookings', selectedBookingForHistory.id), {
-        totalPaid: totalPaid,
-        paymentStatus: newStatus
-      });
-
+      await syncBookingTotalPaid(selectedBookingForHistory.id, selectedBookingForHistory.totalAmount);
+      await fetchPaymentHistory(selectedBookingForHistory.id);
       fetchData();
     } catch (err) {
       alert("Gagal memperbarui pembayaran: " + err.message);
@@ -195,12 +200,10 @@ export default function BookingsModule({ targetBookingId }) {
       const paymentVal = Number(formData.initialPayment || 0);
 
       if (editingBookingId) {
-        const bookingRef = doc(db, 'bookings', editingBookingId);
         const currentBooking = bookings.find(b => b.id === editingBookingId);
-        const newTotalPaid = (currentBooking.totalPaid || 0) + paymentVal;
-        const newStatus = newTotalPaid >= price ? 'Full Payment' : 'DP Paid';
 
-        await updateDoc(bookingRef, {
+        // 1. Simpan perubahan data booking terlebih dahulu
+        await updateDoc(doc(db, 'bookings', editingBookingId), {
           packageId: selectedPkg.id,
           packageName: selectedPkg.name,
           packageCode: selectedPkg.code,
@@ -211,11 +214,10 @@ export default function BookingsModule({ targetBookingId }) {
           roomType: formData.roomType,
           busGroup: formData.busGroup,
           totalAmount: price,
-          totalPaid: newTotalPaid,
-          paymentStatus: newStatus,
           updatedAt: new Date().toISOString()
         });
 
+        // 2. Tambah transaksi pembayaran baru jika nominal diisi > 0
         if (paymentVal > 0) {
           await addDoc(collection(db, 'payments_income'), {
             bookingId: editingBookingId,
@@ -228,6 +230,10 @@ export default function BookingsModule({ targetBookingId }) {
             createdAt: new Date().toISOString()
           });
         }
+
+        // 3. Kalkulasi ulang TOTAL AKURAT dari seluruh riwayat pembayaran
+        await syncBookingTotalPaid(editingBookingId, price);
+
       } else {
         if (Number(selectedPkg.quotaRemaining || 0) <= 0) {
           alert("Kuota paket ini sudah habis!");
@@ -235,7 +241,6 @@ export default function BookingsModule({ targetBookingId }) {
         }
 
         const bookingCode = `BK-${Date.now().toString().slice(-6)}`;
-        const initialStatus = paymentVal >= price ? 'Full Payment' : 'DP Paid';
 
         const newBookingRef = await addDoc(collection(db, 'bookings'), {
           bookingCode,
@@ -250,7 +255,7 @@ export default function BookingsModule({ targetBookingId }) {
           busGroup: formData.busGroup,
           totalAmount: price,
           totalPaid: paymentVal,
-          paymentStatus: initialStatus,
+          paymentStatus: paymentVal >= price ? 'Full Payment' : 'DP Paid',
           createdAt: new Date().toISOString()
         });
 
