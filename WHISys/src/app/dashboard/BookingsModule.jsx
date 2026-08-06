@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where } from 'firebase/firestore';
-import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle } from 'lucide-react';
+import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare } from 'lucide-react';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -115,6 +115,55 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
     }
   }, [targetBookingId, bookings]);
 
+  // HELPER FORMAT & KIRIM PESAN WHATSAPP
+  const sendWhatsAppNotification = (booking) => {
+    const jamaahData = jamaahList.find(j => j.id === booking.jamaahId || j.fullName === booking.jamaahName);
+    
+    if (!jamaahData || !jamaahData.phone) {
+      alert("Nomor HP/WhatsApp jamaah tidak ditemukan pada Data Master Jamaah.");
+      return;
+    }
+
+    let cleanPhone = jamaahData.phone.replace(/[^0-9]/g, '');
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '62' + cleanPhone.slice(1);
+    }
+
+    const isLunas = booking.paymentStatus === 'Full Payment';
+    const totalAmount = Number(booking.totalAmount || 0).toLocaleString('id-ID');
+    const totalPaid = Number(booking.totalPaid || 0).toLocaleString('id-ID');
+    const sisa = (Number(booking.totalAmount || 0) - Number(booking.totalPaid || 0)).toLocaleString('id-ID');
+
+    const message = `*KONFIRMASI BOOKING PROGRAM TRAVEL*
+*PT. WISATA HALAL INTERNASIONAL*
+--------------------------------------------------
+Assalamu'alaikum Wr. Wb.
+Yth. Bpk/Ibu *${booking.jamaahName}* (${jamaahData.customerCode || 'CST'}),
+
+Terima kasih telah mendaftar program perjalanan ibadah bersama kami. Berikut rincian booking Anda:
+
+📋 *DETAIL BOOKING & MANIFEST:*
+• *Kode Booking:* ${booking.bookingCode}
+• *Program Paket:* ${booking.packageName}
+• *Tgl Keberangkatan:* ${formatDateDDMMYYYY(booking.departureDate)}
+• *Tipe Kamar / Bus:* ${booking.roomType} / ${booking.busGroup}
+
+💰 *RINGKASAN KEUANGAN:*
+• *Total Tagihan:* Rp ${totalAmount}
+• *Setoran Diterima:* Rp ${totalPaid}
+• *Sisa Tagihan / Saldo:* Rp ${sisa}
+• *Status Pembayaran:* ${isLunas ? '✅ LUNAS' : '⏳ DP Paid'}
+
+📌 *CATATAN BERKAS DOKUMEN:*
+Mohon melengkapi 8 berkas dokumen (Paspor, KTP/Foto, Buku Nikah, Surat Sponsor, Rekening Koran, Vaksin Meningitis, Visa, & Tiket).
+
+Apabila ada pertanyaan lebih lanjut, silakan hubungi tim kami.
+Wassalamu'alaikum Wr. Wb.`;
+
+    const encodedMessage = encodeURIComponent(message);
+    window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMessage}`, '_blank');
+  };
+
   const syncBookingTotalPaid = async (bookingId, totalTagihan) => {
     try {
       const q = query(collection(db, 'payments_income'), where('bookingId', '==', bookingId));
@@ -152,7 +201,6 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
     setShowHistoryModal(true);
   };
 
-  // FUNGSI MEMBUKA CHECKLIST DOKUMEN (8 ITEMS)
   const handleOpenDocModal = (item) => {
     setSelectedBookingForDoc(item);
     setDocChecklist({
@@ -168,7 +216,6 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
     setShowDocModal(true);
   };
 
-  // FUNGSI MENYIMPAN CHECKLIST DOKUMEN KE FIRESTORE
   const handleSaveDocChecklist = async () => {
     if (!selectedBookingForDoc) return;
     try {
@@ -641,7 +688,6 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
                         <span className={`inline-block ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px]`}>{item.busGroup}</span>
                       </td>
                       
-                      {/* KOLOM MONITORING DOKUMEN (8 DOKUMEN) */}
                       <td className="p-4">
                         <div className="flex items-center gap-2 mb-1">
                           <span className={`text-[10px] font-bold ${isDocComplete ? 'text-emerald-500' : 'text-amber-500'}`}>
@@ -677,6 +723,16 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
                       </td>
                       <td className="p-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
+                          {/* TOMBOL WHATSAPP (IKON HIJAU) */}
+                          <button
+                            onClick={() => sendWhatsAppNotification(item)}
+                            className="p-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white rounded-lg transition-colors"
+                            title="Kirim Konfirmasi via WhatsApp"
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                          </button>
+
+                          {/* TOMBOL MONITORING DOKUMEN */}
                           <button
                             onClick={() => handleOpenDocModal(item)}
                             className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-purple-500 rounded-lg transition-colors`}
@@ -684,6 +740,8 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
                           >
                             <FileCheck className="w-4 h-4" />
                           </button>
+                          
+                          {/* TOMBOL RIWAYAT PEMBAYARAN */}
                           <button
                             onClick={() => handleOpenHistory(item)}
                             className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
@@ -691,6 +749,8 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
                           >
                             <Wallet className="w-4 h-4" />
                           </button>
+
+                          {/* TOMBOL PRINT INVOICE */}
                           <button
                             onClick={() => handlePrintInvoice(item)}
                             className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-amber-500 rounded-lg transition-colors`}
@@ -698,6 +758,8 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
                           >
                             <Printer className="w-4 h-4" />
                           </button>
+
+                          {/* TOMBOL EDIT BOOKING */}
                           <button
                             onClick={() => handleOpenEditModal(item)}
                             className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
@@ -705,6 +767,8 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
                           >
                             <Edit className="w-4 h-4" />
                           </button>
+
+                          {/* TOMBOL HAPUS BOOKING */}
                           <button
                             onClick={() => handleDeleteBooking(item)}
                             className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
@@ -723,7 +787,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
         </div>
       </div>
 
-      {/* MODAL CHECKLIST MONITORING DOKUMEN JAMAAH (8 ITEMS) */}
+      {/* MODAL CHECKLIST MONITORING DOKUMEN JAMAAH */}
       {showDocModal && selectedBookingForDoc && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto`}>
@@ -826,7 +890,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
                   <option value="">-- Pilih Data Master Jamaah --</option>
                   {jamaahList.map(j => (
                     <option key={j.id} value={j.id}>
-                      {j.fullName} - Paspor: {j.passportNumber || 'Belum Ada'}
+                      {j.fullName} - {j.customerCode || 'CST'} - Paspor: {j.passportNumber || 'Belum Ada'}
                     </option>
                   ))}
                 </select>
