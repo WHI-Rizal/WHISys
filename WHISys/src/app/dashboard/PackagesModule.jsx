@@ -35,7 +35,7 @@ export default function PackagesModule() {
   const [selectedAirline, setSelectedAirline] = useState('');
 
   const [showModal, setShowModal] = useState(false);
-  const [editingPackageId, setEditingBookingId] = useState(null);
+  const [editingPackageId, setEditingPackageId] = useState(null);
 
   const [formData, setFormData] = useState({
     code: '',
