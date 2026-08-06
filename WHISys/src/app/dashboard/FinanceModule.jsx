@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { db } from '../../lib/firebase';
-import { collection, addDoc, getDocs, query, orderBy } from 'firebase/firestore';
-import { Wallet, ArrowDownLeft, ArrowUpRight, Plus, Search, Building2, CheckCircle, Clock, X, DollarSign } from 'lucide-react';
+import { db } from '../../../lib/firebase';
+import { collection, addDoc, getDocs } from 'firebase/firestore';
+import { Wallet, ArrowDownLeft, ArrowUpRight, X } from 'lucide-react';
 
-export default function FinanceModule() {
+export default function FinanceModule({ onSelectBooking }) {
   const [transactions, setTransactions] = useState([]);
   const [vendorPayments, setVendorPayments] = useState([]);
   const [bookingsList, setBookingsList] = useState([]);
@@ -14,9 +14,8 @@ export default function FinanceModule() {
   
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [showVendorModal, setShowVendorModal] = useState(false);
-  const [activeTab, setActiveTab] = useState('income'); // 'income' atau 'vendor'
+  const [activeTab, setActiveTab] = useState('income');
 
-  // Form Input Setoran Jamaah
   const [incomeForm, setIncomeForm] = useState({
     bookingId: '',
     amount: '',
@@ -24,11 +23,10 @@ export default function FinanceModule() {
     notes: 'DP Keberangkatan'
   });
 
-  // Form Input Bayar Vendor
   const [vendorForm, setVendorForm] = useState({
     packageId: '',
     vendorName: '',
-    category: 'Tiket Pesawat', // Tiket Pesawat, Hotel Makkah, Hotel Madinah, Visa, LA Bus
+    category: 'Tiket Pesawat',
     amount: '',
     notes: 'DP Booking Seat'
   });
@@ -36,18 +34,15 @@ export default function FinanceModule() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch Bookings & Packages
       const bkSnap = await getDocs(collection(db, 'bookings'));
       setBookingsList(bkSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       const pkgSnap = await getDocs(collection(db, 'packages'));
       setPackagesList(pkgSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
-      // 2. Fetch Transactions (Uang Masuk)
       const txSnap = await getDocs(collection(db, 'payments_income'));
       setTransactions(txSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
-      // 3. Fetch Vendor Payments (Uang Keluar)
       const vpSnap = await getDocs(collection(db, 'payments_vendor'));
       setVendorPayments(vpSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (err) {
@@ -60,7 +55,6 @@ export default function FinanceModule() {
     fetchData();
   }, []);
 
-  // Submit Pembayaran Jamaah (Inflow)
   const handleIncomeSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -86,7 +80,6 @@ export default function FinanceModule() {
     }
   };
 
-  // Submit Pembayaran Vendor (Outflow)
   const handleVendorSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -110,14 +103,12 @@ export default function FinanceModule() {
     }
   };
 
-  // Kalkulasi Total
   const totalIncome = transactions.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const totalVendorPaid = vendorPayments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const netCashflow = totalIncome - totalVendorPaid;
 
   return (
     <div className="space-y-6">
-      {/* Header Bar */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 p-6 rounded-xl border border-slate-800">
         <div>
           <h3 className="text-xl font-bold text-white flex items-center gap-2">
@@ -141,7 +132,6 @@ export default function FinanceModule() {
         </div>
       </div>
 
-      {/* Summary Cards Cashflow */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl">
           <p className="text-xs text-slate-400 mb-1">Total Kas Masuk (Jamaah)</p>
@@ -159,7 +149,6 @@ export default function FinanceModule() {
         </div>
       </div>
 
-      {/* Tab Selector */}
       <div className="flex gap-2 border-b border-slate-800 pb-2">
         <button
           onClick={() => setActiveTab('income')}
@@ -179,7 +168,6 @@ export default function FinanceModule() {
         </button>
       </div>
 
-      {/* Tabel Setoran Jamaah */}
       {activeTab === 'income' && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
@@ -203,7 +191,14 @@ export default function FinanceModule() {
                     <tr key={tx.id} className="hover:bg-slate-800/30">
                       <td className="p-4 font-semibold text-white">
                         {tx.jamaahName}
-                        <span className="block text-[10px] text-emerald-400 font-mono">{tx.bookingCode}</span>
+                        {/* LINK KLIK KODE BOOKING */}
+                        <button
+                          onClick={() => onSelectBooking && onSelectBooking(tx.bookingId)}
+                          className="block text-[10px] text-emerald-400 font-mono hover:underline text-left cursor-pointer"
+                          title="Klik untuk membuka riwayat booking ini"
+                        >
+                          {tx.bookingCode} ↗
+                        </button>
                       </td>
                       <td className="p-4">{tx.packageName}</td>
                       <td className="p-4">
@@ -223,7 +218,6 @@ export default function FinanceModule() {
         </div>
       )}
 
-      {/* Tabel Pembayaran Vendor */}
       {activeTab === 'vendor' && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
@@ -265,7 +259,7 @@ export default function FinanceModule() {
         </div>
       )}
 
-      {/* Modal Terima Setoran Jamaah */}
+      {/* Modal Income */}
       {showIncomeModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 relative">
@@ -341,7 +335,7 @@ export default function FinanceModule() {
         </div>
       )}
 
-      {/* Modal Bayar Vendor */}
+      {/* Modal Vendor */}
       {showVendorModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 relative">
