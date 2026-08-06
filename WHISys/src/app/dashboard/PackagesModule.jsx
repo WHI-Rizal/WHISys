@@ -50,7 +50,7 @@ export default function PackagesModule() {
     hotelTour: 'Hotel Bintang 4 / Setaraf',
     laScope: 'Bus, Mutawwif, Handling, Visas',
     quotaTotal: 45,
-    priceMain: '', // Harga Utama / Dewasa / Quad
+    priceMain: '',
     priceTriple: '',
     priceDouble: '',
     priceChild: ''
@@ -146,7 +146,7 @@ export default function PackagesModule() {
         quotaTotal: Number(formData.quotaTotal),
         quotaRemaining: editingPackageId ? Number(formData.quotaTotal) : Number(formData.quotaTotal),
         priceMain: Number(formData.priceMain || 0),
-        priceQuad: Number(formData.priceMain || 0), // kompatibilitas ke sistem booking lama
+        priceQuad: Number(formData.priceMain || 0),
         priceTriple: Number(formData.priceTriple || 0),
         priceDouble: Number(formData.priceDouble || 0),
         priceChild: Number(formData.priceChild || 0),
@@ -340,12 +340,12 @@ export default function PackagesModule() {
                         Rp {(pkg.priceMain || pkg.priceQuad) ? Number(pkg.priceMain || pkg.priceQuad).toLocaleString('id-ID') : '0'}
                       </td>
                       <td className="p-4 text-center">
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                        <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold inline-block ${
                           (pkg.quotaRemaining ?? pkg.quotaTotal) > 5 
                             ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
                             : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
                         }`}>
-                          {pkg.quotaRemaining ?? pkg.quotaTotal} / {pkg.quotaTotal} Seat
+                          {pkg.quotaRemaining ?? pkg.quotaTotal} / {pkg.quotaTotal}
                         </span>
                       </td>
                       <td className="p-4 text-center">
@@ -467,7 +467,6 @@ export default function PackagesModule() {
 
               {/* DYNAMIC FIELD BERDASARKAN KATEGORI */}
               {isTourOrLA ? (
-                /* INPUTAN UNTUK WISATA HALAL & LA */
                 <div className="grid grid-cols-2 gap-4 bg-slate-950/50 p-3 rounded-xl border border-slate-800">
                   <div>
                     <label className="block mb-1 font-medium text-emerald-400">Destinasi / Kota Tujuan</label>
@@ -493,7 +492,6 @@ export default function PackagesModule() {
                   </div>
                 </div>
               ) : (
-                /* INPUTAN UNTUK UMROH / HAJI */
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block mb-1 font-medium">Hotel Makkah</label>
