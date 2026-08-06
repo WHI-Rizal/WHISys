@@ -275,7 +275,7 @@ export default function PackagesModule() {
                   <label className="block mb-1 font-medium">Tgl Keberangkatan</label>
                   <input
                     type="date" required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white scheme-dark cursor-pointer"
                     value={formData.departureDate} onChange={e => setFormData({ ...formData, departureDate: e.target.value })}
                   />
                 </div>
