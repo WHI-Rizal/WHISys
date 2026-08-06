@@ -299,8 +299,8 @@ export default function BookingsModule({ targetBookingId }) {
               <h1 class="company-logo-title">PT. WISATA HALAL INTERNASIONAL</h1>
               <p class="company-sub">Penyelenggara Perjalanan Ibadah Umrah, Haji & Wisata Halal</p>
               <p class="company-address">
-                Jl. Raya Utama No. 88, Jakarta Selatan, Indonesia<br>
-                Telp/WA: +62 812-3456-7890 | Email: info@wisatahalal.co.id
+                Ruko Graha Cirendeu No.1C Jl. Cirendeu Raya, Tangerang Selatan, Banten, Indonesia, 15445<br>
+                Telp/WA: +62 812-0000-0000 | Email: admin@wisatahalalindonesia.id
               </p>
             </div>
             <div>
