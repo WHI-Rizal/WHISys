@@ -444,11 +444,11 @@ export default function PackagesModule() {
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block mb-1 font-medium">Tgl Keberangkatan</label>
-                  <input
-                    type="date" required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
-                    value={formData.departureDate}
-                    onChange={e => setFormData({ ...formData, departureDate: e.target.value })}
+  <input
+    type="date" required
+    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white [color-scheme:dark]"
+    value={formData.departureDate}
+    onChange={e => setFormData({ ...formData, departureDate: e.target.value })}
                   />
                 </div>
                 <div>
