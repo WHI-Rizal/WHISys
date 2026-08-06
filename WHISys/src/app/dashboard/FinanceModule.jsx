@@ -5,6 +5,17 @@ import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs } from 'firebase/firestore';
 import { Wallet, ArrowDownLeft, ArrowUpRight, X } from 'lucide-react';
 
+// Helper Format Tanggal dd/mm/yyyy
+const formatDateDDMMYYYY = (dateString) => {
+  if (!dateString || dateString === '-') return '-';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return dateString;
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
 export default function FinanceModule({ onSelectBooking }) {
   const [transactions, setTransactions] = useState([]);
   const [vendorPayments, setVendorPayments] = useState([]);
@@ -209,7 +220,7 @@ export default function FinanceModule({ onSelectBooking }) {
                         <span className="bg-slate-800 px-2 py-0.5 rounded text-[10px] mr-1">{tx.paymentMethod}</span>
                         <span className="text-slate-400">{tx.notes}</span>
                       </td>
-                      <td className="p-4 text-slate-400">{new Date(tx.createdAt).toLocaleDateString('id-ID')}</td>
+                      <td className="p-4 text-slate-400">{formatDateDDMMYYYY(tx.createdAt)}</td>
                       <td className="p-4 text-right font-bold text-emerald-400">
                         + Rp {Number(tx.amount).toLocaleString('id-ID')}
                       </td>
@@ -231,7 +242,7 @@ export default function FinanceModule({ onSelectBooking }) {
                   <th className="p-4">Nama Vendor / Supplier</th>
                   <th className="p-4">Kategori Layanan</th>
                   <th className="p-4">Paket Terkait</th>
-                  <th className="p-4">Catatan</th>
+                  <th className="p-4">Catatan & Tanggal</th>
                   <th className="p-4 text-right">Nominal Dibayar</th>
                 </tr>
               </thead>
@@ -250,7 +261,10 @@ export default function FinanceModule({ onSelectBooking }) {
                         </span>
                       </td>
                       <td className="p-4">{vp.packageName}</td>
-                      <td className="p-4 text-slate-400">{vp.notes}</td>
+                      <td className="p-4 text-slate-400">
+                        {vp.notes}
+                        <span className="block text-[10px] text-slate-500">{formatDateDDMMYYYY(vp.createdAt)}</span>
+                      </td>
                       <td className="p-4 text-right font-bold text-rose-400">
                         - Rp {Number(vp.amount).toLocaleString('id-ID')}
                       </td>
