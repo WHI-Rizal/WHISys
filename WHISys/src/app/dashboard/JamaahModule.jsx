@@ -163,7 +163,7 @@ export default function JamaahModule() {
                 <th className="p-4">Nama & NIK</th>
                 <th className="p-4">Gender & Kontak</th>
                 <th className="p-4">TTL</th>
-                <th className="p-4">Nomor Paspor</th>
+                <th className="p-4">Paspor & Nama Paspor</th>
                 <th className="p-4">Expired Paspor</th>
                 <th className="p-4 text-center">Aksi</th>
               </tr>
@@ -187,9 +187,14 @@ export default function JamaahModule() {
                     <td className="p-4">
                       {item.birthPlace ? `${item.birthPlace}, ` : ''}{formatDateDDMMYYYY(item.birthDate)}
                     </td>
-                    <td className="p-4 font-mono font-bold text-emerald-400">
-                      {item.passportNumber || 'Belum Ada'}
-                    </td>
+                    <td className="p-4">
+  <span className="block font-bold text-white mb-0.5">
+    {item.passportName || '-'}
+  </span>
+  <span className="block font-mono text-[10px] text-emerald-400">
+    {item.passportNumber || 'Belum Ada Paspor'}
+  </span>
+</td>
                     <td className="p-4 text-slate-400">
                       {formatDateDDMMYYYY(item.passportExpiry)}
                     </td>
