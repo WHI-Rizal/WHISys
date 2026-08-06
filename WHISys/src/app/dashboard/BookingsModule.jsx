@@ -194,7 +194,8 @@ export default function BookingsModule({ targetBookingId }) {
     <html>
       <head>
         <title>${isLunas ? 'INVOICE' : 'PROFORMA INVOICE'} - ${booking.bookingCode}</title>
-        <link rel="icon" href="/logo.png" type="image/x-icon" />
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📄</text></svg>">
+        
         <style>
           body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; margin: 0; padding: 40px; background-color: #fff; }
           .invoice-box { max-width: 800px; margin: auto; border: 1px solid #e2e8f0; padding: 30px; border-radius: 12px; }
