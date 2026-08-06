@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where } from 'firebase/firestore';
-import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2 } from 'lucide-react';
+import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3 } from 'lucide-react';
 
 // Helper Format Tanggal dd/mm/yyyy
 const formatDateDDMMYYYY = (dateString) => {
@@ -231,6 +231,16 @@ export default function FinanceModule({ onSelectBooking }) {
         >
           Riwayat Bayar Vendor ({vendorPayments.length})
         </button>
+
+        {/* TAB BARU: LABA RUGI OPERASIONAL PAKET */}
+  <button
+    onClick={() => setActiveTab('profit_loss')}
+    className={`px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+      activeTab === 'profit_loss' ? 'bg-slate-800 text-amber-400 border border-slate-700' : 'text-slate-400 hover:text-white'
+    }`}
+  >
+    <TrendingUp className="w-3.5 h-3.5" /> Rekap Laba Rugi per Paket
+  </button>
       </div>
 
       {activeTab === 'income' && (
