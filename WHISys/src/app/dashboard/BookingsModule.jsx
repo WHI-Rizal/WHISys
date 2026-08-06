@@ -1,22 +1,22 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { db } from '../../lib/firebase';
+import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where } from 'firebase/firestore';
 import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History } from 'lucide-react';
 
-export default function BookingsModule() {
+export default function BookingsModule({ targetBookingId }) {
   const [bookings, setBookings] = useState([]);
   const [packagesList, setPackagesList] = useState([]);
   const [jamaahList, setJamaahList] = useState([]);
   const [loading, setLoading] = useState(true);
   
-  // Modals
+  // Modals State
   const [showModal, setShowModal] = useState(false);
   const [editingBookingId, setEditingBookingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Modal History Pembayaran
+  // Modal History Pembayaran State
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedBookingForHistory, setSelectedBookingForHistory] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
@@ -28,12 +28,12 @@ export default function BookingsModule() {
     jamaahId: '',
     roomType: 'Quad',
     busGroup: 'Bus 1',
-    initialPayment: '', // Input pembayaran awal langsung
+    initialPayment: '',
     paymentMethod: 'Transfer Bank',
     paymentNotes: 'DP Pendaftaran'
   });
 
-  // Form State Edit Payment di History
+  // Form State Edit Payment
   const [paymentEditForm, setPaymentEditForm] = useState({
     amount: '',
     paymentMethod: 'Transfer Bank',
@@ -60,6 +60,16 @@ export default function BookingsModule() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Otomatis Buka Modal History jika ada lemparan ID booking dari Keuangan
+  useEffect(() => {
+    if (targetBookingId && bookings.length > 0) {
+      const found = bookings.find(b => b.id === targetBookingId);
+      if (found) {
+        handleOpenHistory(found);
+      }
+    }
+  }, [targetBookingId, bookings]);
 
   // Fetch History Pembayaran Khusus 1 Booking
   const fetchPaymentHistory = async (bookingId) => {
@@ -88,11 +98,9 @@ export default function BookingsModule() {
     try {
       await deleteDoc(doc(db, 'payments_income', payId));
       
-      // Refresh history & rekalkulasi total terbayar
       const updatedHistory = await fetchPaymentHistory(selectedBookingForHistory.id);
       const totalPaid = updatedHistory.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
 
-      // Update status di booking
       const newStatus = totalPaid >= selectedBookingForHistory.totalAmount ? 'Full Payment' : 'DP Paid';
       await updateDoc(doc(db, 'bookings', selectedBookingForHistory.id), {
         totalPaid: totalPaid,
@@ -130,7 +138,6 @@ export default function BookingsModule() {
     }
   };
 
-  // Open Modal Add/Edit Booking
   const handleOpenAddModal = () => {
     setEditingBookingId(null);
     setFormData({ packageId: '', jamaahId: '', roomType: 'Quad', busGroup: 'Bus 1', initialPayment: '', paymentMethod: 'Transfer Bank', paymentNotes: 'DP Pendaftaran' });
@@ -170,7 +177,6 @@ export default function BookingsModule() {
     }
   };
 
-  // Submit Simpan Booking
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.packageId || !formData.jamaahId) {
@@ -189,7 +195,6 @@ export default function BookingsModule() {
       const paymentVal = Number(formData.initialPayment || 0);
 
       if (editingBookingId) {
-        // Edit Booking
         const bookingRef = doc(db, 'bookings', editingBookingId);
         const currentBooking = bookings.find(b => b.id === editingBookingId);
         const newTotalPaid = (currentBooking.totalPaid || 0) + paymentVal;
@@ -224,7 +229,6 @@ export default function BookingsModule() {
           });
         }
       } else {
-        // Tambah Booking Baru
         if (Number(selectedPkg.quotaRemaining || 0) <= 0) {
           alert("Kuota paket ini sudah habis!");
           return;
@@ -250,7 +254,6 @@ export default function BookingsModule() {
           createdAt: new Date().toISOString()
         });
 
-        // Catat Transaksi Keuangan jika ada setoran awal
         if (paymentVal > 0) {
           await addDoc(collection(db, 'payments_income'), {
             bookingId: newBookingRef.id,
@@ -264,7 +267,6 @@ export default function BookingsModule() {
           });
         }
 
-        // Potong Kuota
         const pkgRef = doc(db, 'packages', selectedPkg.id);
         await updateDoc(pkgRef, { quotaRemaining: Number(selectedPkg.quotaRemaining || 1) - 1 });
       }
@@ -396,7 +398,7 @@ export default function BookingsModule() {
         </div>
       </div>
 
-      {/* Modal Form Booking (Input Setoran Terintegrasi) */}
+      {/* Modal Form Booking */}
       {showModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto">
@@ -470,7 +472,6 @@ export default function BookingsModule() {
                 </div>
               </div>
 
-              {/* INPUT SETORAN PEMBAYARAN */}
               <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 space-y-3">
                 <p className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Wallet className="w-3.5 h-3.5" /> Pembayaran / Setoran {editingBookingId ? 'Tambahan' : 'Awal'}
