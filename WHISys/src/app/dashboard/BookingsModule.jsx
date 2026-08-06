@@ -5,24 +5,32 @@ import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where } from 'firebase/firestore';
 import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History } from 'lucide-react';
 
+// Helper Format Tanggal dd/mm/yyyy
+const formatDateDDMMYYYY = (dateString) => {
+  if (!dateString || dateString === '-') return '-';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return dateString;
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
 export default function BookingsModule({ targetBookingId }) {
   const [bookings, setBookings] = useState([]);
   const [packagesList, setPackagesList] = useState([]);
   const [jamaahList, setJamaahList] = useState([]);
   const [loading, setLoading] = useState(true);
   
-  // Modals State
   const [showModal, setShowModal] = useState(false);
   const [editingBookingId, setEditingBookingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Modal History Pembayaran State
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedBookingForHistory, setSelectedBookingForHistory] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [editingPaymentId, setEditingPaymentId] = useState(null);
 
-  // Form State Booking
   const [formData, setFormData] = useState({
     packageId: '',
     jamaahId: '',
@@ -33,7 +41,6 @@ export default function BookingsModule({ targetBookingId }) {
     paymentNotes: 'Setoran Pembayaran'
   });
 
-  // Form State Edit Payment
   const [paymentEditForm, setPaymentEditForm] = useState({
     amount: '',
     paymentMethod: 'Transfer Bank',
@@ -61,7 +68,6 @@ export default function BookingsModule({ targetBookingId }) {
     fetchData();
   }, []);
 
-  // Otomatis Buka Modal History jika ada lemparan ID booking dari Keuangan
   useEffect(() => {
     if (targetBookingId && bookings.length > 0) {
       const found = bookings.find(b => b.id === targetBookingId);
@@ -71,13 +77,11 @@ export default function BookingsModule({ targetBookingId }) {
     }
   }, [targetBookingId, bookings]);
 
-  // Fungsi khusus untuk sinkronisasi ulang total terbayar dari Firestore
   const syncBookingTotalPaid = async (bookingId, totalTagihan) => {
     try {
       const q = query(collection(db, 'payments_income'), where('bookingId', '==', bookingId));
       const snap = await getDocs(q);
       const totalPaidReal = snap.docs.reduce((acc, curr) => acc + (Number(curr.data().amount) || 0), 0);
-      
       const status = totalPaidReal >= totalTagihan ? 'Full Payment' : 'DP Paid';
 
       await updateDoc(doc(db, 'bookings', bookingId), {
@@ -90,7 +94,6 @@ export default function BookingsModule({ targetBookingId }) {
     }
   };
 
-  // Fetch History Pembayaran Khusus 1 Booking
   const fetchPaymentHistory = async (bookingId) => {
     try {
       const q = query(collection(db, 'payments_income'), where('bookingId', '==', bookingId));
@@ -104,7 +107,6 @@ export default function BookingsModule({ targetBookingId }) {
     }
   };
 
-  // Buka Modal History Pembayaran
   const handleOpenHistory = async (item) => {
     setSelectedBookingForHistory(item);
     await fetchPaymentHistory(item.id);
@@ -112,7 +114,6 @@ export default function BookingsModule({ targetBookingId }) {
     setShowHistoryModal(true);
   };
 
-  // Hapus Pembayaran dari History
   const handleDeletePayment = async (payId) => {
     if (!confirm("Apakah Anda yakin ingin menghapus catatan pembayaran ini?")) return;
     try {
@@ -125,7 +126,6 @@ export default function BookingsModule({ targetBookingId }) {
     }
   };
 
-  // Simpan Edit Pembayaran dari Modal History
   const handleSavePaymentEdit = async (payId) => {
     try {
       await updateDoc(doc(db, 'payments_income', payId), {
@@ -202,7 +202,6 @@ export default function BookingsModule({ targetBookingId }) {
       if (editingBookingId) {
         const currentBooking = bookings.find(b => b.id === editingBookingId);
 
-        // 1. Simpan perubahan data booking terlebih dahulu
         await updateDoc(doc(db, 'bookings', editingBookingId), {
           packageId: selectedPkg.id,
           packageName: selectedPkg.name,
@@ -217,7 +216,6 @@ export default function BookingsModule({ targetBookingId }) {
           updatedAt: new Date().toISOString()
         });
 
-        // 2. Tambah transaksi pembayaran baru jika nominal diisi > 0
         if (paymentVal > 0) {
           await addDoc(collection(db, 'payments_income'), {
             bookingId: editingBookingId,
@@ -231,7 +229,6 @@ export default function BookingsModule({ targetBookingId }) {
           });
         }
 
-        // 3. Kalkulasi ulang TOTAL AKURAT dari seluruh riwayat pembayaran
         await syncBookingTotalPaid(editingBookingId, price);
 
       } else {
@@ -347,7 +344,9 @@ export default function BookingsModule({ targetBookingId }) {
                     </td>
                     <td className="p-4">
                       {item.packageName || '-'}
-                      <span className="block text-[10px] text-slate-400">{item.departureDate}</span>
+                      <span className="block text-[10px] text-slate-400">
+                        {formatDateDDMMYYYY(item.departureDate)}
+                      </span>
                     </td>
                     <td className="p-4">
                       <span className="inline-block bg-slate-800 px-2 py-0.5 rounded text-[10px] mr-1">{item.roomType}</span>
@@ -597,7 +596,9 @@ export default function BookingsModule({ targetBookingId }) {
                           </>
                         ) : (
                           <>
-                            <td className="p-3 text-slate-400">{new Date(pay.createdAt).toLocaleDateString('id-ID')}</td>
+                            <td className="p-3 text-slate-400">
+                              {formatDateDDMMYYYY(pay.createdAt)}
+                            </td>
                             <td className="p-3">
                               <span className="bg-slate-800 px-1.5 py-0.5 rounded text-[10px] mr-1">{pay.paymentMethod}</span>
                               <span className="text-slate-400">{pay.notes}</span>
