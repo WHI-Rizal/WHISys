@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { Package, Plus, Search, Calendar, Users, Edit, Trash2, Filter, Plane, MapPin, RefreshCw } from 'lucide-react';
+import { Package, Plus, Search, Calendar, Users, Edit, Trash2, Filter, Plane, MapPin, RefreshCw, X } from 'lucide-react';
 
 // Helper Format Tanggal dd/mm/yyyy
 const formatDateDDMMYYYY = (dateString) => {
@@ -69,7 +69,7 @@ export default function PackagesModule() {
   }, []);
 
   const handleOpenAdd = () => {
-    setEditingBookingId(null);
+    setEditingPackageId(null);
     setFormData({
       code: `PK-${Date.now().toString().slice(-4)}`,
       name: '',
@@ -88,7 +88,7 @@ export default function PackagesModule() {
   };
 
   const handleOpenEdit = (pkg) => {
-    setEditingBookingId(pkg.id);
+    setEditingPackageId(pkg.id);
     setFormData({
       code: pkg.code || '',
       name: pkg.name || '',
@@ -130,7 +130,7 @@ export default function PackagesModule() {
         hotelMadinah: formData.hotelMadinah,
         quotaTotal: Number(formData.quotaTotal),
         quotaRemaining: editingPackageId 
-          ? Number(formData.quotaTotal) // Atur atau pertahankan jika edit
+          ? Number(formData.quotaTotal)
           : Number(formData.quotaTotal),
         priceQuad: Number(formData.priceQuad || 0),
         priceTriple: Number(formData.priceTriple || 0),
@@ -152,33 +152,27 @@ export default function PackagesModule() {
     }
   };
 
-  // 1. Dapatkan daftar unik Maskapai dari data yang ada
+  // Dapatkan daftar unik Maskapai
   const availableAirlines = Array.from(
     new Set(packagesList.map(p => p.airline).filter(Boolean))
   );
 
-  // 2. Dapatkan daftar unik Periode (Bulan & Tahun) dari tanggal keberangkatan
+  // Dapatkan daftar unik Periode
   const availablePeriods = Array.from(
     new Set(packagesList.map(p => formatMonthYear(p.departureDate)).filter(Boolean))
   );
 
-  // 3. Logika Filter Bertingkat
+  // Logika Filter
   const filteredPackages = packagesList.filter((pkg) => {
-    // Search Term
     const matchesSearch = 
       (pkg.name && pkg.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (pkg.code && pkg.code.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (pkg.hotelMakkah && pkg.hotelMakkah.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (pkg.hotelMadinah && pkg.hotelMadinah.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    // Filter Periode
     const pkgPeriod = formatMonthYear(pkg.departureDate);
     const matchesPeriod = !selectedPeriod || pkgPeriod === selectedPeriod;
-
-    // Filter Destinasi / Jenis Paket
     const matchesDestination = !selectedDestination || pkg.type === selectedDestination;
-
-    // Filter Maskapai
     const matchesAirline = !selectedAirline || pkg.airline === selectedAirline;
 
     return matchesSearch && matchesPeriod && matchesDestination && matchesAirline;
