@@ -408,8 +408,25 @@ export default function BookingsModule({ targetBookingId }) {
     </html>
   `;
 
-  printWindow.document.write(docContent);
-  printWindow.document.close();
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(docContent);
+  doc.close();
+
+  iframe.contentWindow.focus();
+  setTimeout(() => {
+    iframe.contentWindow.print();
+    document.body.removeChild(iframe);
+  }, 500);
 };
   const handleSubmit = async (e) => {
     e.preventDefault();
