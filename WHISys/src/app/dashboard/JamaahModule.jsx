@@ -15,6 +15,12 @@ const formatDateDDMMYYYY = (dateString) => {
   return `${day}/${month}/${year}`;
 };
 
+// Helper Generasi Kode Unik CST
+const generateCustomerCode = () => {
+  const randomDigits = Math.floor(100000 + Math.random() * 900000);
+  return `CST${randomDigits}`;
+};
+
 export default function JamaahModule({ theme = 'dark' }) {
   const isDark = theme === 'dark';
 
@@ -35,6 +41,7 @@ export default function JamaahModule({ theme = 'dark' }) {
   const [editingId, setEditingId] = useState(null);
 
   const [formData, setFormData] = useState({
+    customerCode: '',
     fullName: '',
     nik: '',
     gender: 'L',
@@ -62,6 +69,7 @@ export default function JamaahModule({ theme = 'dark' }) {
   const handleOpenAdd = () => {
     setEditingId(null);
     setFormData({
+      customerCode: generateCustomerCode(),
       fullName: '',
       nik: '',
       gender: 'L',
@@ -76,6 +84,7 @@ export default function JamaahModule({ theme = 'dark' }) {
   const handleOpenEdit = (item) => {
     setEditingId(item.id);
     setFormData({
+      customerCode: item.customerCode || generateCustomerCode(),
       fullName: item.fullName || '',
       nik: item.nik || '',
       gender: item.gender || 'L',
@@ -120,6 +129,7 @@ export default function JamaahModule({ theme = 'dark' }) {
 
   const filteredList = jamaahList.filter(
     (j) =>
+      (j.customerCode && j.customerCode.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (j.fullName && j.fullName.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (j.nik && j.nik.includes(searchTerm)) ||
       (j.passportNumber && j.passportNumber.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -132,7 +142,7 @@ export default function JamaahModule({ theme = 'dark' }) {
           <h3 className={`text-xl font-bold ${styles.textTitle} flex items-center gap-2`}>
             <Users className="w-5 h-5 text-emerald-500" /> Data Master Jamaah
           </h3>
-          <p className={`text-xs ${styles.textSub} mt-1`}>Database identitas KTP, kontak, dan dokumen paspor jamaah.</p>
+          <p className={`text-xs ${styles.textSub} mt-1`}>Database identitas KTP, kode unik customer, kontak, dan dokumen paspor jamaah.</p>
         </div>
         <button
           onClick={handleOpenAdd}
@@ -147,7 +157,7 @@ export default function JamaahModule({ theme = 'dark' }) {
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
           <input
             type="text"
-            placeholder="Cari Nama Jamaah, NIK, atau Nomor Paspor..."
+            placeholder="Cari Kode (CST), Nama Jamaah, NIK, atau Nomor Paspor..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className={`w-full ${styles.inputBg} pl-9 pr-4 py-2 rounded-lg text-xs focus:outline-none focus:border-emerald-500`}
@@ -160,7 +170,8 @@ export default function JamaahModule({ theme = 'dark' }) {
           <table className="w-full text-left text-xs">
             <thead className={`${styles.tableHeaderBg} uppercase tracking-wider border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <tr>
-                <th className="p-4">Nama & NIK</th>
+                <th className="p-4">Kode CST</th>
+                <th className="p-4">Nama Lengkap & NIK</th>
                 <th className="p-4">Gender & Kontak</th>
                 <th className="p-4">Paspor & Expiry</th>
                 <th className="p-4">Alamat</th>
@@ -170,24 +181,27 @@ export default function JamaahModule({ theme = 'dark' }) {
             <tbody className={`divide-y ${styles.tableRowBorder}`}>
               {loading ? (
                 <tr>
-                  <td colSpan="5" className={`p-8 text-center ${styles.textSub}`}>Memuat data jamaah...</td>
+                  <td colSpan="6" className={`p-8 text-center ${styles.textSub}`}>Memuat data jamaah...</td>
                 </tr>
               ) : filteredList.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className={`p-8 text-center ${styles.textSub}`}>Belum ada data jamaah.</td>
+                  <td colSpan="6" className={`p-8 text-center ${styles.textSub}`}>Belum ada data jamaah.</td>
                 </tr>
               ) : (
                 filteredList.map((item) => {
                   const isExpiringSoon = item.passportExpiry && new Date(item.passportExpiry) < new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
                   return (
                     <tr key={item.id} className={`${isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'} transition-colors`}>
+                      <td className="p-4 font-mono font-bold text-emerald-500">
+                        {item.customerCode || 'CST-000000'}
+                      </td>
                       <td className={`p-4 font-semibold ${styles.textTitle}`}>
                         {item.fullName}
                         <span className={`block text-[10px] ${styles.textSub} font-mono`}>NIK: {item.nik || '-'}</span>
                       </td>
                       <td className="p-4">
                         <span className={`inline-block ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] mr-2 font-bold`}>
-                          {item.gender === 'L' ? 'L' : 'P'}
+                          {item.gender === 'L' ? 'Laki-Laki' : 'Perempuan'}
                         </span>
                         <span className={styles.textSub}>{item.phone || '-'}</span>
                       </td>
@@ -239,10 +253,31 @@ export default function JamaahModule({ theme = 'dark' }) {
             </h3>
 
             <form onSubmit={handleSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1 font-medium">Kode Unik Customer</label>
+                  <input
+                    type="text" readOnly required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5 font-mono font-bold text-emerald-500 opacity-80 cursor-not-allowed`}
+                    value={formData.customerCode}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">NIK (KTP)</label>
+                  <input
+                    type="text"
+                    placeholder="32010..."
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5 font-mono`}
+                    value={formData.nik}
+                    onChange={(e) => setFormData({ ...formData, nik: e.target.value })}
+                  />
+                </div>
+              </div>
+
               <div>
                 <label className="block mb-1 font-medium">Nama Lengkap (sesuai KTP/Paspor)</label>
                 <input
-                  type="text" required
+                  type="text" required placeholder="Contoh: Ibrahim Khalil"
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                   value={formData.fullName}
                   onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
@@ -250,15 +285,6 @@ export default function JamaahModule({ theme = 'dark' }) {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block mb-1 font-medium">NIK (KTP)</label>
-                  <input
-                    type="text"
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5 font-mono`}
-                    value={formData.nik}
-                    onChange={(e) => setFormData({ ...formData, nik: e.target.value })}
-                  />
-                </div>
                 <div>
                   <label className="block mb-1 font-medium">Jenis Kelamin</label>
                   <select
@@ -270,23 +296,22 @@ export default function JamaahModule({ theme = 'dark' }) {
                     <option value="P">Perempuan</option>
                   </select>
                 </div>
-              </div>
-
-              <div>
-                <label className="block mb-1 font-medium">No. Telepon / WhatsApp</label>
-                <input
-                  type="text" required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                />
+                <div>
+                  <label className="block mb-1 font-medium">No. Telepon / WhatsApp</label>
+                  <input
+                    type="text" required placeholder="08123456789"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block mb-1 font-medium">Nomor Paspor</label>
                   <input
-                    type="text"
+                    type="text" placeholder="X1234567"
                     className={`w-full ${styles.inputBg} rounded-lg p-2.5 font-mono`}
                     value={formData.passportNumber}
                     onChange={(e) => setFormData({ ...formData, passportNumber: e.target.value })}
@@ -306,7 +331,7 @@ export default function JamaahModule({ theme = 'dark' }) {
               <div>
                 <label className="block mb-1 font-medium">Alamat Tempat Tinggal</label>
                 <textarea
-                  rows="2"
+                  rows="2" placeholder="Jl. Raya Utama No. 12..."
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                   value={formData.address}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
