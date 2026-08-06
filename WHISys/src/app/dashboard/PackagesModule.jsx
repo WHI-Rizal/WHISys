@@ -5,6 +5,16 @@ import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
 import { Plane, Plus, Search, Calendar, Users, Hotel, DollarSign, Trash2, X, MapPin } from 'lucide-react';
 
+const formatDateDDMMYYYY = (dateString) => {
+  if (!dateString || dateString === '-') return '-';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return dateString;
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
 export default function PackagesModule() {
   const [packages, setPackages] = useState([]);
   const [loading, setLoading] = useState(true);
