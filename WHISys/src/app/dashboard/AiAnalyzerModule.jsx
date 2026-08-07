@@ -129,10 +129,8 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     setUserQuery('');
     setAnalyzing(true);
 
-    // Ambil API Key dari .env atau fallback
     const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
 
-    // Menyiapkan Konteks Data Sistem dalam Format JSON Ringkas
     const systemContextData = {
       summary: {
         totalOmsetReal: totalOmset,
@@ -175,7 +173,7 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
 
     const promptText = `
 Anda adalah WHI Executive Intelligence Assistant untuk PT. WISATA HALAL INTERNASIONAL (ERP WHISys).
-Tugas Anda adalah menjawab pertanyaan pengguna berdasarkan DATABASE REAL-TIME ERP berikut:
+Jawablah pertanyaan pengguna berdasarkan DATABASE REAL-TIME ERP berikut:
 
 --- DATA REAL-TIME ERP WHISys ---
 ${JSON.stringify(systemContextData, null, 2)}
@@ -183,18 +181,18 @@ ${JSON.stringify(systemContextData, null, 2)}
 
 PERTUANAN PENGGUNA: "${currentQuery}"
 
-INSTRUKSI JAWABAN:
-1. Jawablah secara ramah, profesional, serta singkat dan padat (langsung ke poin utama).
-2. Gunakan format poin-poin/bold agar mudah dibaca oleh eksekutif.
-3. Jika ditanyakan hal spesifik tentang nama jamaah, tagihan, atau paket tertentu, ambil data langsung dari database di atas.
-4. Jika data tidak ada dalam database, jawab dengan jujur bahwa data tersebut belum tercatat di sistem.
+INSTRUKSI:
+- Jawab secara profesional, padat, dan informatif.
+- Gunakan poin-poin/bold jika perlu.
+- Jika data tidak ditemukan di database, katakan belum ada data terkait.
 `;
 
     try {
       if (!apiKey) {
-        throw new Error("API Key Gemini belum dipasang di .env.local (NEXT_PUBLIC_GEMINI_API_KEY).");
+        throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY diset di Vercel/Environment.");
       }
 
+      // Memanggil Gemini REST API v1beta
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
         {
@@ -208,18 +206,21 @@ INSTRUKSI JAWABAN:
 
       const data = await response.json();
 
+      if (data.error) {
+        throw new Error(data.error.message || "Error dari Google Gemini API");
+      }
+
       if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
         const aiAnswer = data.candidates[0].content.parts[0].text;
         setAiChatHistory([...newHistory, { sender: 'ai', text: aiAnswer }]);
       } else {
-        throw new Error("Gagal menerima respons balik dari AI.");
+        throw new Error("Format respons API tidak sesuai.");
       }
 
     } catch (err) {
-      console.error("Gemini AI Error:", err);
+      console.error("Gemini API Error Detail:", err);
       
-      // Fallback jawaban cerdas lokal jika API Key belum dipasang
-      let fallbackAnswer = `⚠️ [Koneksi Gemini AI]: ${err.message}\n\nNamun berdasarkan data lokal saat ini:\n• Total Jamaah: ${jamaah.length} orang\n• Total Booking: ${bookings.length} transaksi\n• Total Setoran: Rp ${totalOmset.toLocaleString('id-ID')}\n• Margin Laba: Rp ${netMargin.toLocaleString('id-ID')}`;
+      let fallbackAnswer = `⚠️ [Koneksi Gemini AI]: ${err.message}\n\nRingkasan Data Real-time:\n• Total Jamaah: ${jamaah.length} orang\n• Total Booking: ${bookings.length} transaksi\n• Total Setoran: Rp ${totalOmset.toLocaleString('id-ID')}\n• Margin Laba: Rp ${netMargin.toLocaleString('id-ID')}`;
 
       setAiChatHistory([...newHistory, { sender: 'ai', text: fallbackAnswer }]);
     }
