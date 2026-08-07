@@ -125,6 +125,8 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     setUserQuery('');
     setAnalyzing(true);
 
+    const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+
     const systemContextData = {
       summary: {
         totalOmsetReal: totalOmset,
@@ -173,7 +175,7 @@ Jawablah pertanyaan pengguna berdasarkan DATABASE REAL-TIME ERP berikut:
 ${JSON.stringify(systemContextData, null, 2)}
 ----------------------------------
 
-PERTUANAN PENGGUNA: "${currentQuery}"
+PERMANTAAN PENGGUNA: "${currentQuery}"
 
 INSTRUKSI:
 - Jawablah dengan ramah, profesional, serta singkat dan padat.
@@ -181,24 +183,51 @@ INSTRUKSI:
 - Jika data tidak ditemukan di database, sampaikan bahwa data tersebut belum tercatat.
 `;
 
+    // Daftar nama model aktif resmi Google Gemini
+    const activeModels = ['gemini-2.5-flash', 'gemini-3.6-flash'];
+
     try {
-      // Memanggil Internal API Route Backend
-      const res = await fetch('/api/ai-chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ promptText })
-      });
+      if (!apiKey) {
+        throw new Error("API Key Gemini tidak terdeteksi di Environment Variables.");
+      }
 
-      const data = await res.json();
+      let aiAnswer = null;
+      let lastErr = '';
 
-      if (res.ok && data.text) {
-        setAiChatHistory([...newHistory, { sender: 'ai', text: data.text }]);
+      for (const modelName of activeModels) {
+        try {
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: promptText }] }]
+              })
+            }
+          );
+
+          const data = await response.json();
+
+          if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+            aiAnswer = data.candidates[0].content.parts[0].text;
+            break;
+          } else if (data.error) {
+            lastErr = data.error.message;
+          }
+        } catch (err) {
+          lastErr = err.message;
+        }
+      }
+
+      if (aiAnswer) {
+        setAiChatHistory([...newHistory, { sender: 'ai', text: aiAnswer }]);
       } else {
-        throw new Error(data.error || 'Gagal menerima balasan dari AI Server.');
+        throw new Error(lastErr || "Gagal menghubungi server Google Gemini.");
       }
 
     } catch (err) {
-      console.error("AI Fetch Error:", err);
+      console.error("Gemini API Error:", err);
       
       let fallbackAnswer = `⚠️ [Error AI]: ${err.message}\n\nRingkasan Data Real-time:\n• Total Jamaah: ${jamaah.length} orang\n• Total Booking: ${bookings.length} transaksi\n• Total Setoran: Rp ${totalOmset.toLocaleString('id-ID')}\n• Margin Laba: Rp ${netMargin.toLocaleString('id-ID')}`;
 
@@ -207,7 +236,6 @@ INSTRUKSI:
 
     setAnalyzing(false);
   };
-
   const insightsList = generateInsights();
 
   return (
