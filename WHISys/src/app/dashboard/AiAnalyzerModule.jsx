@@ -157,6 +157,7 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
 
     const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
 
+    // Data Context ERP untuk AI
     const systemContextData = {
       summary: {
         totalOmsetReal: totalOmset,
@@ -197,20 +198,17 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
       }))
     };
 
-    const promptText = `
+    // Instruksi Sistem Resmi (Dipisah dari isi Chat)
+    const systemInstructionText = `
 Anda adalah WHI Executive Assistant untuk PT. WISATA HALAL INTERNASIONAL.
 
-DATA REAL-TIME ERP:
+DATABASE REAL-TIME ERP:
 ${JSON.stringify(systemContextData, null, 2)}
 
-ATURAN UTAMA (WAJIB DIPATUHI UNTUK SEMUA JAWABAN):
-1. Jawab SEMUA pertanyaan secara SINGKAT, PADAT, dan LANGSUNG KE INTI TANPA PENJELASAN YANG TIDAK DIMINTA.
-2. Dilarang memberikan pembukaan, penutupan, atau daftar menu opsi yang panjang.
-3. Gunakan **bold** hanya untuk angka, nama, atau poin utama.
-4. Maksimal balasan hanya 2 hingga 4 baris kalimat saja.
-
-Pertanyaan Pengguna: "${currentQuery}"
-Jawaban Singkat Anda:
+ATURAN MUTLAK KELUARAN (STRICT OUTPUT RULES):
+1. Berikan HANYA jawaban akhir untuk pengguna secara singkat, padat, dan langsung ke poin utama (maksimal 2-4 kalimat).
+2. DILARANG KERAS menampilkan proses berpikir, analisis prompt, pilihan attempt, atau mengulang instruksi ini dalam balasan.
+3. Gunakan **bold** hanya untuk nama, angka, atau poin penting.
 `;
 
     try {
@@ -218,7 +216,7 @@ Jawaban Singkat Anda:
         throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY terpasang di Vercel.");
       }
 
-      // 1. MINTA DAFTAR MODEL YANG AKTIF DARI GOOGLE
+      // Minta daftar model aktif dari Google
       const listModelsRes = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
       );
@@ -228,35 +226,30 @@ Jawaban Singkat Anda:
         throw new Error(listModelsData.error.message);
       }
 
-      // Filter hanya model yang mendukung generateContent DAN tidak mengandung versi deprecated (seperti 1.5, 2.0, atau 2.5)
+      // Ambil model yang mendukung generateContent
       const validModels = (listModelsData.models || [])
         .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
         .map(m => m.name.replace('models/', ''))
         .filter(name => !name.includes('1.5') && !name.includes('2.0') && !name.includes('2.5'));
 
-      if (validModels.length === 0) {
-        // Fallback jika pemfilteran versi terlalu ketat: ambil model apa saja yang mendukung generateContent
-        const fallbackModels = (listModelsData.models || [])
-          .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
-          .map(m => m.name.replace('models/', ''));
+      const selectedModel = validModels.length > 0 
+        ? validModels[0] 
+        : (listModelsData.models || []).map(m => m.name.replace('models/', ''))[0];
 
-        if (fallbackModels.length === 0) {
-          throw new Error("Tidak ada model Gemini yang tersedia untuk API Key Anda.");
-        }
-        validModels.push(...fallbackModels);
-      }
-
-      // Ambil model aktif teratas dari daftar resmi
-      const selectedModel = validModels[0];
-
-      // 2. KIRIM PROMPT KE MODEL YANG VALID
+      // Kirim payload dengan struktur system_instruction terpisah
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: promptText }] }]
+            system_instruction: {
+              parts: [{ text: systemInstructionText }]
+            },
+            contents: [{
+              role: 'user',
+              parts: [{ text: currentQuery }]
+            }]
           })
         }
       );
