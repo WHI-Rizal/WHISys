@@ -3,8 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { Sparkles, TrendingUp, AlertTriangle, Lightbulb, Wallet, Plane, RefreshCw, MessageSquare, Send } from 'lucide-react';
+import { Sparkles, TrendingUp, AlertTriangle, Lightbulb, Wallet, Plane, RefreshCw, MessageSquare, Send, Maximize2, Minimize2, X } from 'lucide-react';
 
 export default function AiAnalyzerModule({ theme = 'dark' }) {
   const isDark = theme === 'dark';
@@ -20,6 +19,9 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   
+  // State Maximize/Fullscreen Chat
+  const [isChatMaximized, setIsChatMaximized] = useState(false);
+  
   const [packages, setPackages] = useState([]);
   const [jamaah, setJamaah] = useState([]);
   const [bookings, setBookings] = useState([]);
@@ -30,7 +32,7 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
   const [aiChatHistory, setAiChatHistory] = useState([
     {
       sender: 'ai',
-      text: 'Assalamu\'alaikum! Saya WHI Executive Intelligence Advisor yang terhubung langsung ke Google Gemini AI SDK. Tanyakan apa saja mengenai data jamaah, tagihan, laba rugi, hingga proyeksi paket travel Anda.'
+      text: 'Assalamu\'alaikum! Saya WHI Executive Intelligence Advisor yang terhubung langsung ke Google Gemini AI. Tanyakan apa saja mengenai data jamaah, tagihan, laba rugi, hingga proyeksi paket travel Anda.'
     }
   ]);
 
@@ -115,6 +117,28 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     return insights;
   };
 
+  // FUNGSI HELPER UNTUK CLEAN RENDER SIMPEL MARKDOWN (**bold** & *italic*)
+  const renderFormattedText = (rawText) => {
+    if (!rawText) return '';
+    
+    // Pecah per paragraf/baris
+    const lines = rawText.split('\n');
+    return lines.map((line, lIdx) => {
+      // Sederhana: ganti **text** dengan <strong>
+      const parts = line.split(/(\*\*.*?\*\*)/g);
+      return (
+        <div key={lIdx} className={line.trim() === '' ? 'h-2' : 'min-h-[1.2em]'}>
+          {parts.map((part, pIdx) => {
+            if (part.startsWith('**') && part.endsWith('**')) {
+              return <strong key={pIdx} className="font-semibold text-emerald-400">{part.slice(2, -2)}</strong>;
+            }
+            return part;
+          })}
+        </div>
+      );
+    });
+  };
+
   const handleSendChat = async (e) => {
     e.preventDefault();
     if (!userQuery.trim()) return;
@@ -175,26 +199,25 @@ Jawablah pertanyaan pengguna berdasarkan DATABASE REAL-TIME ERP berikut:
 ${JSON.stringify(systemContextData, null, 2)}
 ----------------------------------
 
-PERMANTAAN PENGGUNA: "${currentQuery}"
+PERTUANAN PENGGUNA: "${currentQuery}"
 
 INSTRUKSI:
-- Jawablah dengan ramah, profesional, serta singkat dan padat.
-- Gunakan poin-poin/bold agar mudah dibaca oleh eksekutif.
+- Jawablah secara ramah, profesional, serta jelas.
+- Gunakan format **bold** untuk poin-poin atau angka penting.
 - Jika data tidak ditemukan di database, sampaikan bahwa data tersebut belum tercatat.
 `;
 
-    // Daftar nama model aktif resmi Google Gemini
-    const activeModels = ['gemini-2.5-flash', 'gemini-3.6-flash'];
+    const availableModels = ['gemini-2.5-flash', 'gemini-2.0-flash'];
 
     try {
       if (!apiKey) {
-        throw new Error("API Key Gemini tidak terdeteksi di Environment Variables.");
+        throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY terpasang.");
       }
 
       let aiAnswer = null;
       let lastErr = '';
 
-      for (const modelName of activeModels) {
+      for (const modelName of availableModels) {
         try {
           const response = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
@@ -211,7 +234,7 @@ INSTRUKSI:
 
           if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
             aiAnswer = data.candidates[0].content.parts[0].text;
-            break;
+            break; 
           } else if (data.error) {
             lastErr = data.error.message;
           }
@@ -223,12 +246,11 @@ INSTRUKSI:
       if (aiAnswer) {
         setAiChatHistory([...newHistory, { sender: 'ai', text: aiAnswer }]);
       } else {
-        throw new Error(lastErr || "Gagal menghubungi server Google Gemini.");
+        throw new Error(lastErr || "Gagal mendapatkan respons dari Google Gemini.");
       }
 
     } catch (err) {
-      console.error("Gemini API Error:", err);
-      
+      console.error("Gemini API Error Detail:", err);
       let fallbackAnswer = `⚠️ [Error AI]: ${err.message}\n\nRingkasan Data Real-time:\n• Total Jamaah: ${jamaah.length} orang\n• Total Booking: ${bookings.length} transaksi\n• Total Setoran: Rp ${totalOmset.toLocaleString('id-ID')}\n• Margin Laba: Rp ${netMargin.toLocaleString('id-ID')}`;
 
       setAiChatHistory([...newHistory, { sender: 'ai', text: fallbackAnswer }]);
@@ -236,10 +258,13 @@ INSTRUKSI:
 
     setAnalyzing(false);
   };
+
   const insightsList = generateInsights();
 
+  // RENDER DUA KONDISI: NORMAL VIEW & MAXIMIZED FULLSCREEN VIEW
   return (
     <div className="space-y-6">
+      {/* HEADER BOARD AI */}
       <div className={`flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${styles.cardBg} p-6 rounded-xl border`}>
         <div>
           <h3 className={`text-xl font-bold ${styles.textTitle} flex items-center gap-2`}>
@@ -255,6 +280,7 @@ INSTRUKSI:
         </button>
       </div>
 
+      {/* METRIK REAL-TIME METRICS */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className={`${styles.cardBg} p-4 rounded-xl border`}>
           <div className="flex items-center justify-between mb-2">
@@ -291,7 +317,10 @@ INSTRUKSI:
         </div>
       </div>
 
+      {/* GRID INSIGHTS & CHATBOT ADVISOR */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* REKOMENDASI AUTO-GENERATED */}
         <div className={`lg:col-span-2 ${styles.cardBg} p-6 rounded-xl border space-y-4`}>
           <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} pb-3`}>
             <Lightbulb className="w-4 h-4 text-amber-400" /> Rekomendasi Eksekutif Auto-Generated
@@ -323,28 +352,38 @@ INSTRUKSI:
           )}
         </div>
 
-        <div className={`${styles.cardBg} p-5 rounded-xl border flex flex-col justify-between h-[480px]`}>
+        {/* CHATBOT EXECUTIVE ADVISOR (NORMAL COMPACT MODE) */}
+        <div className={`${styles.cardBg} p-5 rounded-xl border flex flex-col justify-between h-[520px]`}>
           <div>
-            <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} pb-3 mb-3`}>
-              <MessageSquare className="w-4 h-4 text-emerald-400" /> Executive AI Chat Advisor
-            </h4>
+            <div className={`flex items-center justify-between border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} pb-3 mb-3`}>
+              <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2`}>
+                <MessageSquare className="w-4 h-4 text-emerald-400" /> Executive AI Chat Advisor
+              </h4>
+              <button
+                onClick={() => setIsChatMaximized(true)}
+                title="Perbesar Layar Chat"
+                className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-emerald-400 rounded-lg transition-colors"
+              >
+                <Maximize2 className="w-4 h-4" />
+              </button>
+            </div>
 
-            <div className="space-y-3 overflow-y-auto max-h-[330px] pr-1 text-xs">
+            <div className="space-y-3 overflow-y-auto max-h-[370px] pr-1 text-xs">
               {aiChatHistory.map((chat, idx) => (
                 <div 
                   key={idx} 
-                  className={`p-3 rounded-xl max-w-[90%] whitespace-pre-line ${
+                  className={`p-3.5 rounded-xl max-w-[92%] leading-relaxed ${
                     chat.sender === 'user' 
                       ? 'bg-emerald-600 text-white ml-auto' 
-                      : `${styles.innerBg} ${styles.textTitle} border border-slate-700/50`
+                      : `${styles.innerBg} ${styles.textTitle} border border-slate-800/80`
                   }`}
                 >
-                  {chat.text}
+                  {chat.sender === 'ai' ? renderFormattedText(chat.text) : chat.text}
                 </div>
               ))}
               {analyzing && (
                 <div className={`p-2.5 rounded-xl ${styles.innerBg} text-emerald-400 italic text-[11px] animate-pulse`}>
-                  Gemini AI SDK sedang menganalisis database & menyusun jawaban...
+                  Gemini AI sedang membaca database & menyusun jawaban...
                 </div>
               )}
             </div>
@@ -353,7 +392,7 @@ INSTRUKSI:
           <form onSubmit={handleSendChat} className="mt-3 flex gap-2">
             <input
               type="text"
-              placeholder="Tanyakan misal: Siapa jamaah yang belum lunas?"
+              placeholder="Tanyakan analisis paket/jamaah..."
               className={`flex-1 ${styles.inputBg} p-2.5 rounded-lg text-xs focus:outline-none focus:border-emerald-500`}
               value={userQuery}
               onChange={(e) => setUserQuery(e.target.value)}
@@ -361,13 +400,91 @@ INSTRUKSI:
             <button 
               type="submit" 
               disabled={analyzing}
-              className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-1"
+              className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
             >
               <Send className="w-3.5 h-3.5" />
             </button>
           </form>
         </div>
+
       </div>
+
+      {/* OVERLAY MODAL MAXIMIZED FULLSCREEN CHAT */}
+      {isChatMaximized && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-4 md:p-8 flex items-center justify-center animate-in fade-in duration-200">
+          <div className={`w-full max-w-5xl h-[90vh] ${styles.cardBg} rounded-2xl border shadow-2xl flex flex-col justify-between p-6 relative`}>
+            
+            {/* HEADER FULLSCREEN CHAT */}
+            <div className={`flex items-center justify-between border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} pb-4 mb-4`}>
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
+                  <Sparkles className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className={`text-base font-bold ${styles.textTitle}`}>WHI Executive Intelligence Advisor (Fullscreen Mode)</h3>
+                  <p className={`text-xs ${styles.textSub}`}>Mode baca luas untuk analisis data mendalam & strategi bisnis</p>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsChatMaximized(false)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-medium transition-colors"
+                >
+                  <Minimize2 className="w-4 h-4" /> Minimize
+                </button>
+                <button
+                  onClick={() => setIsChatMaximized(false)}
+                  className="p-1.5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* BODY CHAT FULLSCREEN LEBAR */}
+            <div className="flex-1 overflow-y-auto space-y-4 pr-3 text-sm">
+              {aiChatHistory.map((chat, idx) => (
+                <div 
+                  key={idx} 
+                  className={`p-4 rounded-2xl max-w-[85%] leading-relaxed ${
+                    chat.sender === 'user' 
+                      ? 'bg-emerald-600 text-white ml-auto' 
+                      : `${styles.innerBg} ${styles.textTitle} border border-slate-800 shadow-md`
+                  }`}
+                >
+                  {chat.sender === 'ai' ? renderFormattedText(chat.text) : chat.text}
+                </div>
+              ))}
+              {analyzing && (
+                <div className={`p-3 rounded-2xl ${styles.innerBg} text-emerald-400 italic text-xs animate-pulse border border-emerald-500/20`}>
+                  Gemini AI sedang membaca seluruh database & menyusun laporan...
+                </div>
+              )}
+            </div>
+
+            {/* INPUT FIELD FULLSCREEN */}
+            <form onSubmit={handleSendChat} className="mt-4 flex gap-3 pt-3 border-t border-slate-800">
+              <input
+                type="text"
+                placeholder="Tanyakan analisis bisnis, strategi paket, atau data jamaah..."
+                className={`flex-1 ${styles.inputBg} p-3 rounded-xl text-sm focus:outline-none focus:border-emerald-500`}
+                value={userQuery}
+                onChange={(e) => setUserQuery(e.target.value)}
+              />
+              <button 
+                type="submit" 
+                disabled={analyzing}
+                className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white px-6 py-3 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all"
+              >
+                <Send className="w-4 h-4" /> Kirim
+              </button>
+            </form>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
