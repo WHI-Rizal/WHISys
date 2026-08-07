@@ -595,7 +595,7 @@ export default function SettingsModule({ theme = 'dark' }) {
                 <input
                   type="text"
                   required
-                  placeholder="Contoh: Ahmad Rizal, S.E."
+                  placeholder="Contoh: Ahmad Rizal."
                   value={newUserForm.fullName}
                   onChange={(e) => setNewUserForm({ ...newUserForm, fullName: e.target.value })}
                   className={`w-full ${styles.inputBg} p-3 rounded-xl text-xs focus:outline-none focus:border-emerald-500`}
