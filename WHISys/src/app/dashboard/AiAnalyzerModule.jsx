@@ -207,8 +207,7 @@ INSTRUKSI:
 - Jika data tidak ditemukan di database, sampaikan bahwa data tersebut belum tercatat.
 `;
 
-    const availableModels = ['gemini-2.5-flash', 'gemini-2.0-flash'];
-
+    const availableModels = ['gemini-2.5-flash', 'gemini-1.5-flash-latest'];
     try {
       if (!apiKey) {
         throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY terpasang.");
