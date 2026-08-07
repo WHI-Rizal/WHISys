@@ -182,66 +182,61 @@ ${JSON.stringify(systemContextData, null, 2)}
 PERTUANAN PENGGUNA: "${currentQuery}"
 
 INSTRUKSI:
-- Jawab secara profesional, padat, dan informatif.
-- Gunakan poin-poin/bold jika perlu.
-- Jika data tidak ditemukan di database, katakan belum ada data terkait.
+- Jawablah dengan ramah, profesional, serta singkat dan padat.
+- Gunakan poin-poin/bold agar mudah dibaca oleh eksekutif.
+- Jika data tidak ditemukan di database, sampaikan bahwa data tersebut belum tercatat.
 `;
+
+    // Daftar nama model yang dicoba secara berurutan
+    const candidateModels = [
+      'gemini-2.5-flash',
+      'gemini-1.5-flash-latest',
+      'gemini-1.5-pro'
+    ];
 
     try {
       if (!apiKey) {
         throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY diset di Environment Variables.");
       }
 
-      // Memanggil Endpoint Gemini REST API v1beta
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: 'user',
-                parts: [{ text: promptText }]
-              }
-            ]
-          })
-        }
-      );
+      let aiAnswer = null;
+      let lastErrorMessage = '';
 
-      const data = await response.json();
+      for (const modelName of candidateModels) {
+        try {
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [
+                  {
+                    role: 'user',
+                    parts: [{ text: promptText }]
+                  }
+                ]
+              })
+            }
+          );
 
-      if (data.error) {
-        // Jika model gemini-1.5-flash tidak merespons, coba fallback otomatis ke gemini-2.5-flash
-        const fallbackResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: promptText }] }]
-            })
+          const data = await response.json();
+
+          if (!data.error && data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+            aiAnswer = data.candidates[0].content.parts[0].text;
+            break; // Berhasil mendapatkan jawaban, keluar dari loop
+          } else if (data.error) {
+            lastErrorMessage = data.error.message || `Error pada model ${modelName}`;
           }
-        );
-        const fallbackData = await fallbackResponse.json();
-
-        if (fallbackData.error) {
-          throw new Error(data.error.message || fallbackData.error.message);
-        }
-
-        if (fallbackData.candidates && fallbackData.candidates[0]?.content?.parts[0]?.text) {
-          const aiAnswer = fallbackData.candidates[0].content.parts[0].text;
-          setAiChatHistory([...newHistory, { sender: 'ai', text: aiAnswer }]);
-          setAnalyzing(false);
-          return;
+        } catch (err) {
+          lastErrorMessage = err.message;
         }
       }
 
-      if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
-        const aiAnswer = data.candidates[0].content.parts[0].text;
+      if (aiAnswer) {
         setAiChatHistory([...newHistory, { sender: 'ai', text: aiAnswer }]);
       } else {
-        throw new Error("Gagal memproses jawaban dari Gemini.");
+        throw new Error(lastErrorMessage || "Gagal mendapatkan respons dari seluruh model Gemini API.");
       }
 
     } catch (err) {
