@@ -117,28 +117,34 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     return insights;
   };
 
-  // FUNGSI HELPER UNTUK CLEAN RENDER SIMPEL MARKDOWN (**bold** & *italic*)
+  // Safe Helper Render Format Markdown (**bold**)
   const renderFormattedText = (rawText) => {
-    if (!rawText) return '';
-    
-    // Pecah per paragraf/baris
-    const lines = rawText.split('\n');
-    return lines.map((line, lIdx) => {
-      // Sederhana: ganti **text** dengan <strong>
-      const parts = line.split(/(\*\*.*?\*\*)/g);
-      return (
-        <div key={lIdx} className={line.trim() === '' ? 'h-2' : 'min-h-[1.2em]'}>
-          {parts.map((part, pIdx) => {
-            if (part.startsWith('**') && part.endsWith('**')) {
-              return <strong key={pIdx} className="font-semibold text-emerald-400">{part.slice(2, -2)}</strong>;
-            }
-            return part;
-          })}
-        </div>
-      );
-    });
+    if (!rawText) return null;
+    try {
+      const lines = String(rawText).split('\n');
+      return lines.map((line, lIdx) => {
+        const parts = line.split(/(\*\*.*?\*\*)/g);
+        return (
+          <div key={lIdx} className={line.trim() === '' ? 'h-2' : 'min-h-[1.25em]'}>
+            {parts.map((part, pIdx) => {
+              if (part && part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+                return (
+                  <strong key={pIdx} className="font-bold text-emerald-400">
+                    {part.slice(2, -2)}
+                  </strong>
+                );
+              }
+              return part;
+            })}
+          </div>
+        );
+      });
+    } catch (e) {
+      return <div>{rawText}</div>;
+    }
   };
 
+  // Fungsi Chat Handler khusus Gemini REST API (gemini-2.5-flash)
   const handleSendChat = async (e) => {
     e.preventDefault();
     if (!userQuery.trim()) return;
@@ -207,10 +213,12 @@ INSTRUKSI:
 - Jika data tidak ditemukan di database, sampaikan bahwa data tersebut belum tercatat.
 `;
 
+    // Model Aktif Resmi Google Gemini
     const availableModels = ['gemini-2.5-flash', 'gemini-1.5-flash-latest'];
+
     try {
       if (!apiKey) {
-        throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY terpasang.");
+        throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY terpasang di Vercel.");
       }
 
       let aiAnswer = null;
@@ -260,7 +268,6 @@ INSTRUKSI:
 
   const insightsList = generateInsights();
 
-  // RENDER DUA KONDISI: NORMAL VIEW & MAXIMIZED FULLSCREEN VIEW
   return (
     <div className="space-y-6">
       {/* HEADER BOARD AI */}
@@ -279,7 +286,7 @@ INSTRUKSI:
         </button>
       </div>
 
-      {/* METRIK REAL-TIME METRICS */}
+      {/* METRIK REAL-TIME */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className={`${styles.cardBg} p-4 rounded-xl border`}>
           <div className="flex items-center justify-between mb-2">
@@ -316,7 +323,7 @@ INSTRUKSI:
         </div>
       </div>
 
-      {/* GRID INSIGHTS & CHATBOT ADVISOR */}
+      {/* INSIGHTS & CHATBOT ADVISOR */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* REKOMENDASI AUTO-GENERATED */}
@@ -441,7 +448,7 @@ INSTRUKSI:
               </div>
             </div>
 
-            {/* BODY CHAT FULLSCREEN LEBAR */}
+            {/* BODY CHAT FULLSCREEN */}
             <div className="flex-1 overflow-y-auto space-y-4 pr-3 text-sm">
               {aiChatHistory.map((chat, idx) => (
                 <div 
