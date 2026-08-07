@@ -69,7 +69,7 @@ export default function DashboardPage() {
     let idleTimer;
 
     const handleAutoLogout = async () => {
-      alert("Sesi Anda telah berakhir karena tidak ada aktivitas selama 15 menit. Silakan login kembali demi keamanan.");
+      alert("Sesi Anda telah berakhir karena tidak ada aktivitas selama 30 menit. Silakan login kembali demi keamanan.");
       try {
         await signOut(auth);
         window.location.href = '/login';
