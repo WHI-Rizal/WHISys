@@ -213,12 +213,12 @@ INSTRUKSI:
 - Jika data tidak ditemukan di database, sampaikan bahwa data tersebut belum tercatat.
 `;
 
-    // Model Aktif Resmi Google Gemini
+    // Nama model resmi aktif Google Gemini
     const availableModels = ['gemini-2.5-flash', 'gemini-2.0-flash-exp'];
 
     try {
       if (!apiKey) {
-        throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY terpasang di Vercel.");
+        throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY terpasang di Environment Variables.");
       }
 
       let aiAnswer = null;
