@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
-import { Sparkles, TrendingUp, AlertTriangle, Lightbulb, Users, Wallet, Plane, RefreshCw, MessageSquare, Send } from 'lucide-react';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { Sparkles, TrendingUp, AlertTriangle, Lightbulb, Wallet, Plane, RefreshCw, MessageSquare, Send } from 'lucide-react';
 
 export default function AiAnalyzerModule({ theme = 'dark' }) {
   const isDark = theme === 'dark';
@@ -19,19 +20,17 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   
-  // Data Mentah dari Firestore
   const [packages, setPackages] = useState([]);
   const [jamaah, setJamaah] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [incomes, setIncomes] = useState([]);
   const [vendorCosts, setVendorCosts] = useState([]);
 
-  // State Pertanyaan Chatbot AI
   const [userQuery, setUserQuery] = useState('');
   const [aiChatHistory, setAiChatHistory] = useState([
     {
       sender: 'ai',
-      text: 'Assalamu\'alaikum! Saya WHI Executive Intelligence Advisor yang terhubung langsung ke Google Gemini AI. Tanyakan apa saja mengenai data jamaah, tagihan, laba rugi, hingga proyeksi paket travel Anda.'
+      text: 'Assalamu\'alaikum! Saya WHI Executive Intelligence Advisor yang terhubung langsung ke Google Gemini AI SDK. Tanyakan apa saja mengenai data jamaah, tagihan, laba rugi, hingga proyeksi paket travel Anda.'
     }
   ]);
 
@@ -61,7 +60,6 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     fetchAllData();
   }, []);
 
-  // KALKULASI INDIKATOR BISNIS
   const totalOmset = incomes.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const totalVendorCost = vendorCosts.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const netMargin = totalOmset - totalVendorCost;
@@ -69,7 +67,6 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     ? Math.round((bookings.length / packages.reduce((acc, p) => acc + (Number(p.quotaTotal) || 0), 0)) * 100) || 0
     : 0;
 
-  // REKOMENDASI OTOMATIS BERBASIS ALGORITMA HEURISTIK
   const generateInsights = () => {
     const insights = [];
 
@@ -118,7 +115,6 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     return insights;
   };
 
-  // FUNGSI MEMANGGIL GEMINI AI UNTUK MENJAWAB PERTANYAAN BEBAS
   const handleSendChat = async (e) => {
     e.preventDefault();
     if (!userQuery.trim()) return;
@@ -187,62 +183,29 @@ INSTRUKSI:
 - Jika data tidak ditemukan di database, sampaikan bahwa data tersebut belum tercatat.
 `;
 
-    // Daftar nama model yang dicoba secara berurutan
-    const candidateModels = [
-      'gemini-2.5-flash',
-      'gemini-1.5-flash-latest',
-      'gemini-1.5-pro'
-    ];
-
     try {
       if (!apiKey) {
-        throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY diset di Environment Variables.");
+        throw new Error("API Key Gemini tidak terdeteksi di Environment Variables.");
       }
 
-      let aiAnswer = null;
-      let lastErrorMessage = '';
+      // MENGGUNAKAN SDK RESMI GOOGLE GENERATIVE AI
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-      for (const modelName of candidateModels) {
-        try {
-          const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [
-                  {
-                    role: 'user',
-                    parts: [{ text: promptText }]
-                  }
-                ]
-              })
-            }
-          );
-
-          const data = await response.json();
-
-          if (!data.error && data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
-            aiAnswer = data.candidates[0].content.parts[0].text;
-            break; // Berhasil mendapatkan jawaban, keluar dari loop
-          } else if (data.error) {
-            lastErrorMessage = data.error.message || `Error pada model ${modelName}`;
-          }
-        } catch (err) {
-          lastErrorMessage = err.message;
-        }
-      }
+      const result = await model.generateContent(promptText);
+      const response = await result.response;
+      const aiAnswer = response.text();
 
       if (aiAnswer) {
         setAiChatHistory([...newHistory, { sender: 'ai', text: aiAnswer }]);
       } else {
-        throw new Error(lastErrorMessage || "Gagal mendapatkan respons dari seluruh model Gemini API.");
+        throw new Error("Gagal menerima respons dari Gemini SDK.");
       }
 
     } catch (err) {
-      console.error("Gemini API Error Detail:", err);
+      console.error("Gemini SDK Error Detail:", err);
       
-      let fallbackAnswer = `⚠️ [Koneksi Gemini AI]: ${err.message}\n\nRingkasan Data Real-time:\n• Total Jamaah: ${jamaah.length} orang\n• Total Booking: ${bookings.length} transaksi\n• Total Setoran: Rp ${totalOmset.toLocaleString('id-ID')}\n• Margin Laba: Rp ${netMargin.toLocaleString('id-ID')}`;
+      let fallbackAnswer = `⚠️ [Error AI]: ${err.message}\n\nRingkasan Data Real-time:\n• Total Jamaah: ${jamaah.length} orang\n• Total Booking: ${bookings.length} transaksi\n• Total Setoran: Rp ${totalOmset.toLocaleString('id-ID')}\n• Margin Laba: Rp ${netMargin.toLocaleString('id-ID')}`;
 
       setAiChatHistory([...newHistory, { sender: 'ai', text: fallbackAnswer }]);
     }
@@ -254,7 +217,6 @@ INSTRUKSI:
 
   return (
     <div className="space-y-6">
-      {/* HEADER BOARD AI */}
       <div className={`flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${styles.cardBg} p-6 rounded-xl border`}>
         <div>
           <h3 className={`text-xl font-bold ${styles.textTitle} flex items-center gap-2`}>
@@ -270,7 +232,6 @@ INSTRUKSI:
         </button>
       </div>
 
-      {/* METRIK REAL-TIME METRICS */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className={`${styles.cardBg} p-4 rounded-xl border`}>
           <div className="flex items-center justify-between mb-2">
@@ -307,10 +268,7 @@ INSTRUKSI:
         </div>
       </div>
 
-      {/* GRID INSIGHTS & CHATBOT ADVISOR */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* KOLOM REKOMENDASI PINTAR */}
         <div className={`lg:col-span-2 ${styles.cardBg} p-6 rounded-xl border space-y-4`}>
           <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} pb-3`}>
             <Lightbulb className="w-4 h-4 text-amber-400" /> Rekomendasi Eksekutif Auto-Generated
@@ -342,7 +300,6 @@ INSTRUKSI:
           )}
         </div>
 
-        {/* CHATBOT EXECUTIVE ADVISOR */}
         <div className={`${styles.cardBg} p-5 rounded-xl border flex flex-col justify-between h-[480px]`}>
           <div>
             <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} pb-3 mb-3`}>
@@ -364,7 +321,7 @@ INSTRUKSI:
               ))}
               {analyzing && (
                 <div className={`p-2.5 rounded-xl ${styles.innerBg} text-emerald-400 italic text-[11px] animate-pulse`}>
-                  Gemini AI sedang membaca database & menganalisis jawaban...
+                  Gemini AI SDK sedang menganalisis database & menyusun jawaban...
                 </div>
               )}
             </div>
@@ -387,7 +344,6 @@ INSTRUKSI:
             </button>
           </form>
         </div>
-
       </div>
     </div>
   );
