@@ -12,6 +12,7 @@ import {
   PackageCheck, 
   UserCheck, 
   Sparkles,
+  Settings,
   LogOut, 
   Plus, 
   Calendar,
@@ -337,7 +338,7 @@ export default function DashboardPage() {
               onClick={() => changeMenu('agents')} 
             />
 
-            <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Smart Assistant</p>
+            <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Smart Assistant & Config</p>
 
             <SidebarItem 
               icon={Sparkles} 
@@ -346,6 +347,15 @@ export default function DashboardPage() {
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
               onClick={() => changeMenu('ai-analyzer')} 
+            />
+
+            <SidebarItem 
+              icon={Settings} 
+              label="Pengaturan Sistem" 
+              active={activeMenu === 'settings'} 
+              activeClass={currentTheme.activeMenu}
+              subTextClass={currentTheme.subText}
+              onClick={() => changeMenu('settings')} 
             />
           </nav>
         </div>
@@ -562,25 +572,27 @@ export default function DashboardPage() {
         {/* MODUL AI BUSINESS INTELLIGENCE */}
         {activeMenu === 'ai-analyzer' && <AiAnalyzerModule theme={theme} />}
 
+        {/* MODUL PENGATURAN SISTEM */}
         {activeMenu === 'settings' && <SettingsModule theme={theme} />}
 
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
-{activeMenu !== 'dashboard' && 
- activeMenu !== 'packages' && 
- activeMenu !== 'jamaah' && 
- activeMenu !== 'bookings' && 
- activeMenu !== 'finance' && 
- activeMenu !== 'ai-analyzer' && (
-  <div className={`${currentTheme.card} border rounded-xl p-12 text-center`}>
-    <div className={`p-4 ${theme === 'dark' ? 'bg-white/5' : 'bg-slate-100'} ${currentTheme.subText} w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center`}>
-      <Plane className="w-8 h-8" />
-    </div>
-    <h3 className={`text-xl font-bold ${currentTheme.headingText} mb-2`}>Modul {activeMenu.toUpperCase()}</h3>
-    <p className={`${currentTheme.subText} text-sm max-w-md mx-auto`}>
-      Fitur ERP ini sedang disiapkan untuk menghubungkan data langsung ke koleksi Firebase Firestore WHISys.
-    </p>
-  </div>
-)}
+        {activeMenu !== 'dashboard' && 
+         activeMenu !== 'packages' && 
+         activeMenu !== 'jamaah' && 
+         activeMenu !== 'bookings' && 
+         activeMenu !== 'finance' && 
+         activeMenu !== 'ai-analyzer' && 
+         activeMenu !== 'settings' && (
+          <div className={`${currentTheme.card} border rounded-xl p-12 text-center`}>
+            <div className={`p-4 ${theme === 'dark' ? 'bg-white/5' : 'bg-slate-100'} ${currentTheme.subText} w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center`}>
+              <Plane className="w-8 h-8" />
+            </div>
+            <h3 className={`text-xl font-bold ${currentTheme.headingText} mb-2`}>Modul {activeMenu.toUpperCase()}</h3>
+            <p className={`${currentTheme.subText} text-sm max-w-md mx-auto`}>
+              Fitur ERP ini sedang disiapkan untuk menghubungkan data langsung ke koleksi Firebase Firestore WHISys.
+            </p>
+          </div>
+        )}
 
       </main>
     </div>
