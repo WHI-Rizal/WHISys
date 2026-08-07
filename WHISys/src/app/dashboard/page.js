@@ -63,6 +63,42 @@ export default function DashboardPage() {
     localStorage.setItem('whisys_theme', newTheme);
   };
 
+  // LOGIKA IDLE TIMEOUT AUTO LOGOUT (15 MENIT)
+  useEffect(() => {
+    const IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 Menit
+    let idleTimer;
+
+    const handleAutoLogout = async () => {
+      alert("Sesi Anda telah berakhir karena tidak ada aktivitas selama 15 menit. Silakan login kembali demi keamanan.");
+      try {
+        await signOut(auth);
+        window.location.href = '/login';
+      } catch (err) {
+        console.error("Gagal Auto Logout:", err);
+      }
+    };
+
+    const resetTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(handleAutoLogout, IDLE_TIMEOUT_MS);
+    };
+
+    const activityEvents = ['mousemove', 'keydown', 'mousedown', 'touchstart', 'scroll'];
+
+    activityEvents.forEach((event) => {
+      window.addEventListener(event, resetTimer);
+    });
+
+    resetTimer();
+
+    return () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      activityEvents.forEach((event) => {
+        window.removeEventListener(event, resetTimer);
+      });
+    };
+  }, []);
+
   // Configuration Style untuk Dark Mode & Light Mode
   const themeStyles = {
     dark: {
@@ -118,10 +154,8 @@ export default function DashboardPage() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // FUNGSI MEMUAT DATA DASHBOARD & PENGHITUNGAN SEAT REAL-TIME
   const fetchDashboardData = async () => {
     try {
-      // 1. Ambil Data Jamaah
       const jamaahSnap = await getDocs(collection(db, 'jamaah'));
       const jamaahList = jamaahSnap.docs.map(doc => doc.data());
       
@@ -134,11 +168,9 @@ export default function DashboardPage() {
         return new Date(j.passportExpiry) < sixMonths;
       }).length;
 
-      // 2. Ambil Data All Bookings untuk Kalkulasi Sisa Seat Real-time
       const bkSnap = await getDocs(collection(db, 'bookings'));
       const bookingsList = bkSnap.docs.map(doc => doc.data());
 
-      // 3. Ambil Data Packages
       const pkgQuery = query(collection(db, 'packages'), orderBy('departureDate', 'asc'), limit(5));
       const pkgSnap = await getDocs(pkgQuery);
       
@@ -146,7 +178,6 @@ export default function DashboardPage() {
         const pkgData = docSnap.data();
         const pkgId = docSnap.id;
 
-        // Hitung jumlah booking untuk paket ini
         const bookedCount = bookingsList.filter(
           b => b.packageId === pkgId || b.packageName === pkgData.name
         ).length;
@@ -342,7 +373,7 @@ export default function DashboardPage() {
       {/* 2. AREA KONTEN UTAMA */}
       <main className="flex-1 overflow-y-auto p-8">
         
-        {/* HEADER BAR & SWITCHER MODE TERANG/GELAP */}
+        {/* HEADER BAR */}
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
             <h2 className={`text-2xl font-bold ${currentTheme.headingText}`}>WHISys ERP Executive Board</h2>
