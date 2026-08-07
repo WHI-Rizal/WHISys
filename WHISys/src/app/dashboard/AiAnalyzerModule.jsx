@@ -189,17 +189,22 @@ INSTRUKSI:
 
     try {
       if (!apiKey) {
-        throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY diset di Vercel/Environment.");
+        throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY diset di Environment Variables.");
       }
 
-      // Memanggil Gemini REST API v1beta
+      // Memanggil Endpoint Gemini REST API v1beta
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: promptText }] }]
+            contents: [
+              {
+                role: 'user',
+                parts: [{ text: promptText }]
+              }
+            ]
           })
         }
       );
@@ -207,14 +212,36 @@ INSTRUKSI:
       const data = await response.json();
 
       if (data.error) {
-        throw new Error(data.error.message || "Error dari Google Gemini API");
+        // Jika model gemini-1.5-flash tidak merespons, coba fallback otomatis ke gemini-2.5-flash
+        const fallbackResponse = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: promptText }] }]
+            })
+          }
+        );
+        const fallbackData = await fallbackResponse.json();
+
+        if (fallbackData.error) {
+          throw new Error(data.error.message || fallbackData.error.message);
+        }
+
+        if (fallbackData.candidates && fallbackData.candidates[0]?.content?.parts[0]?.text) {
+          const aiAnswer = fallbackData.candidates[0].content.parts[0].text;
+          setAiChatHistory([...newHistory, { sender: 'ai', text: aiAnswer }]);
+          setAnalyzing(false);
+          return;
+        }
       }
 
       if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
         const aiAnswer = data.candidates[0].content.parts[0].text;
         setAiChatHistory([...newHistory, { sender: 'ai', text: aiAnswer }]);
       } else {
-        throw new Error("Format respons API tidak sesuai.");
+        throw new Error("Gagal memproses jawaban dari Gemini.");
       }
 
     } catch (err) {
