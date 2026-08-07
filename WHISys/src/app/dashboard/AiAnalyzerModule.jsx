@@ -125,8 +125,6 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     setUserQuery('');
     setAnalyzing(true);
 
-    const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-
     const systemContextData = {
       summary: {
         totalOmsetReal: totalOmset,
@@ -184,26 +182,23 @@ INSTRUKSI:
 `;
 
     try {
-      if (!apiKey) {
-        throw new Error("API Key Gemini tidak terdeteksi di Environment Variables.");
-      }
+      // Memanggil Internal API Route Backend
+      const res = await fetch('/api/ai-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ promptText })
+      });
 
-      // MENGGUNAKAN SDK RESMI GOOGLE GENERATIVE AI
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const data = await res.json();
 
-      const result = await model.generateContent(promptText);
-      const response = await result.response;
-      const aiAnswer = response.text();
-
-      if (aiAnswer) {
-        setAiChatHistory([...newHistory, { sender: 'ai', text: aiAnswer }]);
+      if (res.ok && data.text) {
+        setAiChatHistory([...newHistory, { sender: 'ai', text: data.text }]);
       } else {
-        throw new Error("Gagal menerima respons dari Gemini SDK.");
+        throw new Error(data.error || 'Gagal menerima balasan dari AI Server.');
       }
 
     } catch (err) {
-      console.error("Gemini SDK Error Detail:", err);
+      console.error("AI Fetch Error:", err);
       
       let fallbackAnswer = `⚠️ [Error AI]: ${err.message}\n\nRingkasan Data Real-time:\n• Total Jamaah: ${jamaah.length} orang\n• Total Booking: ${bookings.length} transaksi\n• Total Setoran: Rp ${totalOmset.toLocaleString('id-ID')}\n• Margin Laba: Rp ${netMargin.toLocaleString('id-ID')}`;
 
