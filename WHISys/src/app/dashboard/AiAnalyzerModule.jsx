@@ -32,7 +32,7 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
   const [aiChatHistory, setAiChatHistory] = useState([
     {
       sender: 'ai',
-      text: 'Assalamu\'alaikum! Saya WHI Executive Intelligence Advisor yang terhubung langsung ke Google Gemini AI. Tanyakan apa saja mengenai data jamaah, tagihan, laba rugi, hingga proyeksi paket travel Anda.'
+      text: 'Assalamu\'alaikum! Saya WHI Executive Intelligence Advisor. Silakan tanyakan informasi data jamaah, tagihan, laba rugi, hingga paket travel Anda.'
     }
   ]);
 
@@ -144,7 +144,36 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     }
   };
 
-  // Fungsi Chat Handler khusus Gemini REST API (gemini-2.5-flash)
+  // Helper pembersih teks jika Gemini masih menyelipkan logika thinking
+  const cleanAiResponse = (rawText) => {
+    if (!rawText) return "";
+    let cleaned = rawText;
+
+    // Ambil kalimat terakhir di dalam tanda petik ganda jika AI menyertakan Polish/Option
+    if (cleaned.includes('"')) {
+      const matches = cleaned.match(/"([^"]+)"/g);
+      if (matches && matches.length > 0) {
+        cleaned = matches[matches.length - 1].replace(/"/g, '');
+      }
+    }
+
+    // Filter baris yang mengandung tag instruksi internal
+    const lines = cleaned.split('\n');
+    const filteredLines = lines.filter(line => {
+      const trimmed = line.trim();
+      return !trimmed.startsWith('* Role:') &&
+             !trimmed.startsWith('* User') &&
+             !trimmed.startsWith('* Context:') &&
+             !trimmed.startsWith('* Constraints:') &&
+             !trimmed.startsWith('* Option') &&
+             !trimmed.startsWith('* Constraint check:') &&
+             !trimmed.startsWith('Final Polish:');
+    });
+
+    return filteredLines.join('\n').trim();
+  };
+
+  // Fungsi Chat Handler
   const handleSendChat = async (e) => {
     e.preventDefault();
     if (!userQuery.trim()) return;
@@ -157,7 +186,7 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
 
     const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
 
-    // Data Context ERP untuk AI
+    // Data Context ERP
     const systemContextData = {
       summary: {
         totalOmsetReal: totalOmset,
@@ -198,18 +227,11 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
       }))
     };
 
-    // Instruksi Sistem Resmi (Dipisah dari isi Chat)
-    const systemInstructionText = `
-Anda adalah WHI Executive Assistant untuk PT. WISATA HALAL INTERNASIONAL.
-
+    const systemInstructionText = `Anda adalah WHI Executive Assistant PT. WISATA HALAL INTERNASIONAL.
 DATABASE REAL-TIME ERP:
-${JSON.stringify(systemContextData, null, 2)}
+${JSON.stringify(systemContextData)}
 
-ATURAN MUTLAK KELUARAN (STRICT OUTPUT RULES):
-1. Berikan HANYA jawaban akhir untuk pengguna secara singkat, padat, dan langsung ke poin utama (maksimal 2-4 kalimat).
-2. DILARANG KERAS menampilkan proses berpikir, analisis prompt, pilihan attempt, atau mengulang instruksi ini dalam balasan.
-3. Gunakan **bold** hanya untuk nama, angka, atau poin penting.
-`;
+Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksimal 2-3 kalimat). Dilarang menuliskan analisis internal, poin aturan, atau opsi jawaban di teks keluaran.`;
 
     try {
       if (!apiKey) {
@@ -226,7 +248,6 @@ ATURAN MUTLAK KELUARAN (STRICT OUTPUT RULES):
         throw new Error(listModelsData.error.message);
       }
 
-      // Ambil model yang mendukung generateContent
       const validModels = (listModelsData.models || [])
         .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
         .map(m => m.name.replace('models/', ''))
@@ -236,7 +257,6 @@ ATURAN MUTLAK KELUARAN (STRICT OUTPUT RULES):
         ? validModels[0] 
         : (listModelsData.models || []).map(m => m.name.replace('models/', ''))[0];
 
-      // Kirim payload dengan struktur system_instruction terpisah
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`,
         {
@@ -249,7 +269,13 @@ ATURAN MUTLAK KELUARAN (STRICT OUTPUT RULES):
             contents: [{
               role: 'user',
               parts: [{ text: currentQuery }]
-            }]
+            }],
+            generationConfig: {
+              temperature: 0.1,
+              thinkingConfig: {
+                thinkingBudget: 0
+              }
+            }
           })
         }
       );
@@ -257,8 +283,9 @@ ATURAN MUTLAK KELUARAN (STRICT OUTPUT RULES):
       const data = await response.json();
 
       if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
-        const aiAnswer = data.candidates[0].content.parts[0].text;
-        setAiChatHistory([...newHistory, { sender: 'ai', text: aiAnswer }]);
+        const rawAiAnswer = data.candidates[0].content.parts[0].text;
+        const finalCleanAnswer = cleanAiResponse(rawAiAnswer);
+        setAiChatHistory([...newHistory, { sender: 'ai', text: finalCleanAnswer }]);
       } else if (data.error) {
         throw new Error(data.error.message);
       } else {
