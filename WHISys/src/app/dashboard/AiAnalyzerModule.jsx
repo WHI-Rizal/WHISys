@@ -218,7 +218,7 @@ INSTRUKSI:
         throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY terpasang di Vercel.");
       }
 
-      // 1. MINTA DAFTAR MODEL YANG AKTIF DARI GOOGLE SECARA REAL-TIME
+      // 1. MINTA DAFTAR MODEL YANG AKTIF DARI GOOGLE
       const listModelsRes = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
       );
@@ -228,19 +228,28 @@ INSTRUKSI:
         throw new Error(listModelsData.error.message);
       }
 
-      // Filter hanya model yang mendukung generateContent
+      // Filter hanya model yang mendukung generateContent DAN tidak mengandung versi deprecated (seperti 1.5, 2.0, atau 2.5)
       const validModels = (listModelsData.models || [])
         .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
-        .map(m => m.name.replace('models/', ''));
+        .map(m => m.name.replace('models/', ''))
+        .filter(name => !name.includes('1.5') && !name.includes('2.0') && !name.includes('2.5'));
 
       if (validModels.length === 0) {
-        throw new Error("Tidak ada model Gemini yang tersedia untuk API Key Anda.");
+        // Fallback jika pemfilteran versi terlalu ketat: ambil model apa saja yang mendukung generateContent
+        const fallbackModels = (listModelsData.models || [])
+          .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+          .map(m => m.name.replace('models/', ''));
+
+        if (fallbackModels.length === 0) {
+          throw new Error("Tidak ada model Gemini yang tersedia untuk API Key Anda.");
+        }
+        validModels.push(...fallbackModels);
       }
 
-      // Utamakan model flash jika ada, jika tidak pakai model valid pertama
-      const selectedModel = validModels.find(m => m.includes('flash')) || validModels[0];
+      // Ambil model aktif teratas dari daftar resmi
+      const selectedModel = validModels[0];
 
-      // 2. KIRIM PROMPT KE MODEL YANG TERBUKTI AKTIF
+      // 2. KIRIM PROMPT KE MODEL YANG VALID
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`,
         {
