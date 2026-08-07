@@ -1,8 +1,10 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { db } from '@/lib/firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db, auth } from '@/lib/firebase';
+import { initializeApp, getApps } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, getDoc, setDoc, collection, getDocs, deleteDoc } from 'firebase/firestore';
 import { 
   Building2, 
   Key, 
@@ -11,12 +13,15 @@ import {
   Save, 
   Check, 
   CreditCard, 
-  ShieldCheck, 
   Bot, 
   Smartphone,
   Moon,
-  Sun,
-  Database
+  Database,
+  UserPlus,
+  X,
+  Trash2,
+  Lock,
+  ShieldCheck
 } from 'lucide-react';
 
 export default function SettingsModule({ theme = 'dark' }) {
@@ -36,7 +41,22 @@ export default function SettingsModule({ theme = 'dark' }) {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Form State Demo Settings
+  // State User & Role
+  const [currentUserRole, setCurrentUserRole] = useState('admin');
+  const [usersList, setUsersList] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [showUserModal, setShowModal] = useState(false);
+  const [creatingUser, setCreatingUser] = useState(false);
+
+  // Form New User
+  const [newUserForm, setNewUserForm] = useState({
+    fullName: '',
+    email: '',
+    password: '',
+    role: 'Operational' // 'Super Admin' | 'Finance' | 'Operational' | 'Sales'
+  });
+
+  // Settings State
   const [companyData, setCompanyData] = useState({
     name: 'PT. WISATA HALAL INTERNASIONAL',
     ppiuNumber: 'PPIU No. U.123 / 2024',
@@ -58,7 +78,30 @@ export default function SettingsModule({ theme = 'dark' }) {
     autoBackup: true
   });
 
-  // Load Settings dari Firestore saat Komponen Dimuat
+  // 1. Cek Role Admin Aktif & Load Data Users
+  const fetchUsersAndRole = async () => {
+    setLoadingUsers(true);
+    try {
+      // Ambil user login saat ini
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+        if (userDoc.exists()) {
+          setCurrentUserRole(userDoc.data().role || 'admin');
+        }
+      }
+
+      // Ambil seluruh daftar user dari koleksi 'users'
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const list = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setUsersList(list);
+    } catch (err) {
+      console.error("Gagal mengambil data user/role:", err);
+    }
+    setLoadingUsers(false);
+  };
+
+  // 2. Load Initial Data Settings
   useEffect(() => {
     const fetchSettings = async () => {
       try {
@@ -76,9 +119,10 @@ export default function SettingsModule({ theme = 'dark' }) {
     };
 
     fetchSettings();
+    fetchUsersAndRole();
   }, []);
 
-  // Simpan Settings ke Firestore
+  // 3. Simpan Settings
   const handleSaveSettings = async (e) => {
     if (e) e.preventDefault();
     setSaving(true);
@@ -94,10 +138,92 @@ export default function SettingsModule({ theme = 'dark' }) {
       setTimeout(() => setSavedSuccess(false), 3000);
     } catch (err) {
       console.error("Gagal menyimpan pengaturan ke Firestore:", err);
-      alert("Gagal menyimpan ke database Firestore. Periksa koneksi internet Anda.");
+      alert("Gagal menyimpan ke database Firestore.");
     }
     setSaving(false);
   };
+
+  // 4. LOGIKA TAMBAH USER BARU KE FIREBASE AUTH & FIRESTORE
+  const handleCreateUser = async (e) => {
+    e.preventDefault();
+
+    // Proteksi Keamanan Frontend
+    const isSuperAdmin = currentUserRole.toLowerCase().includes('super') || currentUserRole.toLowerCase() === 'admin';
+    if (!isSuperAdmin) {
+      alert("Akses Ditolak: Hanya Super Admin yang diizinkan menambah akun staf baru.");
+      return;
+    }
+
+    if (!newUserForm.email || !newUserForm.password || !newUserForm.fullName) {
+      alert("Harap lengkapi semua kolom pendaftaran.");
+      return;
+    }
+
+    if (newUserForm.password.length < 6) {
+      alert("Password minimal harus 6 karakter.");
+      return;
+    }
+
+    setCreatingUser(true);
+    try {
+      // Inisialisasi Secondary App agar Super Admin tidak ter-logout
+      const firebaseConfig = {
+        apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+        authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+        projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+        storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+        messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+        appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
+      };
+
+      const secondaryApp = getApps().find(app => app.name === 'SecondaryApp') 
+        || initializeApp(firebaseConfig, 'SecondaryApp');
+      const secondaryAuth = getAuth(secondaryApp);
+
+      // Create User di Auth Sekunder
+      const userCredential = await createUserWithEmailAndPassword(
+        secondaryAuth,
+        newUserForm.email,
+        newUserForm.password
+      );
+
+      const newUid = userCredential.user.uid;
+
+      // Simpan metadata role & profile ke Firestore 'users'
+      await setDoc(doc(db, 'users', newUid), {
+        uid: newUid,
+        fullName: newUserForm.fullName,
+        email: newUserForm.email,
+        role: newUserForm.role,
+        createdAt: new Date().toISOString()
+      });
+
+      alert(`Berhasil menambahkan staf baru:\nNama: ${newUserForm.fullName}\nEmail: ${newUserForm.email}\nRole: ${newUserForm.role}`);
+      
+      // Reset Form & Reload Data
+      setNewUserForm({ fullName: '', email: '', password: '', role: 'Operational' });
+      setShowModal(false);
+      fetchUsersAndRole();
+
+    } catch (err) {
+      console.error("Gagal membuat user baru:", err);
+      alert("Gagal menambahkan user: " + err.message);
+    }
+    setCreatingUser(false);
+  };
+
+  // 5. Hapus User dari Firestore
+  const handleDeleteUser = async (userId, userEmail) => {
+    if (!confirm(`Apakah Anda yakin ingin menghapus data user ${userEmail}?`)) return;
+    try {
+      await deleteDoc(doc(db, 'users', userId));
+      fetchUsersAndRole();
+    } catch (err) {
+      alert("Gagal menghapus user: " + err.message);
+    }
+  };
+
+  const isSuperAdmin = currentUserRole.toLowerCase().includes('super') || currentUserRole.toLowerCase() === 'admin';
 
   return (
     <div className="space-y-6">
@@ -317,68 +443,79 @@ export default function SettingsModule({ theme = 'dark' }) {
                 </h4>
                 <p className={`text-xs ${styles.textSub}`}>Atur peran dan wewenang admin operasional, keuangan, dan agen sales.</p>
               </div>
+              
+              {/* TOMBOL TAMBAH USER (AKTIF HANYA UNTUK SUPER ADMIN) */}
               <button
                 type="button"
-                className="bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                onClick={() => {
+                  if (!isSuperAdmin) {
+                    alert("Akses Ditolak: Hanya Super Admin yang dapat menambahkan user baru.");
+                    return;
+                  }
+                  setShowModal(true);
+                }}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  isSuperAdmin 
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg' 
+                    : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                }`}
+                title={isSuperAdmin ? "Tambah User Staf Baru" : "Hanya Super Admin yang bisa menambah user"}
               >
+                {isSuperAdmin ? <UserPlus className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
                 + Tambah User
               </button>
             </div>
 
             <div className="space-y-3">
-              <div className={`p-4 rounded-xl border ${styles.innerBg} flex items-center justify-between`}>
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-xl font-bold text-xs">
-                    SA
-                  </div>
-                  <div>
-                    <h5 className={`text-xs font-bold ${styles.textTitle}`}>Eksekutif WHI (Anda)</h5>
-                    <p className={`text-[11px] ${styles.textSub}`}>admin@wisatahalal.co.id</p>
-                  </div>
+              {loadingUsers ? (
+                <p className={`text-xs ${styles.textSub} py-6 text-center`}>Memuat daftar pengguna dari Firestore...</p>
+              ) : usersList.length === 0 ? (
+                <div className={`p-6 text-center ${styles.textSub} text-xs border border-dashed border-slate-800 rounded-xl`}>
+                  Belum ada data user tersimpan di koleksi Firestore.
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="px-2.5 py-1 text-[10px] bg-emerald-500/10 text-emerald-400 rounded-lg font-bold border border-emerald-500/20">
-                    Super Admin
-                  </span>
-                  <span className={`text-xs ${styles.textSub}`}>Akses Penuh</span>
-                </div>
-              </div>
+              ) : (
+                usersList.map((user) => (
+                  <div key={user.id} className={`p-4 rounded-xl border ${styles.innerBg} flex items-center justify-between`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2.5 rounded-xl font-bold text-xs uppercase ${
+                        user.role === 'Super Admin' || user.role === 'admin' ? 'bg-emerald-500/20 text-emerald-400' :
+                        user.role === 'Finance' ? 'bg-blue-500/20 text-blue-400' :
+                        user.role === 'Sales' ? 'bg-amber-500/20 text-amber-400' :
+                        'bg-purple-500/20 text-purple-400'
+                      }`}>
+                        {(user.fullName || user.email || 'US').slice(0, 2)}
+                      </div>
+                      <div>
+                        <h5 className={`text-xs font-bold ${styles.textTitle}`}>{user.fullName || 'Staf WHI'}</h5>
+                        <p className={`text-[11px] ${styles.textSub}`}>{user.email}</p>
+                      </div>
+                    </div>
 
-              <div className={`p-4 rounded-xl border ${styles.innerBg} flex items-center justify-between`}>
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-blue-500/20 text-blue-400 rounded-xl font-bold text-xs">
-                    FN
-                  </div>
-                  <div>
-                    <h5 className={`text-xs font-bold ${styles.textTitle}`}>Staff Keuangan</h5>
-                    <p className={`text-[11px] ${styles.textSub}`}>finance@wisatahalal.co.id</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="px-2.5 py-1 text-[10px] bg-blue-500/10 text-blue-400 rounded-lg font-bold border border-blue-500/20">
-                    Finance
-                  </span>
-                  <span className={`text-xs ${styles.textSub}`}>Input Setoran & Vendor</span>
-                </div>
-              </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`px-2.5 py-1 text-[10px] rounded-lg font-bold border ${
+                        user.role === 'Super Admin' || user.role === 'admin' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                        user.role === 'Finance' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                        user.role === 'Sales' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                        'bg-purple-500/10 text-purple-400 border-purple-500/20'
+                      }`}>
+                        {user.role || 'Operational'}
+                      </span>
 
-              <div className={`p-4 rounded-xl border ${styles.innerBg} flex items-center justify-between`}>
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-purple-500/20 text-purple-400 rounded-xl font-bold text-xs">
-                    OP
+                      {/* Tombol Hapus User (Hanya jika Super Admin & bukan akun sendiri) */}
+                      {isSuperAdmin && auth.currentUser?.uid !== user.id && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteUser(user.id, user.email)}
+                          className="p-1.5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition-colors"
+                          title="Hapus Data User"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <h5 className={`text-xs font-bold ${styles.textTitle}`}>Staff Operasional Jamaah</h5>
-                    <p className={`text-[11px] ${styles.textSub}`}>ops@wisatahalal.co.id</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="px-2.5 py-1 text-[10px] bg-purple-500/10 text-purple-400 rounded-lg font-bold border border-purple-500/20">
-                    Operational
-                  </span>
-                  <span className={`text-xs ${styles.textSub}`}>Dokumen, Bus & Kamar</span>
-                </div>
-              </div>
+                ))
+              )}
             </div>
           </div>
         )}
@@ -432,6 +569,99 @@ export default function SettingsModule({ theme = 'dark' }) {
         )}
 
       </form>
+
+      {/* MODAL DIALOG TAMBAH USER BARU */}
+      {showUserModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative shadow-2xl`}>
+            <button 
+              type="button" 
+              onClick={() => setShowModal(false)} 
+              className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <UserPlus className="w-5 h-5 text-emerald-400" /> Tambah User Staf Baru
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-5`}>
+              Akun akan didaftarkan ke Firebase Auth & Firestore dengan role pilihan.
+            </p>
+
+            <form onSubmit={handleCreateUser} className="space-y-4 text-xs">
+              <div>
+                <label className={`block font-medium ${styles.textSub} mb-1.5`}>Nama Lengkap Staf</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: Ahmad Rizal, S.E."
+                  value={newUserForm.fullName}
+                  onChange={(e) => setNewUserForm({ ...newUserForm, fullName: e.target.value })}
+                  className={`w-full ${styles.inputBg} p-3 rounded-xl text-xs focus:outline-none focus:border-emerald-500`}
+                />
+              </div>
+
+              <div>
+                <label className={`block font-medium ${styles.textSub} mb-1.5`}>Email Login</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="staf@wisatahalal.co.id"
+                  value={newUserForm.email}
+                  onChange={(e) => setNewUserForm({ ...newUserForm, email: e.target.value })}
+                  className={`w-full ${styles.inputBg} p-3 rounded-xl text-xs focus:outline-none focus:border-emerald-500`}
+                />
+              </div>
+
+              <div>
+                <label className={`block font-medium ${styles.textSub} mb-1.5`}>Password (Min. 6 Karakter)</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  value={newUserForm.password}
+                  onChange={(e) => setNewUserForm({ ...newUserForm, password: e.target.value })}
+                  className={`w-full ${styles.inputBg} p-3 rounded-xl text-xs focus:outline-none focus:border-emerald-500`}
+                />
+              </div>
+
+              <div>
+                <label className={`block font-medium ${styles.textSub} mb-1.5`}>Role / Peran Akses Sistem</label>
+                <select
+                  value={newUserForm.role}
+                  onChange={(e) => setNewUserForm({ ...newUserForm, role: e.target.value })}
+                  className={`w-full ${styles.inputBg} p-3 rounded-xl text-xs focus:outline-none focus:border-emerald-500`}
+                >
+                  <option value="Operational">Operational (Manifest, Bus, Dokumen)</option>
+                  <option value="Finance">Finance (Pencatatan Kas & Kwitansi)</option>
+                  <option value="Sales">Sales / Agen (Booking Paket)</option>
+                  <option value="Super Admin">Super Admin (Akses Penuh Sistem)</option>
+                </select>
+              </div>
+
+              <div className="pt-4 flex justify-end gap-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="px-4 py-2.5 bg-slate-800 text-slate-300 rounded-xl font-medium hover:bg-slate-700 transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingUser}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-emerald-900/20 flex items-center gap-2"
+                >
+                  {creatingUser ? 'Memproses...' : 'Daftarkan Staf Baru'}
+                </button>
+              </div>
+            </form>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
