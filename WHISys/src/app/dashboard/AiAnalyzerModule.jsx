@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
-import { Sparkles, TrendingUp, AlertTriangle, Lightbulb, Users, Wallet, Plane, RefreshCw, MessageSquare } from 'lucide-react';
+import { Sparkles, TrendingUp, AlertTriangle, Lightbulb, Users, Wallet, Plane, RefreshCw, MessageSquare, Send } from 'lucide-react';
 
 export default function AiAnalyzerModule({ theme = 'dark' }) {
   const isDark = theme === 'dark';
@@ -31,7 +31,7 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
   const [aiChatHistory, setAiChatHistory] = useState([
     {
       sender: 'ai',
-      text: 'Assalamu\'alaikum! Saya WHI Executive Intelligence Advisor. Tanyakan apa saja mengenai analisis penjualan paket, arus kas, margin laba, atau kelengkapan berkas jamaah.'
+      text: 'Assalamu\'alaikum! Saya WHI Executive Intelligence Advisor yang terhubung langsung ke Google Gemini AI. Tanyakan apa saja mengenai data jamaah, tagihan, laba rugi, hingga proyeksi paket travel Anda.'
     }
   ]);
 
@@ -73,7 +73,6 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
   const generateInsights = () => {
     const insights = [];
 
-    // 1. Analisis Okupansi Seat
     if (occupancyRate > 75) {
       insights.push({
         type: 'success',
@@ -88,7 +87,6 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
       });
     }
 
-    // 2. Analisis Margin Laba
     if (netMargin < 0) {
       insights.push({
         type: 'danger',
@@ -103,7 +101,6 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
       });
     }
 
-    // 3. Analisis Dokumen Jamaah
     const incompleteDocsCount = bookings.filter(b => {
       const docs = b.documents || {};
       const filled = Object.values(docs).filter(Boolean).length;
@@ -121,34 +118,113 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     return insights;
   };
 
-  const handleSendChat = (e) => {
+  // FUNGSI MEMANGGIL GEMINI AI UNTUK MENJAWAB PERTANYAAN BEBAS
+  const handleSendChat = async (e) => {
     e.preventDefault();
     if (!userQuery.trim()) return;
 
-    const q = userQuery.toLowerCase();
-    const newHistory = [...aiChatHistory, { sender: 'user', text: userQuery }];
+    const currentQuery = userQuery;
+    const newHistory = [...aiChatHistory, { sender: 'user', text: currentQuery }];
     setAiChatHistory(newHistory);
     setUserQuery('');
     setAnalyzing(true);
 
-    setTimeout(() => {
-      let reply = '';
+    // Ambil API Key dari .env atau fallback
+    const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
 
-      if (q.includes('untung') || q.includes('laba') || q.includes('profit') || q.includes('margin')) {
-        reply = `Berdasarkan rekap keuangan real-time:\n• Total Setoran Masuk: Rp ${totalOmset.toLocaleString('id-ID')}\n• Total Biaya HPP Vendor: Rp ${totalVendorCost.toLocaleString('id-ID')}\n• Margin Laba Bersih Operasional: Rp ${netMargin.toLocaleString('id-ID')} (${netMargin >= 0 ? 'Surplus/Laba' : 'Defisit'}).`;
-      } else if (q.includes('jamaah') || q.includes('customer') || q.includes('peserta')) {
-        reply = `Saat ini terdaftar ${jamaah.length} orang jamaah di Data Master, dengan total ${bookings.length} transaksi booking aktif.`;
-      } else if (q.includes('paket') || q.includes('seat') || q.includes('kuota')) {
-        reply = `Terdapat ${packages.length} program paket aktif. Rata-rata tingkat keterisian seat saat ini adalah ${occupancyRate}%.`;
-      } else if (q.includes('dokumen') || q.includes('paspor') || q.includes('berkas')) {
-        reply = `Sistem mencatat ada ${bookings.length} booking. Disarankan mengecek baris berwarna kuning di modul Manifest untuk jamaah yang belum lengkap 8 berkas.`;
-      } else {
-        reply = `Saya telah menganalisis data WHISys. Saat ini Anda memiliki ${packages.length} paket aktif, ${jamaah.length} jamaah terdaftar, serta akumulasi omset masuk sebesar Rp ${totalOmset.toLocaleString('id-ID')}. Ada yang spesifik ingin Anda ketahui?`;
+    // Menyiapkan Konteks Data Sistem dalam Format JSON Ringkas
+    const systemContextData = {
+      summary: {
+        totalOmsetReal: totalOmset,
+        totalBiayaVendor: totalVendorCost,
+        marginLabaBersih: netMargin,
+        totalJamaah: jamaah.length,
+        totalBookings: bookings.length,
+        totalPaket: packages.length,
+        occupancyRatePercentage: occupancyRate
+      },
+      packagesList: packages.map(p => ({
+        nama: p.name,
+        kode: p.code,
+        tglKeberangkatan: p.departureDate,
+        kuotaTotal: p.quotaTotal,
+        sisaKuota: p.quotaRemaining,
+        hargaQuad: p.priceQuad || p.priceMain,
+        hargaTriple: p.priceTriple,
+        hargaDouble: p.priceDouble
+      })),
+      jamaahList: jamaah.map(j => ({
+        kodeCustomer: j.customerCode,
+        nama: j.fullName,
+        nik: j.nik,
+        paspor: j.passportNumber,
+        expiredPaspor: j.passportExpiry,
+        noHp: j.phone
+      })),
+      bookingsList: bookings.map(b => ({
+        kodeBooking: b.bookingCode,
+        namaJamaah: b.jamaahName,
+        namaPaket: b.packageName,
+        kamar: b.roomType,
+        bus: b.busGroup,
+        totalTagihan: b.totalAmount,
+        totalSetor: b.totalPaid,
+        statusBayar: b.paymentStatus
+      }))
+    };
+
+    const promptText = `
+Anda adalah WHI Executive Intelligence Assistant untuk PT. WISATA HALAL INTERNASIONAL (ERP WHISys).
+Tugas Anda adalah menjawab pertanyaan pengguna berdasarkan DATABASE REAL-TIME ERP berikut:
+
+--- DATA REAL-TIME ERP WHISys ---
+${JSON.stringify(systemContextData, null, 2)}
+----------------------------------
+
+PERTUANAN PENGGUNA: "${currentQuery}"
+
+INSTRUKSI JAWABAN:
+1. Jawablah secara ramah, profesional, serta singkat dan padat (langsung ke poin utama).
+2. Gunakan format poin-poin/bold agar mudah dibaca oleh eksekutif.
+3. Jika ditanyakan hal spesifik tentang nama jamaah, tagihan, atau paket tertentu, ambil data langsung dari database di atas.
+4. Jika data tidak ada dalam database, jawab dengan jujur bahwa data tersebut belum tercatat di sistem.
+`;
+
+    try {
+      if (!apiKey) {
+        throw new Error("API Key Gemini belum dipasang di .env.local (NEXT_PUBLIC_GEMINI_API_KEY).");
       }
 
-      setAiChatHistory([...newHistory, { sender: 'ai', text: reply }]);
-      setAnalyzing(false);
-    }, 800);
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: promptText }] }]
+          })
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+        const aiAnswer = data.candidates[0].content.parts[0].text;
+        setAiChatHistory([...newHistory, { sender: 'ai', text: aiAnswer }]);
+      } else {
+        throw new Error("Gagal menerima respons balik dari AI.");
+      }
+
+    } catch (err) {
+      console.error("Gemini AI Error:", err);
+      
+      // Fallback jawaban cerdas lokal jika API Key belum dipasang
+      let fallbackAnswer = `⚠️ [Koneksi Gemini AI]: ${err.message}\n\nNamun berdasarkan data lokal saat ini:\n• Total Jamaah: ${jamaah.length} orang\n• Total Booking: ${bookings.length} transaksi\n• Total Setoran: Rp ${totalOmset.toLocaleString('id-ID')}\n• Margin Laba: Rp ${netMargin.toLocaleString('id-ID')}`;
+
+      setAiChatHistory([...newHistory, { sender: 'ai', text: fallbackAnswer }]);
+    }
+
+    setAnalyzing(false);
   };
 
   const insightsList = generateInsights();
@@ -244,13 +320,13 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
         </div>
 
         {/* CHATBOT EXECUTIVE ADVISOR */}
-        <div className={`${styles.cardBg} p-5 rounded-xl border flex flex-col justify-between h-[450px]`}>
+        <div className={`${styles.cardBg} p-5 rounded-xl border flex flex-col justify-between h-[480px]`}>
           <div>
             <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} pb-3 mb-3`}>
               <MessageSquare className="w-4 h-4 text-emerald-400" /> Executive AI Chat Advisor
             </h4>
 
-            <div className="space-y-3 overflow-y-auto max-h-[300px] pr-1 text-xs">
+            <div className="space-y-3 overflow-y-auto max-h-[330px] pr-1 text-xs">
               {aiChatHistory.map((chat, idx) => (
                 <div 
                   key={idx} 
@@ -264,8 +340,8 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
                 </div>
               ))}
               {analyzing && (
-                <div className={`p-2.5 rounded-xl ${styles.innerBg} text-slate-400 italic text-[11px]`}>
-                  AI sedang memproses pertanyaan...
+                <div className={`p-2.5 rounded-xl ${styles.innerBg} text-emerald-400 italic text-[11px] animate-pulse`}>
+                  Gemini AI sedang membaca database & menganalisis jawaban...
                 </div>
               )}
             </div>
@@ -274,16 +350,17 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
           <form onSubmit={handleSendChat} className="mt-3 flex gap-2">
             <input
               type="text"
-              placeholder="Tanyakan analisis keuangan/paket..."
-              className={`flex-1 ${styles.inputBg} p-2 rounded-lg text-xs focus:outline-none focus:border-emerald-500`}
+              placeholder="Tanyakan misal: Siapa jamaah yang belum lunas?"
+              className={`flex-1 ${styles.inputBg} p-2.5 rounded-lg text-xs focus:outline-none focus:border-emerald-500`}
               value={userQuery}
               onChange={(e) => setUserQuery(e.target.value)}
             />
             <button 
               type="submit" 
-              className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-lg text-xs font-semibold"
+              disabled={analyzing}
+              className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-1"
             >
-              Kirim
+              <Send className="w-3.5 h-3.5" />
             </button>
           </form>
         </div>
