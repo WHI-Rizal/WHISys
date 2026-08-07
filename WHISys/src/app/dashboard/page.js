@@ -562,7 +562,6 @@ export default function DashboardPage() {
         {/* MODUL AI BUSINESS INTELLIGENCE */}
         {activeMenu === 'ai-analyzer' && <AiAnalyzerModule theme={theme} />}
 
-        // Contoh rendering berdasarkan state tab menu aktif:
         {activeMenu === 'settings' && <SettingsModule theme={theme} />}
 
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
