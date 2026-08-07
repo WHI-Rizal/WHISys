@@ -213,47 +213,54 @@ INSTRUKSI:
 - Jika data tidak ditemukan di database, sampaikan bahwa data tersebut belum tercatat.
 `;
 
-    // Menggunakan alias dinamis 'gemini-flash' bawaan Google agar selalu terhubung ke model Flash aktif
-    const availableModels = ['gemini-flash', 'gemini-pro'];
-
     try {
       if (!apiKey) {
         throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY terpasang di Vercel.");
       }
 
-      let aiAnswer = null;
-      let lastErr = '';
+      // 1. MINTA DAFTAR MODEL YANG AKTIF DARI GOOGLE SECARA REAL-TIME
+      const listModelsRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
+      );
+      const listModelsData = await listModelsRes.json();
 
-      for (const modelName of availableModels) {
-        try {
-          const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [{ role: 'user', parts: [{ text: promptText }] }]
-              })
-            }
-          );
-
-          const data = await response.json();
-
-          if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
-            aiAnswer = data.candidates[0].content.parts[0].text;
-            break; 
-          } else if (data.error) {
-            lastErr = data.error.message;
-          }
-        } catch (err) {
-          lastErr = err.message;
-        }
+      if (listModelsData.error) {
+        throw new Error(listModelsData.error.message);
       }
 
-      if (aiAnswer) {
+      // Filter hanya model yang mendukung generateContent
+      const validModels = (listModelsData.models || [])
+        .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+        .map(m => m.name.replace('models/', ''));
+
+      if (validModels.length === 0) {
+        throw new Error("Tidak ada model Gemini yang tersedia untuk API Key Anda.");
+      }
+
+      // Utamakan model flash jika ada, jika tidak pakai model valid pertama
+      const selectedModel = validModels.find(m => m.includes('flash')) || validModels[0];
+
+      // 2. KIRIM PROMPT KE MODEL YANG TERBUKTI AKTIF
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: promptText }] }]
+          })
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+        const aiAnswer = data.candidates[0].content.parts[0].text;
         setAiChatHistory([...newHistory, { sender: 'ai', text: aiAnswer }]);
+      } else if (data.error) {
+        throw new Error(data.error.message);
       } else {
-        throw new Error(lastErr || "Gagal mendapatkan respons dari Google Gemini.");
+        throw new Error("Respons dari Google Gemini kosong.");
       }
 
     } catch (err) {
