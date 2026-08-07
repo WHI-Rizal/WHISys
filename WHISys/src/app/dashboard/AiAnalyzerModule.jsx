@@ -198,19 +198,19 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     };
 
     const promptText = `
-Anda adalah WHI Executive Intelligence Assistant untuk PT. WISATA HALAL INTERNASIONAL (ERP WHISys).
-Jawablah pertanyaan pengguna berdasarkan DATABASE REAL-TIME ERP berikut:
+Anda adalah WHI Executive Assistant untuk PT. WISATA HALAL INTERNASIONAL.
 
---- DATA REAL-TIME ERP WHISys ---
+DATA REAL-TIME ERP:
 ${JSON.stringify(systemContextData, null, 2)}
-----------------------------------
 
-PERTUANAN PENGGUNA: "${currentQuery}"
+ATURAN UTAMA (WAJIB DIPATUHI UNTUK SEMUA JAWABAN):
+1. Jawab SEMUA pertanyaan secara SINGKAT, PADAT, dan LANGSUNG KE INTI TANPA PENJELASAN YANG TIDAK DIMINTA.
+2. Dilarang memberikan pembukaan, penutupan, atau daftar menu opsi yang panjang.
+3. Gunakan **bold** hanya untuk angka, nama, atau poin utama.
+4. Maksimal balasan hanya 2 hingga 4 baris kalimat saja.
 
-INSTRUKSI:
-- Jawablah secara ramah, profesional, serta jelas.
-- Gunakan format **bold** untuk poin-poin atau angka penting.
-- Jika data tidak ditemukan di database, sampaikan bahwa data tersebut belum tercatat.
+Pertanyaan Pengguna: "${currentQuery}"
+Jawaban Singkat Anda:
 `;
 
     try {
