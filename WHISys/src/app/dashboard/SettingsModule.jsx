@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { db } from '@/lib/firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { 
   Building2, 
   Key, 
@@ -32,6 +34,7 @@ export default function SettingsModule({ theme = 'dark' }) {
 
   const [activeTab, setActiveTab] = useState('company'); // company | api | users | preferences
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // Form State Demo Settings
   const [companyData, setCompanyData] = useState({
@@ -55,10 +58,45 @@ export default function SettingsModule({ theme = 'dark' }) {
     autoBackup: true
   });
 
-  const handleSaveSettings = (e) => {
-    e.preventDefault();
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 3000);
+  // Load Settings dari Firestore saat Komponen Dimuat
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const docRef = doc(db, 'settings', 'company_profile');
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.company) setCompanyData(data.company);
+          if (data.api) setApiData(data.api);
+          if (data.preferences) setSystemPref(data.preferences);
+        }
+      } catch (err) {
+        console.error("Gagal memuat pengaturan dari Firestore:", err);
+      }
+    };
+
+    fetchSettings();
+  }, []);
+
+  // Simpan Settings ke Firestore
+  const handleSaveSettings = async (e) => {
+    if (e) e.preventDefault();
+    setSaving(true);
+    try {
+      await setDoc(doc(db, 'settings', 'company_profile'), {
+        company: companyData,
+        api: apiData,
+        preferences: systemPref,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 3000);
+    } catch (err) {
+      console.error("Gagal menyimpan pengaturan ke Firestore:", err);
+      alert("Gagal menyimpan ke database Firestore. Periksa koneksi internet Anda.");
+    }
+    setSaving(false);
   };
 
   return (
@@ -74,34 +112,39 @@ export default function SettingsModule({ theme = 'dark' }) {
         
         <button
           onClick={handleSaveSettings}
-          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-xs font-semibold transition-all shadow-lg shadow-emerald-900/20"
+          disabled={saving}
+          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white px-5 py-2.5 rounded-xl text-xs font-semibold transition-all shadow-lg shadow-emerald-900/20"
         >
           {savedSuccess ? <Check className="w-4 h-4 text-white animate-bounce" /> : <Save className="w-4 h-4" />}
-          {savedSuccess ? 'Tersimpan!' : 'Simpan Perubahan'}
+          {saving ? 'Menyimpan...' : savedSuccess ? 'Tersimpan!' : 'Simpan Perubahan'}
         </button>
       </div>
 
       {/* TAB NAVIGATION */}
       <div className="flex overflow-x-auto gap-2 p-1.5 bg-slate-900/40 rounded-xl border border-slate-800/80">
         <button
+          type="button"
           onClick={() => setActiveTab('company')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${activeTab === 'company' ? styles.tabActive : styles.tabInactive}`}
         >
           <Building2 className="w-4 h-4" /> Profil Perusahaan
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('api')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${activeTab === 'api' ? styles.tabActive : styles.tabInactive}`}
         >
           <Key className="w-4 h-4" /> Integrasi & API Keys
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('users')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${activeTab === 'users' ? styles.tabActive : styles.tabInactive}`}
         >
           <Users className="w-4 h-4" /> Hak Akses Staf
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('preferences')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${activeTab === 'preferences' ? styles.tabActive : styles.tabInactive}`}
         >
