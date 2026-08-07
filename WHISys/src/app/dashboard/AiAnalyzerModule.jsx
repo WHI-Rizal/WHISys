@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
-import { Sparkles, TrendingUp, AlertTriangle, Lightbulb, Wallet, Plane, RefreshCw, MessageSquare, Send, Maximize2, Minimize2, X } from 'lucide-react';
+import { Sparkles, TrendingUp, AlertTriangle, Lightbulb, Wallet, Plane, RefreshCw, MessageSquare, Send, Maximize2, Minimize2, X, Trash2 } from 'lucide-react';
 
 export default function AiAnalyzerModule({ theme = 'dark' }) {
   const isDark = theme === 'dark';
@@ -29,12 +29,48 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
   const [vendorCosts, setVendorCosts] = useState([]);
 
   const [userQuery, setUserQuery] = useState('');
-  const [aiChatHistory, setAiChatHistory] = useState([
+
+  // Default Chat Initial
+  const defaultChat = [
     {
       sender: 'ai',
       text: 'Assalamu\'alaikum! Saya WHI Executive Intelligence Advisor. Silakan tanyakan informasi data jamaah, tagihan, laba rugi, hingga paket travel Anda.'
     }
-  ]);
+  ];
+
+  // Load chat dari localStorage jika ada, jika tidak pakai defaultChat
+  const [aiChatHistory, setAiChatHistory] = useState(defaultChat);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedChat = localStorage.getItem('whi_ai_chat_history');
+      if (savedChat) {
+        try {
+          setAiChatHistory(JSON.parse(savedChat));
+        } catch (e) {
+          console.error("Gagal membaca riwayat chat dari localStorage", e);
+        }
+      }
+    }
+  }, []);
+
+  // Simpan riwayat chat ke localStorage setiap kali ada perubahan
+  const updateChatHistory = (newHistory) => {
+    setAiChatHistory(newHistory);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('whi_ai_chat_history', JSON.stringify(newHistory));
+    }
+  };
+
+  // Fungsi Reset / Akhiri Percakapan
+  const handleEndConversation = () => {
+    if (window.confirm("Apakah Anda yakin ingin mengakhiri percakapan dan menghapus riwayat chat?")) {
+      setAiChatHistory(defaultChat);
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('whi_ai_chat_history');
+      }
+    }
+  };
 
   const fetchAllData = async () => {
     setLoading(true);
@@ -144,12 +180,11 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     }
   };
 
-  // Helper pembersih teks jika Gemini masih menyelipkan logika thinking
+  // Helper pembersih teks
   const cleanAiResponse = (rawText) => {
     if (!rawText) return "";
     let cleaned = rawText;
 
-    // Jika ada tanda petik ganda balasan akhir (Final Polish / Attempt), ambil isi terakhirnya
     if (cleaned.includes('"')) {
       const matches = cleaned.match(/"([^"]+)"/g);
       if (matches && matches.length > 0) {
@@ -157,7 +192,6 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
       }
     }
 
-    // Filter baris yang mengandung tag instruksi internal/reasoning
     const lines = cleaned.split('\n');
     const filteredLines = lines.filter(line => {
       const trimmed = line.trim();
@@ -180,7 +214,7 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
 
     const currentQuery = userQuery;
     const newHistory = [...aiChatHistory, { sender: 'user', text: currentQuery }];
-    setAiChatHistory(newHistory);
+    updateChatHistory(newHistory);
     setUserQuery('');
     setAnalyzing(true);
 
@@ -238,7 +272,6 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
         throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY terpasang di Vercel.");
       }
 
-      // Minta daftar model aktif dari Google
       const listModelsRes = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
       );
@@ -282,7 +315,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
       if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
         const rawAiAnswer = data.candidates[0].content.parts[0].text;
         const finalCleanAnswer = cleanAiResponse(rawAiAnswer);
-        setAiChatHistory([...newHistory, { sender: 'ai', text: finalCleanAnswer }]);
+        updateChatHistory([...newHistory, { sender: 'ai', text: finalCleanAnswer }]);
       } else if (data.error) {
         throw new Error(data.error.message);
       } else {
@@ -293,7 +326,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
       console.error("Gemini API Error Detail:", err);
       let fallbackAnswer = `⚠️ [Error AI]: ${err.message}\n\nRingkasan Data Real-time:\n• Total Jamaah: ${jamaah.length} orang\n• Total Booking: ${bookings.length} transaksi\n• Total Setoran: Rp ${totalOmset.toLocaleString('id-ID')}\n• Margin Laba: Rp ${netMargin.toLocaleString('id-ID')}`;
 
-      setAiChatHistory([...newHistory, { sender: 'ai', text: fallbackAnswer }]);
+      updateChatHistory([...newHistory, { sender: 'ai', text: fallbackAnswer }]);
     }
 
     setAnalyzing(false);
@@ -392,7 +425,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
         </div>
 
         {/* CHATBOT EXECUTIVE ADVISOR (NORMAL COMPACT MODE) */}
-        <div className={`${styles.cardBg} p-5 rounded-xl border flex flex-col justify-between h-[520px]`}>
+        <div className={`${styles.cardBg} p-5 rounded-xl border flex flex-col justify-between h-[540px]`}>
           <div>
             <div className={`flex items-center justify-between border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} pb-3 mb-3`}>
               <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2`}>
@@ -407,7 +440,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
               </button>
             </div>
 
-            <div className="space-y-3 overflow-y-auto max-h-[370px] pr-1 text-xs">
+            <div className="space-y-3 overflow-y-auto max-h-[350px] pr-1 text-xs">
               {aiChatHistory.map((chat, idx) => (
                 <div 
                   key={idx} 
@@ -428,22 +461,34 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
             </div>
           </div>
 
-          <form onSubmit={handleSendChat} className="mt-3 flex gap-2">
-            <input
-              type="text"
-              placeholder="Tanyakan analisis paket/jamaah..."
-              className={`flex-1 ${styles.inputBg} p-2.5 rounded-lg text-xs focus:outline-none focus:border-emerald-500`}
-              value={userQuery}
-              onChange={(e) => setUserQuery(e.target.value)}
-            />
-            <button 
-              type="submit" 
-              disabled={analyzing}
-              className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
-            >
-              <Send className="w-3.5 h-3.5" />
-            </button>
-          </form>
+          <div className="space-y-2 mt-2">
+            <form onSubmit={handleSendChat} className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Tanyakan analisis paket/jamaah..."
+                className={`flex-1 ${styles.inputBg} p-2.5 rounded-lg text-xs focus:outline-none focus:border-emerald-500`}
+                value={userQuery}
+                onChange={(e) => setUserQuery(e.target.value)}
+              />
+              <button 
+                type="submit" 
+                disabled={analyzing}
+                className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
+              >
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            </form>
+
+            {/* Tombol Akhiri Percakapan */}
+            {aiChatHistory.length > 1 && (
+              <button
+                onClick={handleEndConversation}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors border border-rose-500/20"
+              >
+                <Trash2 className="w-3 h-3" /> Akhiri Percakapan
+              </button>
+            )}
+          </div>
         </div>
 
       </div>
@@ -466,6 +511,14 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
               </div>
               
               <div className="flex items-center gap-2">
+                {aiChatHistory.length > 1 && (
+                  <button
+                    onClick={handleEndConversation}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg text-xs font-medium transition-colors border border-rose-500/30"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Akhiri Percakapan
+                  </button>
+                )}
                 <button
                   onClick={() => setIsChatMaximized(false)}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-medium transition-colors"
