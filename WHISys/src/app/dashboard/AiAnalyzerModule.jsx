@@ -149,7 +149,7 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     if (!rawText) return "";
     let cleaned = rawText;
 
-    // Ambil kalimat terakhir di dalam tanda petik ganda jika AI menyertakan Polish/Option
+    // Jika ada tanda petik ganda balasan akhir (Final Polish / Attempt), ambil isi terakhirnya
     if (cleaned.includes('"')) {
       const matches = cleaned.match(/"([^"]+)"/g);
       if (matches && matches.length > 0) {
@@ -157,7 +157,7 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
       }
     }
 
-    // Filter baris yang mengandung tag instruksi internal
+    // Filter baris yang mengandung tag instruksi internal/reasoning
     const lines = cleaned.split('\n');
     const filteredLines = lines.filter(line => {
       const trimmed = line.trim();
@@ -271,10 +271,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
               parts: [{ text: currentQuery }]
             }],
             generationConfig: {
-              temperature: 0.1,
-              thinkingConfig: {
-                thinkingBudget: 0
-              }
+              temperature: 0.1
             }
           })
         }
