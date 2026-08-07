@@ -45,6 +45,9 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
   const [jamaahList, setJamaahList] = useState([]);
   const [loading, setLoading] = useState(true);
   
+  // State Profil Perusahaan dari Settings
+  const [companyInfo, setCompanyInfo] = useState(null);
+
   const [showModal, setShowModal] = useState(false);
   const [editingBookingId, setEditingBookingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -84,6 +87,21 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
     paymentMethod: 'Transfer Bank',
     notes: ''
   });
+
+  // Ambil Data Pengaturan Perusahaan Dinamis dari Firestore
+  useEffect(() => {
+    const fetchCompanyInfo = async () => {
+      try {
+        const docSnap = await getDoc(doc(db, 'settings', 'company_profile'));
+        if (docSnap.exists()) {
+          setCompanyInfo(docSnap.data().company);
+        }
+      } catch (err) {
+        console.error("Gagal mengambil data profil perusahaan untuk invoice:", err);
+      }
+    };
+    fetchCompanyInfo();
+  }, []);
 
   const fetchData = async () => {
     setLoading(true);
@@ -134,8 +152,10 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
     const totalPaid = Number(booking.totalPaid || 0).toLocaleString('id-ID');
     const sisa = (Number(booking.totalAmount || 0) - Number(booking.totalPaid || 0)).toLocaleString('id-ID');
 
+    const companyName = companyInfo?.name || 'PT. WISATA HALAL INTERNASIONAL';
+
     const message = `*KONFIRMASI BOOKING PROGRAM TRAVEL*
-*PT. WISATA HALAL INTERNASIONAL*
+*${companyName.toUpperCase()}*
 --------------------------------------------------
 Assalamu'alaikum Wr. Wb.
 Yth. Bpk/Ibu *${booking.jamaahName}* (${jamaahData.customerCode || 'CST'}),
@@ -312,6 +332,15 @@ Terima kasih.`;
     const isLunas = booking.paymentStatus === 'Full Payment';
     const totalAmount = Number(booking.totalAmount) || 0;
     
+    // Variabel Dinamis Profil Perusahaan & Bank
+    const compName = companyInfo?.name || 'PT. WISATA HALAL INTERNASIONAL';
+    const compAddress = companyInfo?.address || 'Ruko Graha Cirendeu No.1C Jl. Cirendeu Raya, Tangerang Selatan, Banten, Indonesia, 15445';
+    const compPpiu = companyInfo?.ppiuNumber || 'PPIU No. U.123 / 2024';
+    const compPhone = companyInfo?.phone || '+62 812-0000-0000';
+    const compEmail = companyInfo?.email || 'admin@wisatahalalindonesia.id';
+    const bankName = companyInfo?.bankName || 'Bank Syariah Indonesia (BSI)';
+    const bankAccount = companyInfo?.bankAccount || '788-9900-112 a.n. PT. Wisata Halal Internasional';
+
     let payments = [];
     try {
       const q = query(collection(db, 'payments_income'), where('bookingId', '==', booking.id));
@@ -382,11 +411,11 @@ Terima kasih.`;
           <div class="invoice-box">
             <div class="kop-header">
               <div>
-                <h1 class="company-logo-title">PT. WISATA HALAL INTERNASIONAL</h1>
-                <p class="company-sub">Penyelenggara Perjalanan Ibadah Umrah, Haji & Wisata Halal</p>
+                <h1 class="company-logo-title">${compName}</h1>
+                <p class="company-sub">Penyelenggara Perjalanan Ibadah Umrah, Haji & Wisata Halal • ${compPpiu}</p>
                 <p class="company-address">
-                  Ruko Graha Cirendeu No.1C Jl. Cirendeu Raya, Tangerang Selatan, Banten, Indonesia, 15445<br>
-                  Telp/WA: +62 812-0000-0000 | Email: admin@wisatahalalindonesia.id
+                  ${compAddress}<br>
+                  Telp/WA: ${compPhone} | Email: ${compEmail}
                 </p>
               </div>
               <div>
@@ -459,16 +488,15 @@ Terima kasih.`;
               <div class="bank-info">
                 <h5>Informasi Pembayaran / Transfer:</h5>
                 <div>Silakan lakukan pembayaran melalui rekening resmi perusahaan:</div>
-                <div class="bank-details">
-                  Bank: <strong>Bank Syariah Indonesia (BSI)</strong><br>
-                  No. Rekening: <strong>788-9900-112</strong><br>
-                  A.N: <strong>PT. Wisata Halal Internasional</strong>
+                <div class="bank-details" style="margin-top: 6px;">
+                  Bank: <strong>${bankName}</strong><br>
+                  No. Rekening & A.N: <strong>${bankAccount}</strong>
                 </div>
               </div>
               <div class="signature-box">
                 <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
                 <div class="signature-space"></div>
-                <p><strong>( PT. Wisata Halal Internasional )</strong></p>
+                <p><strong>( ${compName} )</strong></p>
               </div>
             </div>
 
@@ -688,7 +716,7 @@ Terima kasih.`;
                         <span className={`inline-block ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px]`}>{item.busGroup}</span>
                       </td>
                       
-                      {/* KOLOM KELENGKAPAN DOKUMEN (INTERAKTIF BISA DIKLIK) */}
+                      {/* KOLOM KELENGKAPAN DOKUMEN */}
                       <td className="p-4">
                         <button
                           onClick={() => handleOpenDocModal(item)}
@@ -730,7 +758,7 @@ Terima kasih.`;
                       </td>
                       <td className="p-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
-                          {/* TOMBOL WHATSAPP (IKON HIJAU) */}
+                          {/* TOMBOL WHATSAPP */}
                           <button
                             onClick={() => sendWhatsAppNotification(item)}
                             className="p-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white rounded-lg transition-colors"
