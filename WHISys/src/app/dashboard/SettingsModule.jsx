@@ -141,7 +141,7 @@ export default function SettingsModule({ theme = 'dark' }) {
           onClick={() => setActiveTab('users')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${activeTab === 'users' ? styles.tabActive : styles.tabInactive}`}
         >
-          <Users className="w-4 h-4" /> Hak Akses Staf
+          <Users className="w-4 h-4" /> Hak Akses User
         </button>
         <button
           type="button"
@@ -321,7 +321,7 @@ export default function SettingsModule({ theme = 'dark' }) {
                 type="button"
                 className="bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
               >
-                + Tambah Staf Baru
+                + Tambah User
               </button>
             </div>
 
