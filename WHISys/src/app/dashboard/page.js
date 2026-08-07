@@ -63,9 +63,9 @@ export default function DashboardPage() {
     localStorage.setItem('whisys_theme', newTheme);
   };
 
-  // LOGIKA IDLE TIMEOUT AUTO LOGOUT (15 MENIT)
+  // LOGIKA IDLE TIMEOUT AUTO LOGOUT (30 MENIT)
   useEffect(() => {
-    const IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 Menit
+    const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 Menit
     let idleTimer;
 
     const handleAutoLogout = async () => {
