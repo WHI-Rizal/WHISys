@@ -562,21 +562,22 @@ export default function DashboardPage() {
         {activeMenu === 'ai-analyzer' && <AiAnalyzerModule theme={theme} />}
 
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
-        {activeMenu !== 'dashboard' && 
-         activeMenu !== 'packages' && 
-         activeMenu !== 'jamaah' && 
-         activeMenu !== 'bookings' && 
-         activeMenu !== 'finance' && (
-          <div className={`${currentTheme.card} border rounded-xl p-12 text-center`}>
-            <div className={`p-4 ${theme === 'dark' ? 'bg-white/5' : 'bg-slate-100'} ${currentTheme.subText} w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center`}>
-              <Plane className="w-8 h-8" />
-            </div>
-            <h3 className={`text-xl font-bold ${currentTheme.headingText} mb-2`}>Modul {activeMenu.toUpperCase()}</h3>
-            <p className={`${currentTheme.subText} text-sm max-w-md mx-auto`}>
-              Fitur ERP ini sedang disiapkan untuk menghubungkan data langsung ke koleksi Firebase Firestore WHISys.
-            </p>
-          </div>
-        )}
+{activeMenu !== 'dashboard' && 
+ activeMenu !== 'packages' && 
+ activeMenu !== 'jamaah' && 
+ activeMenu !== 'bookings' && 
+ activeMenu !== 'finance' && 
+ activeMenu !== 'ai-analyzer' && (
+  <div className={`${currentTheme.card} border rounded-xl p-12 text-center`}>
+    <div className={`p-4 ${theme === 'dark' ? 'bg-white/5' : 'bg-slate-100'} ${currentTheme.subText} w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center`}>
+      <Plane className="w-8 h-8" />
+    </div>
+    <h3 className={`text-xl font-bold ${currentTheme.headingText} mb-2`}>Modul {activeMenu.toUpperCase()}</h3>
+    <p className={`${currentTheme.subText} text-sm max-w-md mx-auto`}>
+      Fitur ERP ini sedang disiapkan untuk menghubungkan data langsung ke koleksi Firebase Firestore WHISys.
+    </p>
+  </div>
+)}
 
       </main>
     </div>
