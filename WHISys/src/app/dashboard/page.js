@@ -28,6 +28,7 @@ import JamaahModule from './JamaahModule';
 import BookingsModule from './BookingsModule';
 import FinanceModule from './FinanceModule';
 import AiAnalyzerModule from './AiAnalyzerModule';
+import SettingsModule from './SettingsModule';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -560,6 +561,9 @@ export default function DashboardPage() {
 
         {/* MODUL AI BUSINESS INTELLIGENCE */}
         {activeMenu === 'ai-analyzer' && <AiAnalyzerModule theme={theme} />}
+
+        // Contoh rendering berdasarkan state tab menu aktif:
+        {activeMenu === 'settings' && <SettingsModule theme={theme} />}
 
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
 {activeMenu !== 'dashboard' && 
