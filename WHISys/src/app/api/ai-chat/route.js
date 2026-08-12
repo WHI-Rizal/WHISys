@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 
 export async function POST(req) {
   try {
@@ -15,14 +15,16 @@ export async function POST(req) {
       );
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-    
-    // Memanggil model resmi Gemini di sisi Server
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const ai = new GoogleGenAI({ apiKey });
 
-    const result = await model.generateContent(promptText);
-    const response = await result.response;
-    const aiAnswer = response.text();
+    // Pakai Interactions API (pengganti resmi generateContent) & model
+    // Gemini 3 yang masih aktif untuk akun/API key baru.
+    const interaction = await ai.interactions.create({
+      model: 'gemini-3.5-flash-lite',
+      input: promptText,
+    });
+
+    const aiAnswer = interaction.output_text || 'Tidak ada hasil analisis.';
 
     return NextResponse.json({ text: aiAnswer });
   } catch (err) {
