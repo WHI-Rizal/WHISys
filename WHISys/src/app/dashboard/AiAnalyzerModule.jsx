@@ -218,8 +218,6 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     setUserQuery('');
     setAnalyzing(true);
 
-    const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-
     // Data Context ERP
     const systemContextData = {
       summary: {
@@ -267,59 +265,26 @@ ${JSON.stringify(systemContextData)}
 
 Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksimal 2-3 kalimat). Dilarang menuliskan analisis internal, poin aturan, atau opsi jawaban di teks keluaran.`;
 
+    const fullPrompt = `${systemInstructionText}\n\nPertanyaan User: ${currentQuery}`;
+
     try {
-      if (!apiKey) {
-        throw new Error("API Key Gemini tidak terdeteksi. Pastikan NEXT_PUBLIC_GEMINI_API_KEY terpasang di Vercel.");
-      }
-
-      const listModelsRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
-      );
-      const listModelsData = await listModelsRes.json();
-
-      if (listModelsData.error) {
-        throw new Error(listModelsData.error.message);
-      }
-
-      const validModels = (listModelsData.models || [])
-        .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
-        .map(m => m.name.replace('models/', ''))
-        .filter(name => !name.includes('1.5') && !name.includes('2.0') && !name.includes('2.5'));
-
-      const selectedModel = validModels.length > 0 
-        ? validModels[0] 
-        : (listModelsData.models || []).map(m => m.name.replace('models/', ''))[0];
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            system_instruction: {
-              parts: [{ text: systemInstructionText }]
-            },
-            contents: [{
-              role: 'user',
-              parts: [{ text: currentQuery }]
-            }],
-            generationConfig: {
-              temperature: 0.1
-            }
-          })
-        }
-      );
+      // Panggil API route server-side (/api/ai-chat) — API key Gemini aman
+      // tersimpan di server, tidak pernah terkirim/terekspos ke browser.
+      const response = await fetch('/api/ai-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ promptText: fullPrompt })
+      });
 
       const data = await response.json();
 
-      if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
-        const rawAiAnswer = data.candidates[0].content.parts[0].text;
-        const finalCleanAnswer = cleanAiResponse(rawAiAnswer);
+      if (data.text) {
+        const finalCleanAnswer = cleanAiResponse(data.text);
         updateChatHistory([...newHistory, { sender: 'ai', text: finalCleanAnswer }]);
       } else if (data.error) {
-        throw new Error(data.error.message);
+        throw new Error(data.error);
       } else {
-        throw new Error("Respons dari Google Gemini kosong.");
+        throw new Error("Respons dari server AI kosong.");
       }
 
     } catch (err) {

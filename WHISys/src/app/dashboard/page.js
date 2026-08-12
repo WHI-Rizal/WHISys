@@ -1,20 +1,20 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { 
-  LayoutDashboard, 
-  Plane, 
-  Users, 
-  BookOpen, 
+import {
+  LayoutDashboard,
+  Plane,
+  Users,
+  BookOpen,
   Wallet,
   Sun,
   Moon,
-  PackageCheck, 
-  UserCheck, 
+  PackageCheck,
+  UserCheck,
   Sparkles,
   Settings,
-  LogOut, 
-  Plus, 
+  LogOut,
+  Plus,
   Calendar,
   AlertCircle,
   ShieldCheck
@@ -161,7 +161,7 @@ export default function DashboardPage() {
     try {
       const jamaahSnap = await getDocs(collection(db, 'jamaah'));
       const jamaahList = jamaahSnap.docs.map(doc => doc.data());
-      
+
       const today = new Date();
       const sixMonths = new Date();
       sixMonths.setMonth(today.getMonth() + 6);
@@ -176,7 +176,7 @@ export default function DashboardPage() {
 
       const pkgQuery = query(collection(db, 'packages'), orderBy('departureDate', 'asc'), limit(5));
       const pkgSnap = await getDocs(pkgQuery);
-      
+
       const pkgList = pkgSnap.docs.map(docSnap => {
         const pkgData = docSnap.data();
         const pkgId = docSnap.id;
@@ -218,7 +218,7 @@ export default function DashboardPage() {
             setUserProfile({
               email: user.email,
               fullName: user.displayName || 'Staf WHI',
-              role: 'admin' 
+              role: 'admin'
             });
           }
         } catch (error) {
@@ -256,7 +256,7 @@ export default function DashboardPage() {
 
   return (
     <div className={`flex h-screen ${currentTheme.bg} font-sans transition-colors duration-300`}>
-      
+
       {/* 1. SIDEBAR NAVIGASI ERP */}
       <aside className={`w-64 ${currentTheme.sidebar} border-r flex flex-col justify-between p-4 shrink-0 transition-colors duration-300`}>
         <div>
@@ -272,90 +272,90 @@ export default function DashboardPage() {
 
           <nav className="space-y-1">
             <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Core ERP System</p>
-            
-            <SidebarItem 
-              icon={LayoutDashboard} 
-              label="Dashboard Utama" 
-              active={activeMenu === 'dashboard'} 
+
+            <SidebarItem
+              icon={LayoutDashboard}
+              label="Dashboard Utama"
+              active={activeMenu === 'dashboard'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
-              onClick={() => { changeMenu('dashboard'); fetchDashboardData(); }} 
-            />
-            
-            <SidebarItem 
-              icon={Plane} 
-              label="Paket Travel & LA" 
-              active={activeMenu === 'packages'} 
-              activeClass={currentTheme.activeMenu}
-              subTextClass={currentTheme.subText}
-              onClick={() => changeMenu('packages')} 
+              onClick={() => { changeMenu('dashboard'); fetchDashboardData(); }}
             />
 
-            <SidebarItem 
-              icon={Users} 
-              label="Data Master Jamaah" 
-              active={activeMenu === 'jamaah'} 
+            <SidebarItem
+              icon={Plane}
+              label="Paket Travel & LA"
+              active={activeMenu === 'packages'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
-              onClick={() => changeMenu('jamaah')} 
+              onClick={() => changeMenu('packages')}
             />
 
-            <SidebarItem 
-              icon={BookOpen} 
-              label="Booking & Manifest" 
-              active={activeMenu === 'bookings'} 
+            <SidebarItem
+              icon={Users}
+              label="Data Master Jamaah"
+              active={activeMenu === 'jamaah'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
-              onClick={() => changeMenu('bookings')} 
+              onClick={() => changeMenu('jamaah')}
+            />
+
+            <SidebarItem
+              icon={BookOpen}
+              label="Booking & Manifest"
+              active={activeMenu === 'bookings'}
+              activeClass={currentTheme.activeMenu}
+              subTextClass={currentTheme.subText}
+              onClick={() => changeMenu('bookings')}
             />
 
             <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Operasional Travel</p>
-            
-            <SidebarItem 
-              icon={Wallet} 
-              label="Keuangan & Pelunasan" 
-              active={activeMenu === 'finance'} 
+
+            <SidebarItem
+              icon={Wallet}
+              label="Keuangan & Pelunasan"
+              active={activeMenu === 'finance'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
-              onClick={() => changeMenu('finance')} 
+              onClick={() => changeMenu('finance')}
             />
 
-            <SidebarItem 
-              icon={PackageCheck} 
-              label="Perlengkapan Jamaah" 
-              active={activeMenu === 'equipment'} 
+            <SidebarItem
+              icon={PackageCheck}
+              label="Perlengkapan Jamaah"
+              active={activeMenu === 'equipment'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
-              onClick={() => changeMenu('equipment')} 
+              onClick={() => changeMenu('equipment')}
             />
 
-            <SidebarItem 
-              icon={UserCheck} 
-              label="Mitra & Agen" 
-              active={activeMenu === 'agents'} 
+            <SidebarItem
+              icon={UserCheck}
+              label="Mitra & Agen"
+              active={activeMenu === 'agents'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
-              onClick={() => changeMenu('agents')} 
+              onClick={() => changeMenu('agents')}
             />
 
             <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Smart Assistant & Config</p>
 
-            <SidebarItem 
-              icon={Sparkles} 
-              label="AI Business Intelligence" 
-              active={activeMenu === 'ai-analyzer'} 
+            <SidebarItem
+              icon={Sparkles}
+              label="AI Business Intelligence"
+              active={activeMenu === 'ai-analyzer'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
-              onClick={() => changeMenu('ai-analyzer')} 
+              onClick={() => changeMenu('ai-analyzer')}
             />
 
-            <SidebarItem 
-              icon={Settings} 
-              label="Pengaturan Sistem" 
-              active={activeMenu === 'settings'} 
+            <SidebarItem
+              icon={Settings}
+              label="Pengaturan Sistem"
+              active={activeMenu === 'settings'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
-              onClick={() => changeMenu('settings')} 
+              onClick={() => changeMenu('settings')}
             />
           </nav>
         </div>
@@ -372,8 +372,8 @@ export default function DashboardPage() {
               </span>
             </div>
           </div>
-          <button 
-            onClick={handleLogout} 
+          <button
+            onClick={handleLogout}
             className="text-slate-400 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-slate-800/10"
             title="Keluar / Logout"
           >
@@ -384,7 +384,7 @@ export default function DashboardPage() {
 
       {/* 2. AREA KONTEN UTAMA */}
       <main className="flex-1 overflow-y-auto p-8">
-        
+
         {/* HEADER BAR */}
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
@@ -396,8 +396,8 @@ export default function DashboardPage() {
             <button
               onClick={toggleTheme}
               className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all text-xs font-semibold ${
-                theme === 'dark' 
-                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-800' 
+                theme === 'dark'
+                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-800'
                   : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300 shadow-sm'
               }`}
               title={theme === 'dark' ? 'Ganti ke Mode Terang (Light Mode)' : 'Ganti ke Mode Gelap (Dark Mode)'}
@@ -415,7 +415,7 @@ export default function DashboardPage() {
               )}
             </button>
 
-            <button 
+            <button
               onClick={() => changeMenu('jamaah')}
               className={`flex items-center gap-2 ${currentTheme.accentBg} text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg`}
             >
@@ -523,7 +523,7 @@ export default function DashboardPage() {
                   <h3 className={`font-bold ${currentTheme.headingText} mb-4 flex items-center gap-2`}>
                     <AlertCircle className="w-5 h-5 text-amber-400" /> Peringatan Sistem
                   </h3>
-                  
+
                   <div className="space-y-4">
                     {realStats.expiringPassportsCount > 0 ? (
                       <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs">
@@ -576,12 +576,12 @@ export default function DashboardPage() {
         {activeMenu === 'settings' && <SettingsModule theme={theme} />}
 
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
-        {activeMenu !== 'dashboard' && 
-         activeMenu !== 'packages' && 
-         activeMenu !== 'jamaah' && 
-         activeMenu !== 'bookings' && 
-         activeMenu !== 'finance' && 
-         activeMenu !== 'ai-analyzer' && 
+        {activeMenu !== 'dashboard' &&
+         activeMenu !== 'packages' &&
+         activeMenu !== 'jamaah' &&
+         activeMenu !== 'bookings' &&
+         activeMenu !== 'finance' &&
+         activeMenu !== 'ai-analyzer' &&
          activeMenu !== 'settings' && (
           <div className={`${currentTheme.card} border rounded-xl p-12 text-center`}>
             <div className={`p-4 ${theme === 'dark' ? 'bg-white/5' : 'bg-slate-100'} ${currentTheme.subText} w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center`}>
@@ -604,8 +604,8 @@ function SidebarItem({ icon: Icon, label, active, activeClass, subTextClass, onC
     <button
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-        active 
-          ? `${activeClass} shadow-md` 
+        active
+          ? `${activeClass} shadow-md`
           : `${subTextClass} hover:bg-emerald-500/10 hover:text-emerald-500`
       }`}
     >

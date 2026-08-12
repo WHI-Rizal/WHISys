@@ -28,7 +28,7 @@ export default function LoginPage() {
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 items-center justify-center font-sans px-4">
       <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl w-full max-w-md shadow-2xl">
-        
+
         <div className="text-center mb-8">
           <div className="w-12 h-12 bg-emerald-600 rounded-xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-emerald-900/40">
             <Plane className="w-6 h-6 text-white" />
@@ -49,7 +49,7 @@ export default function LoginPage() {
             <label className="block mb-1 font-medium text-slate-300">Email Administrator / Staf</label>
             <div className="relative">
               <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-              <input 
+              <input
                 type="email" required
                 placeholder="nama@wisatahalalindonesia.com"
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2.5 text-white focus:outline-none focus:border-emerald-500"
@@ -62,7 +62,7 @@ export default function LoginPage() {
             <label className="block mb-1 font-medium text-slate-300">Password</label>
             <div className="relative">
               <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-              <input 
+              <input
                 type="password" required
                 placeholder="••••••••"
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2.5 text-white focus:outline-none focus:border-emerald-500"
@@ -71,7 +71,7 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <button 
+          <button
             type="submit" disabled={loading}
             className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-lg font-medium transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2 mt-2"
           >
