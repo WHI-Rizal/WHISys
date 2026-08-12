@@ -68,7 +68,10 @@ export default function SettingsModule({ theme = 'dark' }) {
   });
 
   const [apiData, setApiData] = useState({
-    geminiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY || 'AIzaSy...',
+    // Gemini API Key TIDAK dibaca/ditampilkan di sini lagi.
+    // Key asli hanya hidup sebagai server-side env var (GEMINI_API_KEY di Vercel)
+    // dan dipakai lewat /api/ai-chat — tidak pernah dikirim ke browser atau
+    // disimpan ke Firestore.
     waGatewayUrl: 'https://api.fonnte.com/send',
     waToken: '••••••••••••••••'
   });
@@ -389,16 +392,17 @@ export default function SettingsModule({ theme = 'dark' }) {
                     <Bot className="w-4 h-4 text-emerald-400" /> Google Gemini AI API Key
                   </span>
                   <span className="px-2 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-400 rounded-full font-semibold border border-emerald-500/30">
-                    Aktif (Free Tier)
+                    Dikelola di Server
                   </span>
                 </div>
                 <input
                   type="password"
-                  value={apiData.geminiKey}
-                  onChange={(e) => setApiData({...apiData, geminiKey: e.target.value})}
-                  className={`w-full ${styles.inputBg} p-2.5 rounded-lg text-xs font-mono focus:outline-none focus:border-emerald-500`}
+                  value="••••••••••••••••••••••••••"
+                  disabled
+                  readOnly
+                  className={`w-full ${styles.inputBg} p-2.5 rounded-lg text-xs font-mono opacity-60 cursor-not-allowed`}
                 />
-                <p className={`text-[11px] ${styles.textSub}`}>Digunakan oleh modul WHI AI Executive Advisor untuk menganalisis data keuangan & jamaah.</p>
+                <p className={`text-[11px] ${styles.textSub}`}>Demi keamanan, API Key hanya diatur lewat Environment Variable <code>GEMINI_API_KEY</code> di Vercel — tidak bisa dilihat/diubah dari sini.</p>
               </div>
 
               {/* WHATSAPP GATEWAY API */}
