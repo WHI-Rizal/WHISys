@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where } from 'firebase/firestore';
-import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare } from 'lucide-react';
+import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter } from 'lucide-react';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -14,6 +14,9 @@ const formatDateDDMMYYYY = (dateString) => {
   const year = date.getFullYear();
   return `${day}/${month}/${year}`;
 };
+
+// Kapasitas orang per tipe kamar (dipakai untuk Rooming List)
+const ROOM_CAPACITY = { Quad: 4, Triple: 3, Double: 2 };
 
 // Daftar Dokumen Persyaratan Standard Travel (8 Dokumen)
 const REQUIRED_DOCUMENTS = [
@@ -87,6 +90,28 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
     paymentMethod: 'Transfer Bank',
     notes: ''
   });
+
+  // State Filter Tampilan (Aktif / Semua / Dibatalkan / Reschedule)
+  const [viewFilter, setViewFilter] = useState('active');
+
+  // State Modal Batalkan / Reschedule Booking
+  const [showActionModal, setShowActionModal] = useState(false);
+  const [actionMode, setActionMode] = useState('cancel'); // 'cancel' | 'reschedule'
+  const [selectedBookingForAction, setSelectedBookingForAction] = useState(null);
+  const [cancelForm, setCancelForm] = useState({
+    refundAmount: '',
+    refundMethod: 'Transfer Bank',
+    reason: ''
+  });
+  const [rescheduleForm, setRescheduleForm] = useState({
+    newPackageId: '',
+    roomType: 'Quad',
+    busGroup: 'Bus 1'
+  });
+
+  // State Modal Rooming List
+  const [showRoomingModal, setShowRoomingModal] = useState(false);
+  const [roomingPackageId, setRoomingPackageId] = useState('');
 
   // Ambil Data Pengaturan Perusahaan Dinamis dari Firestore
   useEffect(() => {
@@ -326,6 +351,243 @@ Terima kasih.`;
     } catch (err) {
       alert("Gagal menghapus booking: " + err.message);
     }
+  };
+
+  // ============ ALUR BATALKAN / RESCHEDULE BOOKING ============
+
+  const handleOpenActionModal = (item, mode) => {
+    setSelectedBookingForAction(item);
+    setActionMode(mode);
+    setCancelForm({
+      refundAmount: item.totalPaid || 0,
+      refundMethod: 'Transfer Bank',
+      reason: ''
+    });
+    setRescheduleForm({
+      newPackageId: '',
+      roomType: item.roomType || 'Quad',
+      busGroup: item.busGroup || 'Bus 1'
+    });
+    setShowActionModal(true);
+  };
+
+  // Melepas kembali kuota seat ke paket terkait (dipakai saat batal/reschedule)
+  const releaseQuotaToPackage = async (packageId) => {
+    if (!packageId) return;
+    const pkgRef = doc(db, 'packages', packageId);
+    const pkgSnap = await getDoc(pkgRef);
+    if (pkgSnap.exists()) {
+      const currentQuota = pkgSnap.data().quotaRemaining ?? 0;
+      await updateDoc(pkgRef, { quotaRemaining: Number(currentQuota) + 1 });
+    }
+  };
+
+  const handleCancelSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedBookingForAction) return;
+
+    try {
+      await updateDoc(doc(db, 'bookings', selectedBookingForAction.id), {
+        status: 'cancelled',
+        cancelReason: cancelForm.reason || '-',
+        refundAmount: Number(cancelForm.refundAmount || 0),
+        refundMethod: cancelForm.refundMethod,
+        cancelledAt: new Date().toISOString()
+      });
+
+      // Kuota seat yang dibatalkan dikembalikan ke paket
+      await releaseQuotaToPackage(selectedBookingForAction.packageId);
+
+      setShowActionModal(false);
+      fetchData();
+    } catch (err) {
+      alert("Gagal memproses pembatalan: " + err.message);
+    }
+  };
+
+  const handleRescheduleSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedBookingForAction) return;
+    if (!rescheduleForm.newPackageId) {
+      alert("Pilih paket/keberangkatan tujuan reschedule.");
+      return;
+    }
+
+    try {
+      const oldBooking = selectedBookingForAction;
+      const newPkg = packagesList.find(p => p.id === rescheduleForm.newPackageId);
+      if (!newPkg) return;
+
+      if (Number(newPkg.quotaRemaining || 0) <= 0) {
+        alert("Kuota paket tujuan sudah habis!");
+        return;
+      }
+
+      let newPrice = Number(newPkg.priceQuad || newPkg.priceMain || 0);
+      if (rescheduleForm.roomType === 'Triple') newPrice = Number(newPkg.priceTriple || newPrice);
+      if (rescheduleForm.roomType === 'Double') newPrice = Number(newPkg.priceDouble || newPrice);
+
+      const carryOverAmount = Number(oldBooking.totalPaid || 0);
+      const newBookingCode = `BK-${Date.now().toString().slice(-6)}`;
+
+      // 1. Buat booking baru di paket tujuan
+      const newBookingRef = await addDoc(collection(db, 'bookings'), {
+        bookingCode: newBookingCode,
+        packageId: newPkg.id,
+        packageName: newPkg.name,
+        packageCode: newPkg.code,
+        departureDate: newPkg.departureDate,
+        jamaahId: oldBooking.jamaahId,
+        jamaahName: oldBooking.jamaahName,
+        passportNumber: oldBooking.passportNumber || '-',
+        roomType: rescheduleForm.roomType,
+        busGroup: rescheduleForm.busGroup,
+        totalAmount: newPrice,
+        totalPaid: carryOverAmount,
+        paymentStatus: carryOverAmount >= newPrice ? 'Full Payment' : 'DP Paid',
+        documents: oldBooking.documents || {
+          passport: false, ktp_foto: false, family_cert: false, sponsor_letter: false,
+          bank_statement: false, vaccine_cert: false, visa: false, ticket: false
+        },
+        rescheduledFromBookingId: oldBooking.id,
+        rescheduledFromBookingCode: oldBooking.bookingCode,
+        createdAt: new Date().toISOString()
+      });
+
+      // 2. Pindahkan setoran yang sudah dibayar sebagai carry-over ke booking baru
+      if (carryOverAmount > 0) {
+        await addDoc(collection(db, 'payments_income'), {
+          bookingId: newBookingRef.id,
+          bookingCode: newBookingCode,
+          jamaahName: oldBooking.jamaahName,
+          packageName: newPkg.name,
+          amount: carryOverAmount,
+          paymentMethod: 'Carry-Over Reschedule',
+          notes: `Pindahan setoran dari booking ${oldBooking.bookingCode} (reschedule)`,
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      // 3. Tandai booking lama sebagai rescheduled & kembalikan kuota paket lama
+      await updateDoc(doc(db, 'bookings', oldBooking.id), {
+        status: 'rescheduled',
+        rescheduledAt: new Date().toISOString(),
+        rescheduledToBookingId: newBookingRef.id,
+        rescheduledToBookingCode: newBookingCode
+      });
+      await releaseQuotaToPackage(oldBooking.packageId);
+
+      // 4. Kurangi kuota paket tujuan
+      await updateDoc(doc(db, 'packages', newPkg.id), {
+        quotaRemaining: Number(newPkg.quotaRemaining || 1) - 1
+      });
+
+      setShowActionModal(false);
+      fetchData();
+    } catch (err) {
+      alert("Gagal memproses reschedule: " + err.message);
+    }
+  };
+
+  // ============ ROOMING LIST ============
+
+  const handleSaveRoomLabel = async (bookingId, roomLabel) => {
+    try {
+      await updateDoc(doc(db, 'bookings', bookingId), { roomLabel });
+      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, roomLabel } : b));
+    } catch (err) {
+      alert("Gagal menyimpan nomor kamar: " + err.message);
+    }
+  };
+
+  const handleAutoAssignRooms = async (roomingBookings) => {
+    try {
+      const byRoomType = {};
+      roomingBookings.forEach(b => {
+        const rt = b.roomType || 'Quad';
+        if (!byRoomType[rt]) byRoomType[rt] = [];
+        byRoomType[rt].push(b);
+      });
+
+      const updates = [];
+      Object.entries(byRoomType).forEach(([roomType, list]) => {
+        const capacity = ROOM_CAPACITY[roomType] || 4;
+        list.forEach((b, idx) => {
+          const roomNumber = Math.floor(idx / capacity) + 1;
+          const roomLabel = `${roomType.charAt(0)}${roomNumber}`;
+          updates.push(updateDoc(doc(db, 'bookings', b.id), { roomLabel }));
+        });
+      });
+
+      await Promise.all(updates);
+      fetchData();
+    } catch (err) {
+      alert("Gagal auto-assign kamar: " + err.message);
+    }
+  };
+
+  const handlePrintRoomingList = (roomingBookings, pkg) => {
+    const grouped = {};
+    roomingBookings.forEach(b => {
+      const label = b.roomLabel || 'Belum Ditentukan';
+      if (!grouped[label]) grouped[label] = [];
+      grouped[label].push(b);
+    });
+
+    const roomRowsHtml = Object.entries(grouped).map(([label, members]) => `
+      <tr>
+        <td style="padding:8px 12px;font-weight:700;border-bottom:1px solid #f1f5f9;">${label}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;">${members[0]?.roomType || '-'}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;">
+          ${members.map((m, i) => `${i + 1}. ${m.jamaahName} (${m.passportNumber || '-'})`).join('<br/>')}
+        </td>
+        <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;text-align:center;">${members.length}</td>
+      </tr>
+    `).join('');
+
+    const docContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Rooming List - ${pkg?.name || ''}</title>
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color:#1e293b; padding:30px; }
+            h1 { font-size:18px; color:#065f46; margin-bottom:2px; }
+            p.sub { font-size:11px; color:#64748b; margin-top:0; }
+            table { width:100%; border-collapse:collapse; margin-top:16px; }
+            th { background:#f1f5f9; text-align:left; padding:8px 12px; font-size:11px; text-transform:uppercase; color:#475569; }
+          </style>
+        </head>
+        <body>
+          <h1>Rooming List</h1>
+          <p class="sub">${pkg?.name || '-'} (${pkg?.code || '-'}) &bull; Keberangkatan: ${formatDateDDMMYYYY(pkg?.departureDate)}</p>
+          <table>
+            <thead><tr><th>Kamar</th><th>Tipe</th><th>Anggota Kamar</th><th style="text-align:center;">Jml</th></tr></thead>
+            <tbody>${roomRowsHtml || '<tr><td colspan="4" style="padding:12px;text-align:center;color:#94a3b8;">Belum ada data.</td></tr>'}</tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    const doc2 = iframe.contentWindow.document;
+    doc2.open();
+    doc2.write(docContent);
+    doc2.close();
+
+    iframe.contentWindow.focus();
+    setTimeout(() => {
+      iframe.contentWindow.print();
+      document.body.removeChild(iframe);
+    }, 500);
   };
 
   const handlePrintInvoice = async (booking) => {
@@ -637,11 +899,24 @@ Terima kasih.`;
     }
   };
 
-  const filteredBookings = bookings.filter(b => 
-    (b.jamaahName && b.jamaahName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (b.packageName && b.packageName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (b.bookingCode && b.bookingCode.toLowerCase().includes(searchTerm.toLowerCase()))
+  const filteredBookings = bookings
+    .filter(b => {
+      const status = b.status || 'active';
+      if (viewFilter === 'active') return status === 'active';
+      if (viewFilter === 'cancelled') return status === 'cancelled';
+      if (viewFilter === 'rescheduled') return status === 'rescheduled';
+      return true; // 'all'
+    })
+    .filter(b =>
+      (b.jamaahName && b.jamaahName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (b.packageName && b.packageName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (b.bookingCode && b.bookingCode.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+
+  const roomingBookingsForPackage = bookings.filter(
+    b => b.packageId === roomingPackageId && (b.status || 'active') === 'active'
   );
+  const roomingPackage = packagesList.find(p => p.id === roomingPackageId);
 
   return (
     <div className="space-y-6">
@@ -652,15 +927,23 @@ Terima kasih.`;
           </h3>
           <p className={`text-xs ${styles.textSub} mt-1`}>Plotting jamaah, kelengkapan berkas/dokumen, dan setoran pembayaran.</p>
         </div>
-        <button
-          onClick={handleOpenAddModal}
-          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg"
-        >
-          <Plus className="w-4 h-4" /> Tambah Booking Baru
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => { setRoomingPackageId(''); setShowRoomingModal(true); }}
+            className={`flex items-center gap-2 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} px-4 py-2 rounded-lg text-sm font-medium transition-all`}
+          >
+            <DoorOpen className="w-4 h-4" /> Rooming List
+          </button>
+          <button
+            onClick={handleOpenAddModal}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg"
+          >
+            <Plus className="w-4 h-4" /> Tambah Booking Baru
+          </button>
+        </div>
       </div>
 
-      <div className={`${styles.cardBg} p-4 rounded-xl border flex items-center gap-4`}>
+      <div className={`${styles.cardBg} p-4 rounded-xl border flex flex-col sm:flex-row items-stretch sm:items-center gap-3`}>
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
           <input
@@ -670,6 +953,27 @@ Terima kasih.`;
             onChange={(e) => setSearchTerm(e.target.value)}
             className={`w-full ${styles.inputBg} pl-9 pr-4 py-2 rounded-lg text-xs focus:outline-none focus:border-emerald-500`}
           />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Filter className={`w-3.5 h-3.5 ${styles.textSub}`} />
+          {[
+            { key: 'active', label: 'Aktif' },
+            { key: 'cancelled', label: 'Dibatalkan' },
+            { key: 'rescheduled', label: 'Reschedule' },
+            { key: 'all', label: 'Semua' }
+          ].map(f => (
+            <button
+              key={f.key}
+              onClick={() => setViewFilter(f.key)}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${
+                viewFilter === f.key
+                  ? 'bg-emerald-600 text-white'
+                  : `${isDark ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -746,7 +1050,15 @@ Terima kasih.`;
                         </div>
                       </td>
                       <td className="p-4">
-                        {item.paymentStatus === 'Full Payment' ? (
+                        {item.status === 'cancelled' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-500/10 text-rose-500 border border-rose-500/20 rounded-full font-semibold">
+                            <Ban className="w-3 h-3" /> Dibatalkan
+                          </span>
+                        ) : item.status === 'rescheduled' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full font-semibold">
+                            <RotateCcw className="w-3 h-3" /> Reschedule
+                          </span>
+                        ) : item.paymentStatus === 'Full Payment' ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-full font-semibold">
                             <CheckCircle className="w-3 h-3" /> Lunas
                           </span>
@@ -754,6 +1066,12 @@ Terima kasih.`;
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-full font-semibold">
                             <Clock className="w-3 h-3" /> DP / Cicilan
                           </span>
+                        )}
+                        {item.status === 'cancelled' && (
+                          <div className="text-[10px] text-rose-400 mt-1">Refund: Rp {Number(item.refundAmount || 0).toLocaleString('id-ID')}</div>
+                        )}
+                        {item.status === 'rescheduled' && (
+                          <div className="text-[10px] text-blue-400 mt-1">Ke: {item.rescheduledToBookingCode || '-'}</div>
                         )}
                       </td>
                       <td className="p-4 text-center">
@@ -766,7 +1084,7 @@ Terima kasih.`;
                           >
                             <MessageSquare className="w-4 h-4" />
                           </button>
-                          
+
                           {/* TOMBOL RIWAYAT PEMBAYARAN */}
                           <button
                             onClick={() => handleOpenHistory(item)}
@@ -793,6 +1111,28 @@ Terima kasih.`;
                           >
                             <Edit className="w-4 h-4" />
                           </button>
+
+                          {(item.status || 'active') === 'active' && (
+                            <>
+                              {/* TOMBOL RESCHEDULE */}
+                              <button
+                                onClick={() => handleOpenActionModal(item, 'reschedule')}
+                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                                title="Reschedule ke Paket Lain"
+                              >
+                                <RotateCcw className="w-4 h-4" />
+                              </button>
+
+                              {/* TOMBOL BATALKAN / REFUND */}
+                              <button
+                                onClick={() => handleOpenActionModal(item, 'cancel')}
+                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                                title="Batalkan Booking & Proses Refund"
+                              >
+                                <Ban className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
 
                           {/* TOMBOL HAPUS BOOKING */}
                           <button
@@ -1108,6 +1448,242 @@ Terima kasih.`;
                 Tutup
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL BATALKAN / RESCHEDULE BOOKING */}
+      {showActionModal && selectedBookingForAction && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowActionModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              {actionMode === 'cancel' ? (
+                <><Ban className="w-5 h-5 text-rose-500" /> Batalkan Booking & Refund</>
+              ) : (
+                <><RotateCcw className="w-5 h-5 text-blue-500" /> Reschedule ke Paket Lain</>
+              )}
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>
+              Jamaah: <strong className={styles.textTitle}>{selectedBookingForAction.jamaahName}</strong> • Kode: <span className="font-mono text-emerald-500">{selectedBookingForAction.bookingCode}</span>
+            </p>
+
+            {/* Tab switch cancel / reschedule */}
+            <div className={`flex gap-1.5 p-1 mb-4 rounded-lg ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
+              <button
+                onClick={() => setActionMode('cancel')}
+                className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors ${actionMode === 'cancel' ? 'bg-rose-600 text-white' : styles.textSub}`}
+              >
+                Batalkan / Refund
+              </button>
+              <button
+                onClick={() => setActionMode('reschedule')}
+                className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors ${actionMode === 'reschedule' ? 'bg-blue-600 text-white' : styles.textSub}`}
+              >
+                Reschedule
+              </button>
+            </div>
+
+            {actionMode === 'cancel' ? (
+              <form onSubmit={handleCancelSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+                <div className={`${styles.innerBg} p-3 rounded-lg border text-[11px]`}>
+                  Total sudah disetor: <strong className={styles.textTitle}>Rp {Number(selectedBookingForAction.totalPaid || 0).toLocaleString('id-ID')}</strong>
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Nominal Refund (Rp)</label>
+                  <input
+                    type="number" required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={cancelForm.refundAmount}
+                    onChange={e => setCancelForm({ ...cancelForm, refundAmount: e.target.value })}
+                  />
+                  <p className="text-[10px] mt-1 opacity-70">Boleh kurang dari total setoran kalau ada potongan/biaya pembatalan.</p>
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Metode Refund</label>
+                  <select
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={cancelForm.refundMethod}
+                    onChange={e => setCancelForm({ ...cancelForm, refundMethod: e.target.value })}
+                  >
+                    <option value="Transfer Bank">Transfer Bank</option>
+                    <option value="Cash / Tunai">Cash / Tunai</option>
+                    <option value="Deposit / Saldo Akun">Deposit / Saldo Akun</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Alasan Pembatalan</label>
+                  <textarea
+                    required rows={3}
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    placeholder="Contoh: Sakit, kendala visa, ganti jadwal keluarga, dll."
+                    value={cancelForm.reason}
+                    onChange={e => setCancelForm({ ...cancelForm, reason: e.target.value })}
+                  />
+                </div>
+                <div className={`pt-3 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                  <button type="button" onClick={() => setShowActionModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                    Batal
+                  </button>
+                  <button type="submit" className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-medium">
+                    Proses Pembatalan & Refund
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleRescheduleSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+                <div className={`${styles.innerBg} p-3 rounded-lg border text-[11px]`}>
+                  Setoran sebesar <strong className={styles.textTitle}>Rp {Number(selectedBookingForAction.totalPaid || 0).toLocaleString('id-ID')}</strong> akan otomatis dipindah (carry-over) ke booking baru.
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Paket / Keberangkatan Tujuan</label>
+                  <select
+                    required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={rescheduleForm.newPackageId}
+                    onChange={e => setRescheduleForm({ ...rescheduleForm, newPackageId: e.target.value })}
+                  >
+                    <option value="">-- Pilih Program Keberangkatan Baru --</option>
+                    {packagesList.filter(p => p.id !== selectedBookingForAction.packageId).map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.code}) - Sisa Seat: {p.quotaRemaining ?? p.quotaTotal}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block mb-1 font-medium">Tipe Kamar</label>
+                    <select
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={rescheduleForm.roomType}
+                      onChange={e => setRescheduleForm({ ...rescheduleForm, roomType: e.target.value })}
+                    >
+                      <option value="Quad">Quad (4 Orang)</option>
+                      <option value="Triple">Triple (3 Orang)</option>
+                      <option value="Double">Double (2 Orang)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block mb-1 font-medium">Alokasi Bus</label>
+                    <select
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={rescheduleForm.busGroup}
+                      onChange={e => setRescheduleForm({ ...rescheduleForm, busGroup: e.target.value })}
+                    >
+                      <option value="Bus 1">Bus 1</option>
+                      <option value="Bus 2">Bus 2</option>
+                      <option value="Bus 3">Bus 3</option>
+                    </select>
+                  </div>
+                </div>
+                <div className={`pt-3 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                  <button type="button" onClick={() => setShowActionModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                    Batal
+                  </button>
+                  <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium">
+                    Proses Reschedule
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ROOMING LIST */}
+      {showRoomingModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-3xl p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowRoomingModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <DoorOpen className="w-5 h-5 text-emerald-500" /> Rooming List
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>Kelompokkan jamaah ke dalam kamar per program keberangkatan.</p>
+
+            <div className="mb-4">
+              <label className="block mb-1 text-xs font-medium">Pilih Program Keberangkatan</label>
+              <select
+                className={`w-full ${styles.inputBg} rounded-lg p-2.5 text-xs`}
+                value={roomingPackageId}
+                onChange={e => setRoomingPackageId(e.target.value)}
+              >
+                <option value="">-- Pilih Paket --</option>
+                {packagesList.map(p => (
+                  <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
+                ))}
+              </select>
+            </div>
+
+            {roomingPackageId && (
+              <>
+                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                  <div className="text-[11px] flex flex-wrap gap-2">
+                    {Object.entries(ROOM_CAPACITY).map(([rt, cap]) => {
+                      const count = roomingBookingsForPackage.filter(b => (b.roomType || 'Quad') === rt).length;
+                      return (
+                        <span key={rt} className={`px-2.5 py-1 rounded-full ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}>
+                          {rt}: {count} orang ({Math.ceil(count / cap)} kamar)
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleAutoAssignRooms(roomingBookingsForPackage)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium"
+                    >
+                      <Wand2 className="w-3.5 h-3.5" /> Auto-Isi Kamar
+                    </button>
+                    <button
+                      onClick={() => handlePrintRoomingList(roomingBookingsForPackage, roomingPackage)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} rounded-lg text-[11px] font-medium`}
+                    >
+                      <Printer className="w-3.5 h-3.5" /> Cetak
+                    </button>
+                  </div>
+                </div>
+
+                <div className={`border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg overflow-hidden`}>
+                  <table className="w-full text-left text-xs">
+                    <thead className={`${styles.tableHeaderBg} uppercase`}>
+                      <tr>
+                        <th className="p-3">Jamaah</th>
+                        <th className="p-3">Tipe Kamar</th>
+                        <th className="p-3">No. Kamar</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                      {roomingBookingsForPackage.length === 0 ? (
+                        <tr><td colSpan="3" className={`p-6 text-center ${styles.textSub}`}>Belum ada jamaah aktif di paket ini.</td></tr>
+                      ) : (
+                        roomingBookingsForPackage.map(b => (
+                          <tr key={b.id}>
+                            <td className={`p-3 font-medium ${styles.textTitle}`}>{b.jamaahName}</td>
+                            <td className="p-3">{b.roomType}</td>
+                            <td className="p-3">
+                              <input
+                                type="text"
+                                defaultValue={b.roomLabel || ''}
+                                placeholder="Cth: Q1"
+                                onBlur={(e) => handleSaveRoomLabel(b.id, e.target.value)}
+                                className={`w-24 ${styles.inputBg} rounded-lg p-1.5 text-xs`}
+                              />
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
