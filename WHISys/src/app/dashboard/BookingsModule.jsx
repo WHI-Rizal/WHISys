@@ -1413,7 +1413,7 @@ Terima kasih.`;
 
               {!editingBookingId && (
                 <div>
-                  <label className="block mb-1 font-medium">Jumlah Pax (Rombongan)</label>
+                  <label className="block mb-1 font-medium">Jumlah Pax</label>
                   <input
                     type="number" min="1" max="20"
                     className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
