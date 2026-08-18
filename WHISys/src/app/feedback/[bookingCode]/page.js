@@ -5,7 +5,7 @@ import { db } from '@/lib/firebase';
 import { collection, addDoc } from 'firebase/firestore';
 import { Star, Send, CheckCircle2, Plane, ExternalLink } from 'lucide-react';
 
-const GOOGLE_REVIEW_LINK = 'https://share.google/USDEuDl1V5G0qG8Jl';
+const GOOGLE_REVIEW_LINK = 'https://www.google.com/maps/place/Wisata+Halal+Indonesia/@-6.3127371,106.767536,17z/data=!3m1!4b1!4m6!3m5!1s0x2e69ef800cfab2df:0x6c9f79f91ef9de17!8m2!3d-6.3127424!4d106.7701109!16s%2Fg%2F11v0qsvbxm?hl=en-GB&entry=ttu';
 
 export default function PublicFeedbackPage({ params, searchParams }) {
   const bookingCode = params?.bookingCode || '';
