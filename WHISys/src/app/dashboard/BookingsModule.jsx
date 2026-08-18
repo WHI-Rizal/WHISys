@@ -1316,15 +1316,6 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                                 <MessageSquare className="w-4 h-4" />
                               </button>
 
-                              {/* TOMBOL KIRIM LINK FEEDBACK */}
-                              <button
-                                onClick={() => handleShareFeedbackLink(item)}
-                                className="p-1.5 bg-amber-500/20 hover:bg-amber-500 text-amber-400 hover:text-white rounded-lg transition-colors"
-                                title="Kirim Link Feedback/Ulasan ke Jamaah"
-                              >
-                                <Star className="w-4 h-4" />
-                              </button>
-
                               {/* TOMBOL PRINT INVOICE */}
                               <button
                                 onClick={() => handlePrintInvoice(item)}
