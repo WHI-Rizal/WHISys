@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where } from 'firebase/firestore';
-import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter } from 'lucide-react';
+import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal } from 'lucide-react';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -93,6 +93,9 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
 
   // State Filter Tampilan (Aktif / Semua / Dibatalkan / Reschedule)
   const [viewFilter, setViewFilter] = useState('active');
+
+  // State baris mana yang lagi diperluas aksinya (kolom Aksi diminimalkan by default)
+  const [expandedActionsId, setExpandedActionsId] = useState(null);
 
   // State Modal Batalkan / Reschedule Booking
   const [showActionModal, setShowActionModal] = useState(false);
@@ -1076,16 +1079,7 @@ Terima kasih.`;
                       </td>
                       <td className="p-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
-                          {/* TOMBOL WHATSAPP */}
-                          <button
-                            onClick={() => sendWhatsAppNotification(item)}
-                            className="p-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white rounded-lg transition-colors"
-                            title="Kirim Konfirmasi via WhatsApp"
-                          >
-                            <MessageSquare className="w-4 h-4" />
-                          </button>
-
-                          {/* TOMBOL RIWAYAT PEMBAYARAN */}
+                          {/* TOMBOL RIWAYAT PEMBAYARAN - selalu tampil, paling sering dipakai */}
                           <button
                             onClick={() => handleOpenHistory(item)}
                             className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
@@ -1094,54 +1088,76 @@ Terima kasih.`;
                             <Wallet className="w-4 h-4" />
                           </button>
 
-                          {/* TOMBOL PRINT INVOICE */}
+                          {/* TOMBOL MAXIMIZE/MINIMIZE AKSI LAINNYA */}
                           <button
-                            onClick={() => handlePrintInvoice(item)}
-                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-amber-500 rounded-lg transition-colors`}
-                            title="Cetak Invoice / Proforma Invoice"
+                            onClick={() => setExpandedActionsId(expandedActionsId === item.id ? null : item.id)}
+                            className={`p-1.5 ${expandedActionsId === item.id ? 'bg-emerald-600 text-white' : (isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600')} rounded-lg transition-colors`}
+                            title={expandedActionsId === item.id ? 'Sembunyikan Aksi Lainnya' : 'Tampilkan Aksi Lainnya'}
                           >
-                            <Printer className="w-4 h-4" />
+                            <MoreHorizontal className="w-4 h-4" />
                           </button>
 
-                          {/* TOMBOL EDIT BOOKING */}
-                          <button
-                            onClick={() => handleOpenEditModal(item)}
-                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
-                            title="Edit Booking"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
-
-                          {(item.status || 'active') === 'active' && (
+                          {expandedActionsId === item.id && (
                             <>
-                              {/* TOMBOL RESCHEDULE */}
+                              {/* TOMBOL WHATSAPP */}
                               <button
-                                onClick={() => handleOpenActionModal(item, 'reschedule')}
-                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
-                                title="Reschedule ke Paket Lain"
+                                onClick={() => sendWhatsAppNotification(item)}
+                                className="p-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white rounded-lg transition-colors"
+                                title="Kirim Konfirmasi via WhatsApp"
                               >
-                                <RotateCcw className="w-4 h-4" />
+                                <MessageSquare className="w-4 h-4" />
                               </button>
 
-                              {/* TOMBOL BATALKAN / REFUND */}
+                              {/* TOMBOL PRINT INVOICE */}
                               <button
-                                onClick={() => handleOpenActionModal(item, 'cancel')}
-                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                                title="Batalkan Booking & Proses Refund"
+                                onClick={() => handlePrintInvoice(item)}
+                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-amber-500 rounded-lg transition-colors`}
+                                title="Cetak Invoice / Proforma Invoice"
                               >
-                                <Ban className="w-4 h-4" />
+                                <Printer className="w-4 h-4" />
+                              </button>
+
+                              {/* TOMBOL EDIT BOOKING */}
+                              <button
+                                onClick={() => handleOpenEditModal(item)}
+                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                                title="Edit Booking"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+
+                              {(item.status || 'active') === 'active' && (
+                                <>
+                                  {/* TOMBOL RESCHEDULE */}
+                                  <button
+                                    onClick={() => handleOpenActionModal(item, 'reschedule')}
+                                    className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                                    title="Reschedule ke Paket Lain"
+                                  >
+                                    <RotateCcw className="w-4 h-4" />
+                                  </button>
+
+                                  {/* TOMBOL BATALKAN / REFUND */}
+                                  <button
+                                    onClick={() => handleOpenActionModal(item, 'cancel')}
+                                    className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                                    title="Batalkan Booking & Proses Refund"
+                                  >
+                                    <Ban className="w-4 h-4" />
+                                  </button>
+                                </>
+                              )}
+
+                              {/* TOMBOL HAPUS BOOKING */}
+                              <button
+                                onClick={() => handleDeleteBooking(item)}
+                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                                title="Hapus Booking"
+                              >
+                                <Trash2 className="w-4 h-4" />
                               </button>
                             </>
                           )}
-
-                          {/* TOMBOL HAPUS BOOKING */}
-                          <button
-                            onClick={() => handleDeleteBooking(item)}
-                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                            title="Hapus Booking"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
                         </div>
                       </td>
                     </tr>
