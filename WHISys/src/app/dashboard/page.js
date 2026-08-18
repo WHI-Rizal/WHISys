@@ -17,7 +17,8 @@ import {
   Plus,
   Calendar,
   AlertCircle,
-  ShieldCheck
+  ShieldCheck,
+  MessageSquareHeart
 } from 'lucide-react';
 import { auth, db } from '../../lib/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -30,6 +31,7 @@ import BookingsModule from './BookingsModule';
 import FinanceModule from './FinanceModule';
 import AiAnalyzerModule from './AiAnalyzerModule';
 import SettingsModule from './SettingsModule';
+import FeedbackModule from './FeedbackModule';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -321,6 +323,15 @@ export default function DashboardPage() {
             />
 
             <SidebarItem
+              icon={MessageSquareHeart}
+              label="Feedback & Ulasan"
+              active={activeMenu === 'feedback'}
+              activeClass={currentTheme.activeMenu}
+              subTextClass={currentTheme.subText}
+              onClick={() => changeMenu('feedback')}
+            />
+
+            <SidebarItem
               icon={PackageCheck}
               label="Perlengkapan Jamaah"
               active={activeMenu === 'equipment'}
@@ -572,6 +583,9 @@ export default function DashboardPage() {
         {/* MODUL AI BUSINESS INTELLIGENCE */}
         {activeMenu === 'ai-analyzer' && <AiAnalyzerModule theme={theme} />}
 
+        {/* MODUL FEEDBACK & ULASAN */}
+        {activeMenu === 'feedback' && <FeedbackModule theme={theme} />}
+
         {/* MODUL PENGATURAN SISTEM */}
         {activeMenu === 'settings' && <SettingsModule theme={theme} />}
 
@@ -582,6 +596,7 @@ export default function DashboardPage() {
          activeMenu !== 'bookings' &&
          activeMenu !== 'finance' &&
          activeMenu !== 'ai-analyzer' &&
+         activeMenu !== 'feedback' &&
          activeMenu !== 'settings' && (
           <div className={`${currentTheme.card} border rounded-xl p-12 text-center`}>
             <div className={`p-4 ${theme === 'dark' ? 'bg-white/5' : 'bg-slate-100'} ${currentTheme.subText} w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center`}>

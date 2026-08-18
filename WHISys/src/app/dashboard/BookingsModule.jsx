@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where } from 'firebase/firestore';
-import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal } from 'lucide-react';
+import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star } from 'lucide-react';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -217,6 +217,35 @@ Terima kasih.`;
 
     const encodedMessage = encodeURIComponent(message);
     window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMessage}`, '_blank');
+  };
+
+  // Kirim link form feedback pasca-trip ke jamaah via WhatsApp (tanpa perlu login WHISys)
+  const handleShareFeedbackLink = (booking) => {
+    const jamaahData = jamaahList.find(j => j.id === booking.jamaahId || j.fullName === booking.jamaahName);
+
+    if (!jamaahData || !jamaahData.phone) {
+      alert("Nomor HP/WhatsApp jamaah tidak ditemukan pada Data Master Jamaah.");
+      return;
+    }
+
+    let cleanPhone = jamaahData.phone.replace(/[^0-9]/g, '');
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '62' + cleanPhone.slice(1);
+    }
+
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const feedbackUrl = `${baseUrl}/feedback/${booking.bookingCode}?j=${encodeURIComponent(booking.jamaahName || '')}&p=${encodeURIComponent(booking.packageName || '')}&pid=${encodeURIComponent(booking.packageId || '')}`;
+
+    const message = `Assalamu'alaikum Wr. Wb.
+Yth. Bpk/Ibu *${booking.jamaahName}*,
+
+Terima kasih telah mempercayakan perjalanan Anda bersama kami. Kami sangat menghargai kalau Bapak/Ibu berkenan meluangkan waktu sebentar buat memberi ulasan pengalaman perjalanan lewat link berikut:
+
+${feedbackUrl}
+
+Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas layanan. Terima kasih 🙏`;
+
+    window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(message)}`, '_blank');
   };
 
   const syncBookingTotalPaid = async (bookingId, totalTagihan) => {
@@ -1270,6 +1299,15 @@ Terima kasih.`;
                                 title="Kirim Konfirmasi via WhatsApp"
                               >
                                 <MessageSquare className="w-4 h-4" />
+                              </button>
+
+                              {/* TOMBOL KIRIM LINK FEEDBACK */}
+                              <button
+                                onClick={() => handleShareFeedbackLink(item)}
+                                className="p-1.5 bg-amber-500/20 hover:bg-amber-500 text-amber-400 hover:text-white rounded-lg transition-colors"
+                                title="Kirim Link Feedback/Ulasan ke Jamaah"
+                              >
+                                <Star className="w-4 h-4" />
                               </button>
 
                               {/* TOMBOL PRINT INVOICE */}
