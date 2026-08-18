@@ -80,6 +80,8 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
     jamaahId: '',
     roomType: 'Quad',
     busGroup: 'Bus 1',
+    paxCount: 1,
+    additionalPaxNames: [],
     initialPayment: '',
     paymentMethod: 'Transfer Bank',
     paymentNotes: 'Setoran Pembayaran'
@@ -309,7 +311,7 @@ Terima kasih.`;
 
   const handleOpenAddModal = () => {
     setEditingBookingId(null);
-    setFormData({ packageId: '', jamaahId: '', roomType: 'Quad', busGroup: 'Bus 1', initialPayment: '', paymentMethod: 'Transfer Bank', paymentNotes: 'DP Pendaftaran' });
+    setFormData({ packageId: '', jamaahId: '', roomType: 'Quad', busGroup: 'Bus 1', paxCount: 1, additionalPaxNames: [], initialPayment: '', paymentMethod: 'Transfer Bank', paymentNotes: 'DP Pendaftaran' });
     setShowModal(true);
   };
 
@@ -320,11 +322,48 @@ Terima kasih.`;
       jamaahId: item.jamaahId || '',
       roomType: item.roomType || 'Quad',
       busGroup: item.busGroup || 'Bus 1',
+      paxCount: 1,
+      additionalPaxNames: [],
       initialPayment: '',
       paymentMethod: 'Transfer Bank',
       paymentNotes: 'Setoran Tambahan'
     });
     setShowModal(true);
+  };
+
+  // Sesuaikan panjang array nama pax tambahan saat Jumlah Pax berubah
+  const handlePaxCountChange = (value) => {
+    const count = Math.max(1, Math.min(20, Number(value) || 1));
+    setFormData(prev => {
+      const needed = count - 1;
+      const currentNames = prev.additionalPaxNames || [];
+      const newNames = Array.from({ length: needed }, (_, i) => currentNames[i] || '');
+      return { ...prev, paxCount: count, additionalPaxNames: newNames };
+    });
+  };
+
+  const handleAdditionalPaxNameChange = (idx, value) => {
+    setFormData(prev => {
+      const updated = [...prev.additionalPaxNames];
+      updated[idx] = value;
+      return { ...prev, additionalPaxNames: updated };
+    });
+  };
+
+  // Cari jamaah existing berdasarkan nama (case-insensitive), buat menghindari duplikat data master
+  const findJamaahByName = (name, list) =>
+    list.find(j => j.fullName && j.fullName.trim().toLowerCase() === name.trim().toLowerCase());
+
+  // Generate kode customer baru mengikuti pola CSTxxxxxx (sama seperti di Data Master Jamaah)
+  const generateNextCustomerCode = (existingList) => {
+    let maxNum = 2000;
+    existingList.forEach(j => {
+      if (j.customerCode && j.customerCode.startsWith('CST')) {
+        const numPart = parseInt(j.customerCode.replace('CST', ''), 10);
+        if (!isNaN(numPart) && numPart > maxNum) maxNum = numPart;
+      }
+    });
+    return `CST${String(maxNum + 1).padStart(6, '0')}`;
   };
 
   const handleDeleteBooking = async (item) => {
@@ -844,55 +883,140 @@ Terima kasih.`;
         await syncBookingTotalPaid(editingBookingId, price);
 
       } else {
-        if (Number(selectedPkg.quotaRemaining || 0) <= 0) {
-          alert("Kuota paket ini sudah habis!");
+        const paxCount = Math.max(1, Number(formData.paxCount) || 1);
+
+        if (Number(selectedPkg.quotaRemaining || 0) < paxCount) {
+          alert(`Kuota paket ini tidak cukup. Sisa seat: ${selectedPkg.quotaRemaining || 0}, dibutuhkan: ${paxCount}.`);
           return;
         }
 
-        const bookingCode = `BK-${Date.now().toString().slice(-6)}`;
+        const emptyDocChecklist = {
+          passport: false, ktp_foto: false, family_cert: false, sponsor_letter: false,
+          bank_statement: false, vaccine_cert: false, visa: false, ticket: false
+        };
 
-        const newBookingRef = await addDoc(collection(db, 'bookings'), {
-          bookingCode,
-          packageId: selectedPkg.id,
-          packageName: selectedPkg.name,
-          packageCode: selectedPkg.code,
-          departureDate: selectedPkg.departureDate,
-          jamaahId: selectedJamaah.id,
-          jamaahName: selectedJamaah.fullName,
-          passportNumber: selectedJamaah.passportNumber || '-',
-          roomType: formData.roomType,
-          busGroup: formData.busGroup,
-          totalAmount: price,
-          totalPaid: paymentVal,
-          paymentStatus: paymentVal >= price ? 'Full Payment' : 'DP Paid',
-          documents: {
-            passport: false,
-            ktp_foto: false,
-            family_cert: false,
-            sponsor_letter: false,
-            bank_statement: false,
-            vaccine_cert: false,
-            visa: false,
-            ticket: false
-          },
-          createdAt: new Date().toISOString()
-        });
+        if (paxCount === 1) {
+          // ===== REGISTRASI 1 PAX (alur normal, tidak berubah) =====
+          const bookingCode = `BK-${Date.now().toString().slice(-6)}`;
 
-        if (paymentVal > 0) {
-          await addDoc(collection(db, 'payments_income'), {
-            bookingId: newBookingRef.id,
-            bookingCode: bookingCode,
-            jamaahName: selectedJamaah.fullName,
+          const newBookingRef = await addDoc(collection(db, 'bookings'), {
+            bookingCode,
+            packageId: selectedPkg.id,
             packageName: selectedPkg.name,
-            amount: paymentVal,
-            paymentMethod: formData.paymentMethod,
-            notes: formData.paymentNotes,
+            packageCode: selectedPkg.code,
+            departureDate: selectedPkg.departureDate,
+            jamaahId: selectedJamaah.id,
+            jamaahName: selectedJamaah.fullName,
+            passportNumber: selectedJamaah.passportNumber || '-',
+            roomType: formData.roomType,
+            busGroup: formData.busGroup,
+            totalAmount: price,
+            totalPaid: paymentVal,
+            paymentStatus: paymentVal >= price ? 'Full Payment' : 'DP Paid',
+            documents: emptyDocChecklist,
             createdAt: new Date().toISOString()
           });
-        }
 
-        const pkgRef = doc(db, 'packages', selectedPkg.id);
-        await updateDoc(pkgRef, { quotaRemaining: Number(selectedPkg.quotaRemaining || 1) - 1 });
+          if (paymentVal > 0) {
+            await addDoc(collection(db, 'payments_income'), {
+              bookingId: newBookingRef.id,
+              bookingCode: bookingCode,
+              jamaahName: selectedJamaah.fullName,
+              packageName: selectedPkg.name,
+              amount: paymentVal,
+              paymentMethod: formData.paymentMethod,
+              notes: formData.paymentNotes,
+              createdAt: new Date().toISOString()
+            });
+          }
+
+          await updateDoc(doc(db, 'packages', selectedPkg.id), { quotaRemaining: Number(selectedPkg.quotaRemaining || 1) - 1 });
+
+        } else {
+          // ===== REGISTRASI GROUP / MULTI-PAX (jadi 1 manifest, kode grup sama) =====
+          const additionalNames = (formData.additionalPaxNames || []).map(n => n.trim());
+          if (additionalNames.some(n => !n)) {
+            alert(`Lengkapi nama semua tamu tambahan (${paxCount - 1} nama dibutuhkan).`);
+            return;
+          }
+
+          const groupBookingCode = `GRP-${Date.now().toString().slice(-6)}`;
+
+          // Susun daftar pax: pax pertama = jamaah utama yang dipilih, sisanya dari nama tambahan
+          const paxList = [{ jamaahId: selectedJamaah.id, jamaahName: selectedJamaah.fullName, passportNumber: selectedJamaah.passportNumber || '-' }];
+
+          // Salinan kerja data jamaah, dipakai buat cari/generate kode customer baru tanpa tabrakan
+          let workingJamaahList = [...jamaahList];
+
+          for (const name of additionalNames) {
+            const existing = findJamaahByName(name, workingJamaahList);
+            if (existing) {
+              paxList.push({ jamaahId: existing.id, jamaahName: existing.fullName, passportNumber: existing.passportNumber || '-' });
+            } else {
+              const newCode = generateNextCustomerCode(workingJamaahList);
+              const newJamaahRef = await addDoc(collection(db, 'jamaah'), {
+                customerCode: newCode,
+                fullName: name,
+                gender: 'L',
+                nik: '',
+                phone: '',
+                passportNumber: '',
+                passportExpiry: '',
+                address: '',
+                createdAt: new Date().toISOString()
+              });
+              const newJamaahData = { id: newJamaahRef.id, customerCode: newCode, fullName: name };
+              workingJamaahList = [...workingJamaahList, newJamaahData];
+              paxList.push({ jamaahId: newJamaahRef.id, jamaahName: name, passportNumber: '-' });
+            }
+          }
+
+          // Bagi rata setoran awal ke semua pax (sisa pembagian masuk ke pax pertama)
+          const baseShare = Math.floor(paymentVal / paxCount);
+          const remainder = paymentVal - (baseShare * paxCount);
+
+          for (let i = 0; i < paxList.length; i++) {
+            const pax = paxList[i];
+            const paxShare = baseShare + (i === 0 ? remainder : 0);
+            const bookingCode = `${groupBookingCode}-${i + 1}`;
+
+            const newBookingRef = await addDoc(collection(db, 'bookings'), {
+              bookingCode,
+              groupBookingCode,
+              groupPaxIndex: i + 1,
+              groupTotalPax: paxCount,
+              packageId: selectedPkg.id,
+              packageName: selectedPkg.name,
+              packageCode: selectedPkg.code,
+              departureDate: selectedPkg.departureDate,
+              jamaahId: pax.jamaahId,
+              jamaahName: pax.jamaahName,
+              passportNumber: pax.passportNumber,
+              roomType: formData.roomType,
+              busGroup: formData.busGroup,
+              totalAmount: price,
+              totalPaid: paxShare,
+              paymentStatus: paxShare >= price ? 'Full Payment' : 'DP Paid',
+              documents: emptyDocChecklist,
+              createdAt: new Date().toISOString()
+            });
+
+            if (paxShare > 0) {
+              await addDoc(collection(db, 'payments_income'), {
+                bookingId: newBookingRef.id,
+                bookingCode,
+                jamaahName: pax.jamaahName,
+                packageName: selectedPkg.name,
+                amount: paxShare,
+                paymentMethod: formData.paymentMethod,
+                notes: `${formData.paymentNotes} (Grup ${groupBookingCode}, ${paxCount} pax)`,
+                createdAt: new Date().toISOString()
+              });
+            }
+          }
+
+          await updateDoc(doc(db, 'packages', selectedPkg.id), { quotaRemaining: Number(selectedPkg.quotaRemaining || paxCount) - paxCount });
+        }
       }
 
       setShowModal(false);
@@ -913,7 +1037,8 @@ Terima kasih.`;
     .filter(b =>
       (b.jamaahName && b.jamaahName.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (b.packageName && b.packageName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (b.bookingCode && b.bookingCode.toLowerCase().includes(searchTerm.toLowerCase()))
+      (b.bookingCode && b.bookingCode.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (b.groupBookingCode && b.groupBookingCode.toLowerCase().includes(searchTerm.toLowerCase()))
     );
 
   const roomingBookingsForPackage = bookings.filter(
@@ -1011,6 +1136,11 @@ Terima kasih.`;
                       <td className={`p-4 font-semibold ${styles.textTitle}`}>
                         {item.jamaahName || '-'}
                         <span className="block text-[10px] text-emerald-500 font-mono">{item.bookingCode}</span>
+                        {item.groupBookingCode && (
+                          <span className={`inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[9px] font-semibold ${isDark ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-purple-50 text-purple-600 border border-purple-200'}`}>
+                            👥 Grup {item.groupPaxIndex}/{item.groupTotalPax}
+                          </span>
+                        )}
                       </td>
                       <td className="p-4">
                         <span className={styles.textTitle}>{item.packageName || '-'}</span>
@@ -1276,7 +1406,46 @@ Terima kasih.`;
                     </option>
                   ))}
                 </select>
+                {formData.paxCount > 1 && (
+                  <p className="text-[10px] mt-1 opacity-70">Jamaah di atas jadi Pax 1 / penanggung jawab rombongan.</p>
+                )}
               </div>
+
+              {!editingBookingId && (
+                <div>
+                  <label className="block mb-1 font-medium">Jumlah Pax (Rombongan)</label>
+                  <input
+                    type="number" min="1" max="20"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={formData.paxCount}
+                    onChange={e => handlePaxCountChange(e.target.value)}
+                  />
+                  <p className="text-[10px] mt-1 opacity-70">Kalau daftar bareng lebih dari 1 orang (keluarga/rombongan), isi jumlahnya di sini.</p>
+                </div>
+              )}
+
+              {!editingBookingId && formData.paxCount > 1 && (
+                <div className={`${styles.innerBg} p-3 rounded-xl border space-y-2.5`}>
+                  <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">
+                    Nama Tamu Tambahan ({formData.paxCount - 1} orang)
+                  </p>
+                  {formData.additionalPaxNames.map((name, idx) => (
+                    <input
+                      key={idx}
+                      type="text" required
+                      list="jamaah-name-suggestions"
+                      placeholder={`Nama lengkap Pax ${idx + 2}`}
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={name}
+                      onChange={e => handleAdditionalPaxNameChange(idx, e.target.value)}
+                    />
+                  ))}
+                  <datalist id="jamaah-name-suggestions">
+                    {jamaahList.map(j => <option key={j.id} value={j.fullName} />)}
+                  </datalist>
+                  <p className="text-[10px] opacity-70">Ketik nama yang sudah ada di Data Master Jamaah biar otomatis kepakai datanya, atau ketik nama baru — nanti otomatis dibuatkan data jamaah barunya.</p>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -1305,10 +1474,30 @@ Terima kasih.`;
                 </div>
               </div>
 
+              {!editingBookingId && formData.packageId && (() => {
+                const pkgPreview = packagesList.find(p => p.id === formData.packageId);
+                if (!pkgPreview) return null;
+                let unitPrice = Number(pkgPreview.priceQuad || pkgPreview.priceMain || 0);
+                if (formData.roomType === 'Triple') unitPrice = Number(pkgPreview.priceTriple || unitPrice);
+                if (formData.roomType === 'Double') unitPrice = Number(pkgPreview.priceDouble || unitPrice);
+                const totalPreview = unitPrice * (formData.paxCount || 1);
+                return (
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl text-[11px] flex justify-between items-center">
+                    <span className="text-emerald-500 font-medium">
+                      Rp {unitPrice.toLocaleString('id-ID')} / pax {formData.paxCount > 1 ? `x ${formData.paxCount} pax` : ''}
+                    </span>
+                    <span className="font-bold text-emerald-500">Total: Rp {totalPreview.toLocaleString('id-ID')}</span>
+                  </div>
+                );
+              })()}
+
               <div className={`${styles.innerBg} p-4 rounded-xl border space-y-3`}>
                 <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1.5">
                   <Wallet className="w-3.5 h-3.5" /> Pembayaran / Setoran {editingBookingId ? 'Tambahan' : 'Awal'}
                 </p>
+                {formData.paxCount > 1 && (
+                  <p className="text-[10px] opacity-70 -mt-2">Nominal di bawah akan dibagi rata otomatis ke {formData.paxCount} pax.</p>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block mb-1 font-medium">Nominal Bayar (Rp)</label>
