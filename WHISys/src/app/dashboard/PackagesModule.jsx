@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, RefreshCw, X } from 'lucide-react';
+import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble } from 'lucide-react';
 
 // Helper Format Tanggal dd/mm/yyyy
 const formatDateDDMMYYYY = (dateString) => {
@@ -50,6 +50,12 @@ export default function PackagesModule({ theme = 'dark' }) {
 
   const [showModal, setShowModal] = useState(false);
   const [editingPackageId, setEditingPackageId] = useState(null);
+
+  // State Modal Itinerary
+  const [showItineraryModal, setShowItineraryModal] = useState(false);
+  const [selectedPackageForItinerary, setSelectedPackageForItinerary] = useState(null);
+  const [itineraryDays, setItineraryDays] = useState([]);
+  const [savingItinerary, setSavingItinerary] = useState(false);
 
   const [formData, setFormData] = useState({
     code: '',
@@ -145,6 +151,129 @@ export default function PackagesModule({ theme = 'dark' }) {
     } catch (err) {
       alert("Gagal menghapus paket: " + err.message);
     }
+  };
+
+  // ============ ITINERARY PAKET ============
+
+  const handleOpenItinerary = (pkg) => {
+    setSelectedPackageForItinerary(pkg);
+    const existing = Array.isArray(pkg.itinerary) ? pkg.itinerary : [];
+    setItineraryDays(existing.length > 0 ? existing : [
+      { title: '', description: '', meals: '', hotel: '' }
+    ]);
+    setShowItineraryModal(true);
+  };
+
+  const handleAddDay = () => {
+    setItineraryDays(prev => [...prev, { title: '', description: '', meals: '', hotel: '' }]);
+  };
+
+  const handleRemoveDay = (idx) => {
+    setItineraryDays(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleMoveDay = (idx, direction) => {
+    setItineraryDays(prev => {
+      const newIdx = idx + direction;
+      if (newIdx < 0 || newIdx >= prev.length) return prev;
+      const updated = [...prev];
+      [updated[idx], updated[newIdx]] = [updated[newIdx], updated[idx]];
+      return updated;
+    });
+  };
+
+  const handleDayFieldChange = (idx, field, value) => {
+    setItineraryDays(prev => prev.map((d, i) => i === idx ? { ...d, [field]: value } : d));
+  };
+
+  const handleSaveItinerary = async () => {
+    if (!selectedPackageForItinerary) return;
+    setSavingItinerary(true);
+    try {
+      await updateDoc(doc(db, 'packages', selectedPackageForItinerary.id), {
+        itinerary: itineraryDays,
+        updatedAt: new Date().toISOString()
+      });
+      setShowItineraryModal(false);
+      fetchData();
+    } catch (err) {
+      alert("Gagal menyimpan itinerary: " + err.message);
+    }
+    setSavingItinerary(false);
+  };
+
+  // Format itinerary jadi teks rapi buat dikirim CS/TC ke customer via WhatsApp
+  const buildItineraryText = (pkg, days) => {
+    const header = `*ITINERARY PERJALANAN*\n*${pkg.name}*\n${pkg.code} • ${pkg.durationDays || '-'} • Berangkat ${formatDateDDMMYYYY(pkg.departureDate)}\n--------------------------------------------------`;
+    const body = days.map((d, idx) => {
+      const lines = [`\n*Hari ke-${idx + 1}${d.title ? ': ' + d.title : ''}*`];
+      if (d.description) lines.push(d.description);
+      if (d.hotel) lines.push(`🏨 Hotel: ${d.hotel}`);
+      if (d.meals) lines.push(`🍽️ Makan: ${d.meals}`);
+      return lines.join('\n');
+    }).join('\n');
+    return `${header}\n${body}`;
+  };
+
+  const handleShareItineraryWA = (pkg, days) => {
+    if (!days || days.length === 0 || days.every(d => !d.title && !d.description)) {
+      alert("Itinerary paket ini masih kosong. Isi dulu sebelum dibagikan.");
+      return;
+    }
+    const text = buildItineraryText(pkg, days);
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
+  const handlePrintItinerary = (pkg, days) => {
+    const dayRowsHtml = days.map((d, idx) => `
+      <div style="margin-bottom:18px;padding-bottom:14px;border-bottom:1px dashed #e2e8f0;">
+        <h3 style="margin:0 0 6px 0;font-size:13px;color:#065f46;">Hari ke-${idx + 1}${d.title ? ' &mdash; ' + d.title : ''}</h3>
+        <p style="margin:0 0 6px 0;font-size:12px;color:#334155;white-space:pre-wrap;">${d.description || '-'}</p>
+        <div style="font-size:11px;color:#64748b;">
+          ${d.hotel ? `🏨 Hotel: <strong>${d.hotel}</strong><br/>` : ''}
+          ${d.meals ? `🍽️ Makan: <strong>${d.meals}</strong>` : ''}
+        </div>
+      </div>
+    `).join('');
+
+    const docContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Itinerary - ${pkg.name}</title>
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color:#1e293b; padding:35px; }
+            h1 { font-size:20px; color:#065f46; margin-bottom:2px; }
+            p.sub { font-size:11px; color:#64748b; margin-top:0; margin-bottom:20px; }
+          </style>
+        </head>
+        <body>
+          <h1>Itinerary Perjalanan</h1>
+          <p class="sub">${pkg.name} (${pkg.code}) &bull; ${pkg.durationDays || '-'} &bull; Berangkat ${formatDateDDMMYYYY(pkg.departureDate)}</p>
+          ${dayRowsHtml || '<p style="color:#94a3b8;">Belum ada itinerary.</p>'}
+        </body>
+      </html>
+    `;
+
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    const doc2 = iframe.contentWindow.document;
+    doc2.open();
+    doc2.write(docContent);
+    doc2.close();
+
+    iframe.contentWindow.focus();
+    setTimeout(() => {
+      iframe.contentWindow.print();
+      document.body.removeChild(iframe);
+    }, 500);
   };
 
   const handleSubmit = async (e) => {
@@ -377,6 +506,18 @@ export default function PackagesModule({ theme = 'dark' }) {
                       <td className="p-4 text-center">
                         <div className="flex items-center justify-center gap-2">
                           <button
+                            onClick={() => handleOpenItinerary(pkg)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-purple-500 rounded-lg transition-colors relative`}
+                            title="Itinerary Perjalanan"
+                          >
+                            <ListOrdered className="w-4 h-4" />
+                            {Array.isArray(pkg.itinerary) && pkg.itinerary.length > 0 && (
+                              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-purple-500 text-white text-[8px] rounded-full flex items-center justify-center font-bold">
+                                {pkg.itinerary.length}
+                              </span>
+                            )}
+                          </button>
+                          <button
                             onClick={() => handleOpenEdit(pkg)}
                             className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
                             title="Edit Paket"
@@ -608,6 +749,123 @@ export default function PackagesModule({ theme = 'dark' }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ITINERARY PERJALANAN */}
+      {showItineraryModal && selectedPackageForItinerary && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-2xl p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowItineraryModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <ListOrdered className="w-5 h-5 text-purple-500" /> Itinerary Perjalanan
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>
+              <strong className={styles.textTitle}>{selectedPackageForItinerary.name}</strong> ({selectedPackageForItinerary.code}) &bull; {selectedPackageForItinerary.durationDays || '-'}
+              <br />Susun jadwal harian biar CS/TC gampang jelasin ke customer.
+            </p>
+
+            <div className="space-y-4 mb-4">
+              {itineraryDays.map((d, idx) => (
+                <div key={idx} className={`${styles.innerBg} p-4 rounded-xl border space-y-2.5`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-purple-500">Hari ke-{idx + 1}</span>
+                    <div className="flex items-center gap-1">
+                      <button type="button" onClick={() => handleMoveDay(idx, -1)} disabled={idx === 0} className={`p-1 rounded ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'} disabled:opacity-30`} title="Pindah ke atas">
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button type="button" onClick={() => handleMoveDay(idx, 1)} disabled={idx === itineraryDays.length - 1} className={`p-1 rounded ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'} disabled:opacity-30`} title="Pindah ke bawah">
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </button>
+                      <button type="button" onClick={() => handleRemoveDay(idx)} className="p-1 rounded text-rose-500 hover:bg-rose-500/10" title="Hapus hari ini">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <input
+                    type="text"
+                    placeholder="Judul singkat, cth: Jakarta - Jeddah - Madinah"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs font-medium`}
+                    value={d.title}
+                    onChange={e => handleDayFieldChange(idx, 'title', e.target.value)}
+                  />
+                  <textarea
+                    rows={2}
+                    placeholder="Rincian kegiatan hari ini..."
+                    className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
+                    value={d.description}
+                    onChange={e => handleDayFieldChange(idx, 'description', e.target.value)}
+                  />
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="relative">
+                      <BedDouble className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                      <input
+                        type="text"
+                        placeholder="Hotel (opsional)"
+                        className={`w-full ${styles.inputBg} rounded-lg pl-8 pr-2 py-2 text-xs`}
+                        value={d.hotel}
+                        onChange={e => handleDayFieldChange(idx, 'hotel', e.target.value)}
+                      />
+                    </div>
+                    <div className="relative">
+                      <Utensils className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                      <input
+                        type="text"
+                        placeholder="Makan (opsional)"
+                        className={`w-full ${styles.inputBg} rounded-lg pl-8 pr-2 py-2 text-xs`}
+                        value={d.meals}
+                        onChange={e => handleDayFieldChange(idx, 'meals', e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAddDay}
+              className={`w-full flex items-center justify-center gap-1.5 py-2.5 mb-5 border-2 border-dashed ${isDark ? 'border-slate-700 hover:border-purple-500 text-slate-400' : 'border-slate-300 hover:border-purple-500 text-slate-500'} hover:text-purple-500 rounded-xl text-xs font-semibold transition-colors`}
+            >
+              <Plus className="w-4 h-4" /> Tambah Hari
+            </button>
+
+            <div className={`pt-4 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleShareItineraryWA(selectedPackageForItinerary, itineraryDays)}
+                  className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-500 hover:text-white rounded-lg text-xs font-medium transition-colors"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" /> Bagikan WA
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePrintItinerary(selectedPackageForItinerary, itineraryDays)}
+                  className={`flex items-center justify-center gap-1.5 px-3.5 py-2 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} rounded-lg text-xs font-medium transition-colors`}
+                >
+                  <Printer className="w-3.5 h-3.5" /> Cetak
+                </button>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button type="button" onClick={() => setShowItineraryModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg text-xs`}>
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveItinerary}
+                  disabled={savingItinerary}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-60 text-white rounded-lg text-xs font-medium"
+                >
+                  {savingItinerary ? 'Menyimpan...' : 'Simpan Itinerary'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
