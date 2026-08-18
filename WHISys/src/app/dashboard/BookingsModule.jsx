@@ -87,6 +87,11 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
     paymentNotes: 'Setoran Pembayaran'
   });
 
+  // State form jamaah baru yang ditambahkan langsung dari modal Booking
+  const [newJamaahForm, setNewJamaahForm] = useState({
+    fullName: '', phone: '', nik: '', passportNumber: ''
+  });
+
   const [paymentEditForm, setPaymentEditForm] = useState({
     amount: '',
     paymentMethod: 'Transfer Bank',
@@ -312,6 +317,7 @@ Terima kasih.`;
   const handleOpenAddModal = () => {
     setEditingBookingId(null);
     setFormData({ packageId: '', jamaahId: '', roomType: 'Quad', busGroup: 'Bus 1', paxCount: 1, additionalPaxNames: [], initialPayment: '', paymentMethod: 'Transfer Bank', paymentNotes: 'DP Pendaftaran' });
+    setNewJamaahForm({ fullName: '', phone: '', nik: '', passportNumber: '' });
     setShowModal(true);
   };
 
@@ -328,6 +334,7 @@ Terima kasih.`;
       paymentMethod: 'Transfer Bank',
       paymentNotes: 'Setoran Tambahan'
     });
+    setNewJamaahForm({ fullName: '', phone: '', nik: '', passportNumber: '' });
     setShowModal(true);
   };
 
@@ -839,10 +846,37 @@ Terima kasih.`;
       alert("Pilih Paket Travel dan Jamaah.");
       return;
     }
+    if (formData.jamaahId === '__new__' && !newJamaahForm.fullName.trim()) {
+      alert("Isi nama lengkap jamaah baru terlebih dahulu.");
+      return;
+    }
 
     try {
       const selectedPkg = packagesList.find(p => p.id === formData.packageId);
-      const selectedJamaah = jamaahList.find(j => j.id === formData.jamaahId);
+      let selectedJamaah = jamaahList.find(j => j.id === formData.jamaahId);
+
+      // Kalau CS pilih "Tambah Jamaah Baru", buat dulu data jamaahnya di sini
+      if (formData.jamaahId === '__new__') {
+        const newCode = generateNextCustomerCode(jamaahList);
+        const newJamaahRef = await addDoc(collection(db, 'jamaah'), {
+          customerCode: newCode,
+          fullName: newJamaahForm.fullName.trim(),
+          nik: newJamaahForm.nik || '',
+          gender: 'L',
+          phone: newJamaahForm.phone || '',
+          passportNumber: newJamaahForm.passportNumber || '',
+          passportExpiry: '',
+          address: '',
+          createdAt: new Date().toISOString()
+        });
+        selectedJamaah = {
+          id: newJamaahRef.id,
+          customerCode: newCode,
+          fullName: newJamaahForm.fullName.trim(),
+          phone: newJamaahForm.phone || '',
+          passportNumber: newJamaahForm.passportNumber || ''
+        };
+      }
 
       let price = Number(selectedPkg.priceQuad || selectedPkg.priceMain || 0);
       if (formData.roomType === 'Triple') price = Number(selectedPkg.priceTriple || price);
@@ -1400,6 +1434,7 @@ Terima kasih.`;
                   onChange={e => setFormData({ ...formData, jamaahId: e.target.value })}
                 >
                   <option value="">-- Pilih Data Master Jamaah --</option>
+                  <option value="__new__">➕ Tambah Jamaah Baru (Belum Terdaftar)</option>
                   {jamaahList.map(j => (
                     <option key={j.id} value={j.id}>
                       {j.fullName} - {j.customerCode || 'CST'} - Paspor: {j.passportNumber || 'Belum Ada'}
@@ -1410,6 +1445,43 @@ Terima kasih.`;
                   <p className="text-[10px] mt-1 opacity-70">Jamaah di atas jadi Pax 1 / penanggung jawab rombongan.</p>
                 )}
               </div>
+
+              {formData.jamaahId === '__new__' && (
+                <div className={`${styles.innerBg} p-3 rounded-xl border space-y-2.5`}>
+                  <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">Data Jamaah Baru</p>
+                  <input
+                    type="text" required
+                    placeholder="Nama Lengkap (wajib)"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={newJamaahForm.fullName}
+                    onChange={e => setNewJamaahForm({ ...newJamaahForm, fullName: e.target.value })}
+                  />
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <input
+                      type="text"
+                      placeholder="No. HP / WhatsApp"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={newJamaahForm.phone}
+                      onChange={e => setNewJamaahForm({ ...newJamaahForm, phone: e.target.value })}
+                    />
+                    <input
+                      type="text"
+                      placeholder="NIK"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={newJamaahForm.nik}
+                      onChange={e => setNewJamaahForm({ ...newJamaahForm, nik: e.target.value })}
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="No. Paspor (opsional)"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={newJamaahForm.passportNumber}
+                    onChange={e => setNewJamaahForm({ ...newJamaahForm, passportNumber: e.target.value })}
+                  />
+                  <p className="text-[10px] opacity-70">Data lengkap lainnya (KTP, alamat, dll) bisa dilengkapi belakangan di menu Data Master Jamaah.</p>
+                </div>
+              )}
 
               {!editingBookingId && (
                 <div>
