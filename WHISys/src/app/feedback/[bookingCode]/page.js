@@ -3,7 +3,9 @@
 import { useState } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc } from 'firebase/firestore';
-import { Star, Send, CheckCircle2, Plane } from 'lucide-react';
+import { Star, Send, CheckCircle2, Plane, ExternalLink } from 'lucide-react';
+
+const GOOGLE_REVIEW_LINK = 'https://share.google/USDEuDl1V5G0qG8Jl';
 
 export default function PublicFeedbackPage({ params, searchParams }) {
   const bookingCode = params?.bookingCode || '';
@@ -16,6 +18,7 @@ export default function PublicFeedbackPage({ params, searchParams }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
+  const [submittedRating, setSubmittedRating] = useState(0);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -32,6 +35,7 @@ export default function PublicFeedbackPage({ params, searchParams }) {
         source: 'self',
         createdAt: new Date().toISOString()
       });
+      setSubmittedRating(rating);
       setSubmitted(true);
     } catch (err) {
       setError('Gagal mengirim feedback. Silakan coba lagi dalam beberapa saat.');
@@ -83,6 +87,34 @@ export default function PublicFeedbackPage({ params, searchParams }) {
             <p style={{ color: '#cbd5e1', fontSize: '0.85rem', lineHeight: 1.6 }}>
               Terima kasih sudah meluangkan waktu memberi ulasan. Masukan Anda sangat berarti buat kami terus tingkatkan kualitas layanan.
             </p>
+
+            {submittedRating >= 4 && (
+              <div style={{
+                marginTop: '1.5rem', padding: '1.25rem', backgroundColor: '#1e293b',
+                border: '1px solid #334155', borderRadius: '0.75rem'
+              }}>
+                <p style={{ color: '#fbbf24', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.4rem' }}>
+                  ⭐ Senang Anda puas dengan perjalanannya!
+                </p>
+                <p style={{ color: '#94a3b8', fontSize: '0.78rem', lineHeight: 1.6, marginBottom: '1rem' }}>
+                  Boleh bantu kami sekali lagi? Ulasan Anda di Google akan sangat membantu jamaah lain menemukan kami.
+                </p>
+                <a
+                  href={GOOGLE_REVIEW_LINK}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
+                    width: '100%', padding: '0.75rem 1rem', backgroundColor: '#fff', color: '#1e293b',
+                    fontWeight: 600, borderRadius: '0.75rem', textDecoration: 'none', fontSize: '0.85rem',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  Beri Ulasan di Google <ExternalLink size={15} />
+                </a>
+              </div>
+            )}
+
             <p style={{ color: '#475569', fontSize: '0.75rem', marginTop: '1rem' }}>
               PT Wisata Halal Indonesia
             </p>
