@@ -123,6 +123,11 @@ export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
   const [showRoomingModal, setShowRoomingModal] = useState(false);
   const [roomingPackageId, setRoomingPackageId] = useState('');
 
+  // State Modal Kirim Feedback Massal
+  const [showBulkFeedbackModal, setShowBulkFeedbackModal] = useState(false);
+  const [bulkFeedbackPackageId, setBulkFeedbackPackageId] = useState('');
+  const [sentFeedbackIds, setSentFeedbackIds] = useState([]);
+
   // Ambil Data Pengaturan Perusahaan Dinamis dari Firestore
   useEffect(() => {
     const fetchCompanyInfo = async () => {
@@ -1109,6 +1114,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   );
   const roomingPackage = packagesList.find(p => p.id === roomingPackageId);
 
+  const bulkFeedbackBookings = bookings.filter(
+    b => b.packageId === bulkFeedbackPackageId && (b.status || 'active') === 'active'
+  );
+
   return (
     <div className="space-y-6">
       <div className={`flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${styles.cardBg} p-6 rounded-xl border`}>
@@ -1124,6 +1133,12 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             className={`flex items-center gap-2 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} px-4 py-2 rounded-lg text-sm font-medium transition-all`}
           >
             <DoorOpen className="w-4 h-4" /> Rooming List
+          </button>
+          <button
+            onClick={() => { setBulkFeedbackPackageId(''); setSentFeedbackIds([]); setShowBulkFeedbackModal(true); }}
+            className={`flex items-center gap-2 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} px-4 py-2 rounded-lg text-sm font-medium transition-all`}
+          >
+            <Star className="w-4 h-4" /> Kirim Feedback Massal
           </button>
           <button
             onClick={handleOpenAddModal}
@@ -1996,6 +2011,81 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                       )}
                     </tbody>
                   </table>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL KIRIM FEEDBACK MASSAL */}
+      {showBulkFeedbackModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowBulkFeedbackModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <Star className="w-5 h-5 text-amber-500" /> Kirim Feedback Massal
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>Pilih program keberangkatan yang udah pulang, terus kirim link review ke tiap jamaah satu-satu dari daftar ini.</p>
+
+            <div className="mb-4">
+              <label className="block mb-1 text-xs font-medium">Pilih Program Keberangkatan</label>
+              <select
+                className={`w-full ${styles.inputBg} rounded-lg p-2.5 text-xs`}
+                value={bulkFeedbackPackageId}
+                onChange={e => { setBulkFeedbackPackageId(e.target.value); setSentFeedbackIds([]); }}
+              >
+                <option value="">-- Pilih Paket --</option>
+                {packagesList.map(p => (
+                  <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
+                ))}
+              </select>
+            </div>
+
+            {bulkFeedbackPackageId && (
+              <>
+                <div className="flex items-center justify-between mb-2 text-[11px]">
+                  <span className={styles.textSub}>{bulkFeedbackBookings.length} jamaah di paket ini</span>
+                  <span className="text-emerald-500 font-semibold">{sentFeedbackIds.length} sudah dikirim</span>
+                </div>
+
+                <div className={`border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg divide-y ${styles.tableRowBorder} overflow-hidden`}>
+                  {bulkFeedbackBookings.length === 0 ? (
+                    <div className={`p-6 text-center ${styles.textSub} text-xs`}>Belum ada jamaah aktif di paket ini.</div>
+                  ) : (
+                    bulkFeedbackBookings.map(b => {
+                      const jamaahData = jamaahList.find(j => j.id === b.jamaahId || j.fullName === b.jamaahName);
+                      const hasPhone = !!jamaahData?.phone;
+                      const isSent = sentFeedbackIds.includes(b.id);
+                      return (
+                        <div key={b.id} className="flex items-center justify-between p-3 text-xs">
+                          <div>
+                            <p className={`font-medium ${styles.textTitle}`}>{b.jamaahName}</p>
+                            <p className={styles.textSub}>{hasPhone ? jamaahData.phone : 'No. HP belum diisi'}</p>
+                          </div>
+                          <button
+                            onClick={() => {
+                              handleShareFeedbackLink(b);
+                              setSentFeedbackIds(prev => prev.includes(b.id) ? prev : [...prev, b.id]);
+                            }}
+                            disabled={!hasPhone}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors ${
+                              isSent
+                                ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                                : hasPhone
+                                  ? 'bg-amber-500 hover:bg-amber-400 text-white'
+                                  : `${isDark ? 'bg-slate-800 text-slate-600' : 'bg-slate-100 text-slate-400'} cursor-not-allowed`
+                            }`}
+                          >
+                            {isSent ? <><Check className="w-3.5 h-3.5" /> Terkirim</> : <><Star className="w-3.5 h-3.5" /> Kirim</>}
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </>
             )}
