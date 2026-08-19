@@ -2,8 +2,37 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where } from 'firebase/firestore';
-import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock } from 'lucide-react';
+import { collection, addDoc, getDocs, getDoc, deleteDoc, doc, updateDoc, query, where } from 'firebase/firestore';
+import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock, Download } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+
+const DEFAULT_COMPANY_PROFILE = {
+  name: 'PT. WISATA HALAL INTERNASIONAL',
+  ppiuNumber: '',
+  address: '',
+  phone: '',
+  email: ''
+};
+
+const loadImageAsDataURL = (src) => new Promise((resolve, reject) => {
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    } catch (err) {
+      reject(err);
+    }
+  };
+  img.onerror = reject;
+  img.src = src;
+});
 
 const OPERATIONAL_CATEGORIES = [
   'Sewa Kantor',
@@ -96,6 +125,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   });
 
   const [plPeriod, setPlPeriod] = useState('all');
+  const [companyProfile, setCompanyProfile] = useState(DEFAULT_COMPANY_PROFILE);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -114,6 +145,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       const opSnap = await getDocs(collection(db, 'expenses_operational'));
       setOperationalExpenses(opSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      const profileSnap = await getDoc(doc(db, 'settings', 'company_profile'));
+      if (profileSnap.exists() && profileSnap.data().company) {
+        setCompanyProfile({ ...DEFAULT_COMPANY_PROFILE, ...profileSnap.data().company });
+      }
     } catch (err) {
       console.error("Gagal mengambil data keuangan:", err);
     }
@@ -349,6 +385,161 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const totalSelectedPkgIncome = selectedPkgIncomes.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const totalSelectedPkgVendorCost = selectedPkgVendorCosts.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const selectedPkgProfit = totalSelectedPkgIncome - totalSelectedPkgVendorCost;
+
+  // Paket yang sudah diakui pendapatannya & masuk hitungan periode P&L yang lagi difilter — dipakai buat laporan PDF.
+  const recognizedPackagesInPeriod = packagesList.filter(pkg => {
+    if (!pkg.revenueRecognized) return false;
+    if (plPeriod === 'all') return true;
+    return getPeriodKey(pkg.recognizedAt) === plPeriod;
+  }).map(pkg => {
+    const pkgIncome = transactions
+      .filter(tx => tx.packageName === pkg.name)
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    const pkgVendorCost = vendorPayments
+      .filter(vp => vp.packageId === pkg.id || vp.packageName === pkg.name)
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    return { pkg, pkgIncome, pkgVendorCost, profit: pkgIncome - pkgVendorCost };
+  });
+
+  const handleDownloadProfitLossPDF = async () => {
+    setGeneratingPdf(true);
+    try {
+      const docPdf = new jsPDF({ unit: 'mm', format: 'a4' });
+      const pageWidth = docPdf.internal.pageSize.getWidth();
+      const marginX = 14;
+      let cursorY = 16;
+
+      // Kop surat
+      try {
+        const logoDataUrl = await loadImageAsDataURL('/logo.png');
+        docPdf.addImage(logoDataUrl, 'PNG', marginX, cursorY - 4, 18, 18);
+      } catch (err) {
+        console.warn('Logo tidak berhasil dimuat untuk PDF:', err);
+      }
+
+      const textStartX = marginX + 22;
+      docPdf.setFont('helvetica', 'bold');
+      docPdf.setFontSize(13);
+      docPdf.text(companyProfile.name || DEFAULT_COMPANY_PROFILE.name, textStartX, cursorY);
+
+      docPdf.setFont('helvetica', 'normal');
+      docPdf.setFontSize(8.5);
+      let subY = cursorY + 5;
+      if (companyProfile.ppiuNumber) {
+        docPdf.text(companyProfile.ppiuNumber, textStartX, subY);
+        subY += 4;
+      }
+      if (companyProfile.address) {
+        docPdf.text(companyProfile.address, textStartX, subY, { maxWidth: pageWidth - textStartX - marginX });
+        subY += 4;
+      }
+      const contactLine = [companyProfile.phone, companyProfile.email].filter(Boolean).join('  •  ');
+      if (contactLine) {
+        docPdf.text(contactLine, textStartX, subY);
+        subY += 4;
+      }
+
+      cursorY = Math.max(cursorY + 18, subY) + 2;
+      docPdf.setDrawColor(180);
+      docPdf.line(marginX, cursorY, pageWidth - marginX, cursorY);
+      cursorY += 8;
+
+      // Judul laporan
+      docPdf.setFont('helvetica', 'bold');
+      docPdf.setFontSize(12);
+      docPdf.text('LAPORAN LABA RUGI (PROFIT & LOSS)', pageWidth / 2, cursorY, { align: 'center' });
+      cursorY += 6;
+      docPdf.setFont('helvetica', 'normal');
+      docPdf.setFontSize(9);
+      docPdf.text(`Periode: ${formatPeriodLabel(plPeriod)}`, pageWidth / 2, cursorY, { align: 'center' });
+      cursorY += 4.5;
+      docPdf.setFontSize(8);
+      docPdf.setTextColor(120);
+      docPdf.text(`Dicetak: ${formatDateDDMMYYYY(new Date().toISOString())}`, pageWidth / 2, cursorY, { align: 'center' });
+      docPdf.setTextColor(0);
+      cursorY += 8;
+
+      // Ringkasan P&L
+      autoTable(docPdf, {
+        startY: cursorY,
+        margin: { left: marginX, right: marginX },
+        head: [['Komponen', 'Nominal (Rp)']],
+        body: [
+          ['Omset (Pendapatan Diakui)', plOmset.toLocaleString('id-ID')],
+          ['HPP / Biaya Vendor', `(${plHpp.toLocaleString('id-ID')})`],
+          ['Laba Kotor', plLabaKotor.toLocaleString('id-ID')],
+          ['Biaya Operasional Kantor', `(${plOpex.toLocaleString('id-ID')})`],
+          ['Laba Bersih', plLabaBersih.toLocaleString('id-ID')]
+        ],
+        styles: { fontSize: 9, cellPadding: 2.5 },
+        headStyles: { fillColor: [15, 23, 42] },
+        columnStyles: { 1: { halign: 'right' } },
+        didParseCell: (data) => {
+          if (data.row.index === 4 && data.section === 'body') {
+            data.cell.styles.fontStyle = 'bold';
+          }
+        }
+      });
+
+      cursorY = docPdf.lastAutoTable.finalY + 8;
+
+      // Breakdown per paket (yang sudah diakui, sesuai periode terpilih)
+      docPdf.setFont('helvetica', 'bold');
+      docPdf.setFontSize(10);
+      docPdf.text('Rincian Margin per Paket (Pendapatan Sudah Diakui)', marginX, cursorY);
+      cursorY += 4;
+
+      if (recognizedPackagesInPeriod.length === 0) {
+        docPdf.setFont('helvetica', 'italic');
+        docPdf.setFontSize(9);
+        docPdf.text('Belum ada paket dengan pendapatan diakui pada periode ini.', marginX, cursorY + 4);
+        cursorY += 10;
+      } else {
+        autoTable(docPdf, {
+          startY: cursorY + 2,
+          margin: { left: marginX, right: marginX },
+          head: [['Nama Paket', 'Omset', 'HPP Vendor', 'Laba/Margin']],
+          body: recognizedPackagesInPeriod.map(({ pkg, pkgIncome, pkgVendorCost, profit }) => [
+            `${pkg.name}${pkg.code ? ` (${pkg.code})` : ''}`,
+            pkgIncome.toLocaleString('id-ID'),
+            pkgVendorCost.toLocaleString('id-ID'),
+            profit.toLocaleString('id-ID')
+          ]),
+          styles: { fontSize: 8.5, cellPadding: 2.5 },
+          headStyles: { fillColor: [15, 23, 42] },
+          columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } }
+        });
+        cursorY = docPdf.lastAutoTable.finalY + 10;
+      }
+
+      // Blok tanda tangan
+      if (cursorY > 250) {
+        docPdf.addPage();
+        cursorY = 20;
+      }
+      const signColWidth = (pageWidth - marginX * 2) / 2;
+      docPdf.setFont('helvetica', 'normal');
+      docPdf.setFontSize(9);
+      docPdf.text('Dibuat oleh,', marginX, cursorY);
+      docPdf.text('Mengetahui,', marginX + signColWidth, cursorY);
+      cursorY += 22;
+      docPdf.text('( ______________________ )', marginX, cursorY);
+      docPdf.text('( ______________________ )', marginX + signColWidth, cursorY);
+      cursorY += 4.5;
+      docPdf.setFontSize(8);
+      docPdf.setTextColor(120);
+      docPdf.text('Finance / Admin', marginX, cursorY);
+      docPdf.text('Direktur', marginX + signColWidth, cursorY);
+      docPdf.setTextColor(0);
+
+      const fileSuffix = plPeriod === 'all' ? 'semua-periode' : plPeriod;
+      docPdf.save(`Laporan-Laba-Rugi-WHISys-${fileSuffix}.pdf`);
+    } catch (err) {
+      console.error('Gagal membuat PDF laporan:', err);
+      alert('Gagal membuat PDF laporan: ' + err.message);
+    }
+    setGeneratingPdf(false);
+  };
 
   return (
     <div className="space-y-6">
@@ -616,7 +807,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                   Omset seluruh jamaah dikurangi HPP vendor dan biaya operasional kantor — {formatPeriodLabel(plPeriod)}.
                 </p>
               </div>
-              <div>
+              <div className="flex items-center gap-2">
                 <select
                   className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
                   value={plPeriod}
@@ -627,6 +818,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                     <option key={p} value={p}>{formatPeriodLabel(p)}</option>
                   ))}
                 </select>
+                <button
+                  type="button"
+                  onClick={handleDownloadProfitLossPDF}
+                  disabled={generatingPdf}
+                  className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white px-3 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap"
+                >
+                  <Download className="w-3.5 h-3.5" /> {generatingPdf ? 'Membuat PDF...' : 'Download Laporan (PDF)'}
+                </button>
               </div>
             </div>
 
