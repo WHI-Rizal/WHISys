@@ -48,6 +48,13 @@ export default function DashboardPage() {
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Sinkron sama matriks akses di Firestore Security Rules: cuma Finance & Super
+  // Admin yang boleh buka modul Keuangan. Ini gating tampilan doang (biar nggak
+  // nyasar ke modul yang isinya bakal gagal dimuat) — penegaknya tetap Firestore
+  // Rules di server, bukan pengecekan ini.
+  const currentRole = (userProfile?.role || '').toLowerCase();
+  const canAccessFinance = currentRole.includes('super') || currentRole === 'admin' || currentRole === 'finance';
+
   // Toggle Theme State (2 Mode: 'dark' atau 'light')
   const [theme, setTheme] = useState('dark');
 
@@ -217,10 +224,17 @@ export default function DashboardPage() {
           if (userDoc.exists()) {
             setUserProfile(userDoc.data());
           } else {
+            // PENTING: dulu fallback-nya 'admin' kalau dokumen user belum ada di
+            // Firestore — artinya siapapun yang baru login otomatis kelihatan
+            // punya akses penuh di tampilan. Sekarang default-nya paling rendah
+            // (Belum Diatur / tanpa akses modul Keuangan & manajemen user), dan
+            // Firestore Security Rules yang jadi penentu akses sebenarnya —
+            // bukan tebakan di sisi browser ini.
             setUserProfile({
               email: user.email,
               fullName: user.displayName || 'Staf WHI',
-              role: 'admin'
+              role: 'Belum Diatur',
+              roleUnassigned: true
             });
           }
         } catch (error) {
@@ -313,14 +327,16 @@ export default function DashboardPage() {
 
             <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Operasional Travel</p>
 
-            <SidebarItem
-              icon={Wallet}
-              label="Keuangan & Pelunasan"
-              active={activeMenu === 'finance'}
-              activeClass={currentTheme.activeMenu}
-              subTextClass={currentTheme.subText}
-              onClick={() => changeMenu('finance')}
-            />
+            {canAccessFinance && (
+              <SidebarItem
+                icon={Wallet}
+                label="Keuangan & Pelunasan"
+                active={activeMenu === 'finance'}
+                activeClass={currentTheme.activeMenu}
+                subTextClass={currentTheme.subText}
+                onClick={() => changeMenu('finance')}
+              />
+            )}
 
             <SidebarItem
               icon={MessageSquareHeart}
@@ -569,8 +585,17 @@ export default function DashboardPage() {
           <BookingsModule targetBookingId={selectedBookingForModal} theme={theme} />
         )}
 
-        {/* MODUL KEUANGAN & PELUNASAN */}
-        {activeMenu === 'finance' && (
+        {/* MODUL KEUANGAN & PELUNASAN — dibatasi Finance & Super Admin, sinkron sama Firestore Rules */}
+        {activeMenu === 'finance' && !canAccessFinance && (
+          <div className={`${currentTheme.card} border ${currentTheme.border} rounded-xl p-8 text-center`}>
+            <ShieldCheck className="w-8 h-8 mx-auto mb-3 text-amber-500" />
+            <h3 className={`text-sm font-bold ${currentTheme.headingText} mb-1`}>Akses Terbatas</h3>
+            <p className={`text-xs ${currentTheme.subText}`}>
+              Modul Keuangan cuma bisa diakses role Finance & Super Admin. Hubungi Super Admin kalau kamu butuh akses ini.
+            </p>
+          </div>
+        )}
+        {activeMenu === 'finance' && canAccessFinance && (
           <FinanceModule
             theme={theme}
             onSelectBooking={(bookingId) => {
