@@ -34,11 +34,20 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   // Sinkron sama Firestore Rules: cuma Finance & Super Admin yang boleh edit/hapus
   // riwayat setoran yang udah tercatat. Semua staf tetap boleh lihat & catat DP baru.
   const roleLower = (userRole || '').toLowerCase();
+  const isSales = roleLower === 'sales';
+  const isOperational = roleLower === 'operational';
   const canManagePayments = roleLower.includes('super') || roleLower === 'admin' || roleLower === 'finance';
-  // Sama aturannya buat aksi booking: Edit, Reschedule, Batalkan/Refund, Hapus
-  // cuma Finance & Super Admin. Semua staf tetap boleh registrasi booking baru
-  // dan atur rooming list (nomor kamar).
+  // Edit Booking, Batalkan/Refund, dan Hapus Booking cuma boleh Finance & Super
+  // Admin — ini yang megang keputusan soal uang customer.
   const canManageBookings = canManagePayments;
+  // Reschedule tetap dibatasin ke Finance & Super Admin doang — Operational
+  // & Sales nggak boleh.
+  const canReschedule = canManageBookings;
+  // Nyatet setoran DP awal boleh semua staf yang login — Operational sering
+  // yang input booking + DP awal jamaah di lapangan, baru setoran berikutnya
+  // dilanjutin tim Finance lewat Edit Booking (yang emang udah dibatasin
+  // Finance & Super Admin doang di atas).
+  const canRecordPayment = true;
 
   const isDark = theme === 'dark';
 
@@ -464,8 +473,12 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   // ============ ALUR BATALKAN / RESCHEDULE BOOKING ============
 
   const handleOpenActionModal = (item, mode) => {
-    if (!canManageBookings) {
-      alert("Cuma Finance & Super Admin yang boleh reschedule / membatalkan booking.");
+    if (mode === 'reschedule' && !canReschedule) {
+      alert("Cuma Finance & Super Admin yang boleh reschedule booking.");
+      return;
+    }
+    if (mode === 'cancel' && !canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh membatalkan booking & proses refund.");
       return;
     }
     setSelectedBookingForAction(item);
@@ -524,7 +537,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   const handleRescheduleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedBookingForAction) return;
-    if (!canManageBookings) {
+    if (!canReschedule) {
       alert("Cuma Finance & Super Admin yang boleh memproses reschedule.");
       return;
     }
@@ -953,7 +966,12 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       if (formData.roomType === 'Triple') price = Number(selectedPkg.priceTriple || price);
       if (formData.roomType === 'Double') price = Number(selectedPkg.priceDouble || price);
 
-      const paymentVal = Number(formData.initialPayment || 0);
+      let paymentVal = Number(formData.initialPayment || 0);
+      if (paymentVal > 0 && !canRecordPayment) {
+        // Jaga-jaga: role yang nggak boleh nyatet setoran (mis. Operational)
+        // tetap bisa proses booking-nya, tapi setorannya diabaikan di sini.
+        paymentVal = 0;
+      }
 
       if (editingBookingId) {
         if (!canManageBookings) {
@@ -1376,8 +1394,12 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                                   >
                                     <Edit className="w-4 h-4" />
                                   </button>
+                                </>
+                              )}
 
-                                  {(item.status || 'active') === 'active' && (
+                              {(item.status || 'active') === 'active' && (
+                                <>
+                                  {canReschedule && (
                                     <>
                                       {/* TOMBOL RESCHEDULE */}
                                       <button
@@ -1387,7 +1409,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                                       >
                                         <RotateCcw className="w-4 h-4" />
                                       </button>
+                                    </>
+                                  )}
 
+                                  {canManageBookings && (
+                                    <>
                                       {/* TOMBOL BATALKAN / REFUND */}
                                       <button
                                         onClick={() => handleOpenActionModal(item, 'cancel')}
@@ -1398,7 +1424,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                                       </button>
                                     </>
                                   )}
+                                </>
+                              )}
 
+                              {canManageBookings && (
+                                <>
                                   {/* TOMBOL HAPUS BOOKING */}
                                   <button
                                     onClick={() => handleDeleteBooking(item)}
@@ -1656,41 +1686,49 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1.5">
                   <Wallet className="w-3.5 h-3.5" /> Pembayaran / Setoran {editingBookingId ? 'Tambahan' : 'Awal'}
                 </p>
-                {formData.paxCount > 1 && (
-                  <p className="text-[10px] opacity-70 -mt-2">Nominal di bawah akan dibagi rata otomatis ke {formData.paxCount} pax.</p>
+                {canRecordPayment ? (
+                  <>
+                    {formData.paxCount > 1 && (
+                      <p className="text-[10px] opacity-70 -mt-2">Nominal di bawah akan dibagi rata otomatis ke {formData.paxCount} pax.</p>
+                    )}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block mb-1 font-medium">Nominal Bayar (Rp)</label>
+                        <input
+                          type="number" placeholder="5000000 (Kosongkan jika 0)"
+                          className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                          value={formData.initialPayment}
+                          onChange={e => setFormData({ ...formData, initialPayment: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="block mb-1 font-medium">Metode Bayar</label>
+                        <select
+                          className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                          value={formData.paymentMethod}
+                          onChange={e => setFormData({ ...formData, paymentMethod: e.target.value })}
+                        >
+                          <option value="Transfer Bank">Transfer Bank</option>
+                          <option value="Cash / Tunai">Cash / Tunai</option>
+                          <option value="EDC / Kartu">EDC / Kartu</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block mb-1 font-medium">Catatan Pembayaran</label>
+                      <input
+                        type="text" placeholder="Catatan setoran..."
+                        className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                        value={formData.paymentNotes}
+                        onChange={e => setFormData({ ...formData, paymentNotes: e.target.value })}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-[11px] italic opacity-70">
+                    Role kamu nggak bisa mencatat setoran pembayaran di sini. Booking akan diproses tanpa setoran awal — nanti Sales/Finance yang catat pembayarannya.
+                  </p>
                 )}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block mb-1 font-medium">Nominal Bayar (Rp)</label>
-                    <input
-                      type="number" placeholder="5000000 (Kosongkan jika 0)"
-                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                      value={formData.initialPayment}
-                      onChange={e => setFormData({ ...formData, initialPayment: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="block mb-1 font-medium">Metode Bayar</label>
-                    <select
-                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                      value={formData.paymentMethod}
-                      onChange={e => setFormData({ ...formData, paymentMethod: e.target.value })}
-                    >
-                      <option value="Transfer Bank">Transfer Bank</option>
-                      <option value="Cash / Tunai">Cash / Tunai</option>
-                      <option value="EDC / Kartu">EDC / Kartu</option>
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="block mb-1 font-medium">Catatan Pembayaran</label>
-                  <input
-                    type="text" placeholder="Catatan setoran..."
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    value={formData.paymentNotes}
-                    onChange={e => setFormData({ ...formData, paymentNotes: e.target.value })}
-                  />
-                </div>
               </div>
 
               <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
