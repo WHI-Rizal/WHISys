@@ -582,7 +582,7 @@ export default function DashboardPage() {
 
         {/* MODUL BOOKING & MANIFEST */}
         {activeMenu === 'bookings' && (
-          <BookingsModule targetBookingId={selectedBookingForModal} theme={theme} />
+          <BookingsModule targetBookingId={selectedBookingForModal} theme={theme} userRole={userProfile?.role} />
         )}
 
         {/* MODUL KEUANGAN & PELUNASAN — dibatasi Finance & Super Admin, sinkron sama Firestore Rules */}
