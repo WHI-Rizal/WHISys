@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { Calendar } from 'lucide-react';
 
 // Browser native <input type="date"> selalu menyimpan value dalam format ISO
 // (yyyy-mm-dd), tapi TAMPILANNYA (waktu nggak lagi fokus/diedit) ngikutin locale
@@ -25,8 +26,9 @@ export default function DateFieldID({
 
   return (
     <div className="relative">
-      <div className={`${className} flex items-center pointer-events-none select-none`}>
+      <div className={`${className} flex items-center justify-between gap-2 pointer-events-none select-none`}>
         {displayValue ? <span>{displayValue}</span> : <span className="opacity-40">{placeholder}</span>}
+        <Calendar className="w-4 h-4 opacity-50 shrink-0" />
       </div>
       <input
         type="date"
