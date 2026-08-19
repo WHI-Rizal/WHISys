@@ -25,8 +25,14 @@ const formatMonthYear = (dateString) => {
   return date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
 };
 
-export default function PackagesModule({ theme = 'dark' }) {
+export default function PackagesModule({ theme = 'dark', userRole = '' }) {
   const isDark = theme === 'dark';
+
+  // Cuma Super Admin & Operational yang boleh kelola katalog paket (buat,
+  // edit, hapus, atur itinerary). Sales & Finance tetap boleh lihat katalog
+  // (butuh buat proses booking), tapi nggak boleh ubah data paketnya.
+  const roleLower = (userRole || '').toLowerCase();
+  const canManagePackages = roleLower.includes('super') || roleLower === 'admin' || roleLower === 'operational';
 
   // Config Style Adaptif Tema
   const styles = {
@@ -99,6 +105,10 @@ export default function PackagesModule({ theme = 'dark' }) {
   }, []);
 
   const handleOpenAdd = () => {
+    if (!canManagePackages) {
+      alert("Cuma Super Admin & Operational yang boleh menambah paket.");
+      return;
+    }
     setEditingPackageId(null);
     setFormData({
       code: `PK-${Date.now().toString().slice(-4)}`,
@@ -122,6 +132,10 @@ export default function PackagesModule({ theme = 'dark' }) {
   };
 
   const handleOpenEdit = (pkg) => {
+    if (!canManagePackages) {
+      alert("Cuma Super Admin & Operational yang boleh mengedit paket.");
+      return;
+    }
     setEditingPackageId(pkg.id);
     setFormData({
       code: pkg.code || '',
@@ -145,6 +159,10 @@ export default function PackagesModule({ theme = 'dark' }) {
   };
 
   const handleDelete = async (pkg) => {
+    if (!canManagePackages) {
+      alert("Cuma Super Admin & Operational yang boleh menghapus paket.");
+      return;
+    }
     if (!confirm(`Apakah Anda yakin ingin menghapus paket "${pkg.name}"?`)) return;
     try {
       await deleteDoc(doc(db, 'packages', pkg.id));
@@ -189,6 +207,10 @@ export default function PackagesModule({ theme = 'dark' }) {
 
   const handleSaveItinerary = async () => {
     if (!selectedPackageForItinerary) return;
+    if (!canManagePackages) {
+      alert("Cuma Super Admin & Operational yang boleh mengubah itinerary.");
+      return;
+    }
     setSavingItinerary(true);
     try {
       await updateDoc(doc(db, 'packages', selectedPackageForItinerary.id), {
@@ -279,6 +301,10 @@ export default function PackagesModule({ theme = 'dark' }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!canManagePackages) {
+      alert("Cuma Super Admin & Operational yang boleh menyimpan data paket.");
+      return;
+    }
     try {
       const payload = {
         code: formData.code,
@@ -354,12 +380,14 @@ export default function PackagesModule({ theme = 'dark' }) {
           </h3>
           <p className={`text-xs ${styles.textSub} mt-1`}>Kelola program keberangkatan, akomodasi, dan harga paket secara adaptif.</p>
         </div>
-        <button
-          onClick={handleOpenAdd}
-          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg shadow-emerald-900/10"
-        >
-          <Plus className="w-4 h-4" /> Buat Paket Baru
-        </button>
+        {canManagePackages && (
+          <button
+            onClick={handleOpenAdd}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg shadow-emerald-900/10"
+          >
+            <Plus className="w-4 h-4" /> Buat Paket Baru
+          </button>
+        )}
       </div>
 
       {/* FILTER BAR */}
@@ -518,20 +546,24 @@ export default function PackagesModule({ theme = 'dark' }) {
                               </span>
                             )}
                           </button>
-                          <button
-                            onClick={() => handleOpenEdit(pkg)}
-                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
-                            title="Edit Paket"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(pkg)}
-                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                            title="Hapus Paket"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canManagePackages && (
+                            <>
+                              <button
+                                onClick={() => handleOpenEdit(pkg)}
+                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                                title="Edit Paket"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(pkg)}
+                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                                title="Hapus Paket"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -776,31 +808,35 @@ export default function PackagesModule({ theme = 'dark' }) {
                 <div key={idx} className={`${styles.innerBg} p-4 rounded-xl border space-y-2.5`}>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-purple-500">Hari ke-{idx + 1}</span>
-                    <div className="flex items-center gap-1">
-                      <button type="button" onClick={() => handleMoveDay(idx, -1)} disabled={idx === 0} className={`p-1 rounded ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'} disabled:opacity-30`} title="Pindah ke atas">
-                        <ChevronUp className="w-3.5 h-3.5" />
-                      </button>
-                      <button type="button" onClick={() => handleMoveDay(idx, 1)} disabled={idx === itineraryDays.length - 1} className={`p-1 rounded ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'} disabled:opacity-30`} title="Pindah ke bawah">
-                        <ChevronDown className="w-3.5 h-3.5" />
-                      </button>
-                      <button type="button" onClick={() => handleRemoveDay(idx)} className="p-1 rounded text-rose-500 hover:bg-rose-500/10" title="Hapus hari ini">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                    {canManagePackages && (
+                      <div className="flex items-center gap-1">
+                        <button type="button" onClick={() => handleMoveDay(idx, -1)} disabled={idx === 0} className={`p-1 rounded ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'} disabled:opacity-30`} title="Pindah ke atas">
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button type="button" onClick={() => handleMoveDay(idx, 1)} disabled={idx === itineraryDays.length - 1} className={`p-1 rounded ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'} disabled:opacity-30`} title="Pindah ke bawah">
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        </button>
+                        <button type="button" onClick={() => handleRemoveDay(idx)} className="p-1 rounded text-rose-500 hover:bg-rose-500/10" title="Hapus hari ini">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <input
                     type="text"
                     placeholder="Judul singkat, cth: Jakarta - Jeddah - Madinah"
-                    className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs font-medium`}
+                    className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs font-medium disabled:opacity-70`}
                     value={d.title}
+                    disabled={!canManagePackages}
                     onChange={e => handleDayFieldChange(idx, 'title', e.target.value)}
                   />
                   <textarea
                     rows={2}
                     placeholder="Rincian kegiatan hari ini..."
-                    className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
+                    className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs disabled:opacity-70`}
                     value={d.description}
+                    disabled={!canManagePackages}
                     onChange={e => handleDayFieldChange(idx, 'description', e.target.value)}
                   />
                   <div className="grid grid-cols-2 gap-2.5">
@@ -809,8 +845,9 @@ export default function PackagesModule({ theme = 'dark' }) {
                       <input
                         type="text"
                         placeholder="Hotel (opsional)"
-                        className={`w-full ${styles.inputBg} rounded-lg pl-8 pr-2 py-2 text-xs`}
+                        className={`w-full ${styles.inputBg} rounded-lg pl-8 pr-2 py-2 text-xs disabled:opacity-70`}
                         value={d.hotel}
+                        disabled={!canManagePackages}
                         onChange={e => handleDayFieldChange(idx, 'hotel', e.target.value)}
                       />
                     </div>
@@ -819,8 +856,9 @@ export default function PackagesModule({ theme = 'dark' }) {
                       <input
                         type="text"
                         placeholder="Makan (opsional)"
-                        className={`w-full ${styles.inputBg} rounded-lg pl-8 pr-2 py-2 text-xs`}
+                        className={`w-full ${styles.inputBg} rounded-lg pl-8 pr-2 py-2 text-xs disabled:opacity-70`}
                         value={d.meals}
+                        disabled={!canManagePackages}
                         onChange={e => handleDayFieldChange(idx, 'meals', e.target.value)}
                       />
                     </div>
@@ -829,13 +867,15 @@ export default function PackagesModule({ theme = 'dark' }) {
               ))}
             </div>
 
-            <button
-              type="button"
-              onClick={handleAddDay}
-              className={`w-full flex items-center justify-center gap-1.5 py-2.5 mb-5 border-2 border-dashed ${isDark ? 'border-slate-700 hover:border-purple-500 text-slate-400' : 'border-slate-300 hover:border-purple-500 text-slate-500'} hover:text-purple-500 rounded-xl text-xs font-semibold transition-colors`}
-            >
-              <Plus className="w-4 h-4" /> Tambah Hari
-            </button>
+            {canManagePackages && (
+              <button
+                type="button"
+                onClick={handleAddDay}
+                className={`w-full flex items-center justify-center gap-1.5 py-2.5 mb-5 border-2 border-dashed ${isDark ? 'border-slate-700 hover:border-purple-500 text-slate-400' : 'border-slate-300 hover:border-purple-500 text-slate-500'} hover:text-purple-500 rounded-xl text-xs font-semibold transition-colors`}
+              >
+                <Plus className="w-4 h-4" /> Tambah Hari
+              </button>
+            )}
 
             <div className={`pt-4 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <div className="flex gap-2">
@@ -856,16 +896,18 @@ export default function PackagesModule({ theme = 'dark' }) {
               </div>
               <div className="flex gap-2 justify-end">
                 <button type="button" onClick={() => setShowItineraryModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg text-xs`}>
-                  Batal
+                  {canManagePackages ? 'Batal' : 'Tutup'}
                 </button>
-                <button
-                  type="button"
-                  onClick={handleSaveItinerary}
-                  disabled={savingItinerary}
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-60 text-white rounded-lg text-xs font-medium"
-                >
-                  {savingItinerary ? 'Menyimpan...' : 'Simpan Itinerary'}
-                </button>
+                {canManagePackages && (
+                  <button
+                    type="button"
+                    onClick={handleSaveItinerary}
+                    disabled={savingItinerary}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-60 text-white rounded-lg text-xs font-medium"
+                  >
+                    {savingItinerary ? 'Menyimpan...' : 'Simpan Itinerary'}
+                  </button>
+                )}
               </div>
             </div>
           </div>
