@@ -6,6 +6,7 @@ import { collection, addDoc, getDocs, getDoc, deleteDoc, doc, updateDoc, query, 
 import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock, Download } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import DateFieldID from '@/components/DateFieldID';
 
 const DEFAULT_COMPANY_PROFILE = {
   name: 'PT. WISATA HALAL INTERNASIONAL',
@@ -1371,11 +1372,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
               <div>
                 <label className="block mb-1 font-medium">Tanggal Biaya</label>
-                <input
-                  type="date" required
+                <DateFieldID
+                  required
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                   value={operationalForm.expenseDate}
-                  onChange={e => setOperationalForm({ ...operationalForm, expenseDate: e.target.value })}
+                  onChange={(val) => setOperationalForm({ ...operationalForm, expenseDate: val })}
                 />
               </div>
 
@@ -1421,11 +1422,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
             <form onSubmit={handleConfirmRecognizeRevenue} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
                 <label className="block mb-1 font-medium">Tanggal Pengakuan Pendapatan</label>
-                <input
-                  type="date" required
+                <DateFieldID
+                  required
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                   value={recognizeDateInput}
-                  onChange={e => setRecognizeDateInput(e.target.value)}
+                  onChange={(val) => setRecognizeDateInput(val)}
                 />
               </div>
 
