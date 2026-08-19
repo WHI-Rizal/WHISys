@@ -575,7 +575,7 @@ export default function DashboardPage() {
         )}
 
         {/* MODUL PAKET TRAVEL & LA */}
-        {activeMenu === 'packages' && <PackagesModule theme={theme} />}
+        {activeMenu === 'packages' && <PackagesModule theme={theme} userRole={userProfile?.role} />}
 
         {/* MODUL MASTER DATA JAMAAH */}
         {activeMenu === 'jamaah' && <JamaahModule theme={theme} />}
