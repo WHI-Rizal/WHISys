@@ -35,6 +35,10 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   // riwayat setoran yang udah tercatat. Semua staf tetap boleh lihat & catat DP baru.
   const roleLower = (userRole || '').toLowerCase();
   const canManagePayments = roleLower.includes('super') || roleLower === 'admin' || roleLower === 'finance';
+  // Sama aturannya buat aksi booking: Edit, Reschedule, Batalkan/Refund, Hapus
+  // cuma Finance & Super Admin. Semua staf tetap boleh registrasi booking baru
+  // dan atur rooming list (nomor kamar).
+  const canManageBookings = canManagePayments;
 
   const isDark = theme === 'dark';
 
@@ -369,6 +373,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   };
 
   const handleOpenEditModal = (item) => {
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh mengedit booking.");
+      return;
+    }
     setEditingBookingId(item.id);
     setFormData({
       packageId: item.packageId || '',
@@ -421,6 +429,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   };
 
   const handleDeleteBooking = async (item) => {
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh menghapus booking.");
+      return;
+    }
     try {
       const q = query(collection(db, 'payments_income'), where('bookingId', '==', item.id));
       const paySnap = await getDocs(q);
@@ -452,6 +464,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   // ============ ALUR BATALKAN / RESCHEDULE BOOKING ============
 
   const handleOpenActionModal = (item, mode) => {
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh reschedule / membatalkan booking.");
+      return;
+    }
     setSelectedBookingForAction(item);
     setActionMode(mode);
     setCancelForm({
@@ -481,6 +497,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   const handleCancelSubmit = async (e) => {
     e.preventDefault();
     if (!selectedBookingForAction) return;
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh memproses pembatalan/refund.");
+      return;
+    }
 
     try {
       await updateDoc(doc(db, 'bookings', selectedBookingForAction.id), {
@@ -504,6 +524,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   const handleRescheduleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedBookingForAction) return;
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh memproses reschedule.");
+      return;
+    }
     if (!rescheduleForm.newPackageId) {
       alert("Pilih paket/keberangkatan tujuan reschedule.");
       return;
@@ -932,6 +956,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       const paymentVal = Number(formData.initialPayment || 0);
 
       if (editingBookingId) {
+        if (!canManageBookings) {
+          alert("Cuma Finance & Super Admin yang boleh mengedit booking.");
+          return;
+        }
         const currentBooking = bookings.find(b => b.id === editingBookingId);
 
         await updateDoc(doc(db, 'bookings', editingBookingId), {
@@ -1338,45 +1366,49 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                                 <Printer className="w-4 h-4" />
                               </button>
 
-                              {/* TOMBOL EDIT BOOKING */}
-                              <button
-                                onClick={() => handleOpenEditModal(item)}
-                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
-                                title="Edit Booking"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </button>
-
-                              {(item.status || 'active') === 'active' && (
+                              {canManageBookings && (
                                 <>
-                                  {/* TOMBOL RESCHEDULE */}
+                                  {/* TOMBOL EDIT BOOKING */}
                                   <button
-                                    onClick={() => handleOpenActionModal(item, 'reschedule')}
-                                    className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
-                                    title="Reschedule ke Paket Lain"
+                                    onClick={() => handleOpenEditModal(item)}
+                                    className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                                    title="Edit Booking"
                                   >
-                                    <RotateCcw className="w-4 h-4" />
+                                    <Edit className="w-4 h-4" />
                                   </button>
 
-                                  {/* TOMBOL BATALKAN / REFUND */}
+                                  {(item.status || 'active') === 'active' && (
+                                    <>
+                                      {/* TOMBOL RESCHEDULE */}
+                                      <button
+                                        onClick={() => handleOpenActionModal(item, 'reschedule')}
+                                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                                        title="Reschedule ke Paket Lain"
+                                      >
+                                        <RotateCcw className="w-4 h-4" />
+                                      </button>
+
+                                      {/* TOMBOL BATALKAN / REFUND */}
+                                      <button
+                                        onClick={() => handleOpenActionModal(item, 'cancel')}
+                                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                                        title="Batalkan Booking & Proses Refund"
+                                      >
+                                        <Ban className="w-4 h-4" />
+                                      </button>
+                                    </>
+                                  )}
+
+                                  {/* TOMBOL HAPUS BOOKING */}
                                   <button
-                                    onClick={() => handleOpenActionModal(item, 'cancel')}
+                                    onClick={() => handleDeleteBooking(item)}
                                     className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                                    title="Batalkan Booking & Proses Refund"
+                                    title="Hapus Booking"
                                   >
-                                    <Ban className="w-4 h-4" />
+                                    <Trash2 className="w-4 h-4" />
                                   </button>
                                 </>
                               )}
-
-                              {/* TOMBOL HAPUS BOOKING */}
-                              <button
-                                onClick={() => handleDeleteBooking(item)}
-                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                                title="Hapus Booking"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
                             </>
                           )}
                         </div>
