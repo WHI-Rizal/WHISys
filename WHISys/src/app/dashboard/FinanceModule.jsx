@@ -128,6 +128,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const [companyProfile, setCompanyProfile] = useState(DEFAULT_COMPANY_PROFILE);
   const [generatingPdf, setGeneratingPdf] = useState(false);
 
+  const [showRecognizeModal, setShowRecognizeModal] = useState(false);
+  const [pkgToRecognize, setPkgToRecognize] = useState(null);
+  const [recognizeDateInput, setRecognizeDateInput] = useState(todayISODate());
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -217,25 +221,53 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     }
   };
 
-  const handleToggleRevenueRecognition = async (pkg) => {
-    const isRecognized = !!pkg.revenueRecognized;
-    const confirmMsg = isRecognized
-      ? `Batalkan pengakuan pendapatan untuk paket "${pkg.name}"? Omset & HPP paket ini akan kembali berstatus Diterima/Dibayar Dimuka dan keluar dari Laporan P&L.`
-      : `Akui pendapatan & HPP untuk paket "${pkg.name}" sekarang? Omset dan biaya vendor paket ini akan masuk ke Laporan Laba Rugi periode berjalan.`;
+  const handleUnrecognizeRevenue = async (pkg) => {
+    const confirmMsg = `Batalkan pengakuan pendapatan untuk paket "${pkg.name}"? Omset & HPP paket ini akan kembali berstatus Diterima/Dibayar Dimuka dan keluar dari Laporan P&L.`;
     if (!confirm(confirmMsg)) return;
 
     try {
-      const newRecognizedAt = !isRecognized ? new Date().toISOString() : null;
       await updateDoc(doc(db, 'packages', pkg.id), {
-        revenueRecognized: !isRecognized,
-        recognizedAt: newRecognizedAt
+        revenueRecognized: false,
+        recognizedAt: null
       });
       await fetchData();
       setSelectedPackageForDetail(prev =>
-        prev && prev.id === pkg.id ? { ...prev, revenueRecognized: !isRecognized, recognizedAt: newRecognizedAt } : prev
+        prev && prev.id === pkg.id ? { ...prev, revenueRecognized: false, recognizedAt: null } : prev
       );
     } catch (err) {
-      alert("Gagal memperbarui status pengakuan pendapatan: " + err.message);
+      alert("Gagal membatalkan pengakuan pendapatan: " + err.message);
+    }
+  };
+
+  const openRecognizeModal = (pkg) => {
+    const parsedDeparture = pkg.departureDate ? new Date(pkg.departureDate) : null;
+    const defaultDate = parsedDeparture && !isNaN(parsedDeparture.getTime())
+      ? parsedDeparture.toISOString().slice(0, 10)
+      : todayISODate();
+
+    setPkgToRecognize(pkg);
+    setRecognizeDateInput(defaultDate);
+    setShowRecognizeModal(true);
+  };
+
+  const handleConfirmRecognizeRevenue = async (e) => {
+    e.preventDefault();
+    if (!pkgToRecognize) return;
+
+    try {
+      const isoDate = new Date(recognizeDateInput).toISOString();
+      await updateDoc(doc(db, 'packages', pkgToRecognize.id), {
+        revenueRecognized: true,
+        recognizedAt: isoDate
+      });
+      await fetchData();
+      setSelectedPackageForDetail(prev =>
+        prev && prev.id === pkgToRecognize.id ? { ...prev, revenueRecognized: true, recognizedAt: isoDate } : prev
+      );
+      setShowRecognizeModal(false);
+      setPkgToRecognize(null);
+    } catch (err) {
+      alert("Gagal mengakui pendapatan: " + err.message);
     }
   };
 
@@ -944,7 +976,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                                 <span className="text-[10px] text-slate-400">{formatDateDDMMYYYY(pkg.recognizedAt)}</span>
                                 <button
                                   type="button"
-                                  onClick={() => handleToggleRevenueRecognition(pkg)}
+                                  onClick={() => handleUnrecognizeRevenue(pkg)}
                                   className="text-[10px] text-slate-400 hover:text-rose-500 inline-flex items-center gap-1 underline"
                                 >
                                   <RotateCcw className="w-3 h-3" /> Batalkan
@@ -957,7 +989,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                                 </span>
                                 <button
                                   type="button"
-                                  onClick={() => handleToggleRevenueRecognition(pkg)}
+                                  onClick={() => openRecognizeModal(pkg)}
                                   className="mt-0.5 px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-[10px] font-medium inline-flex items-center gap-1"
                                 >
                                   <CheckCircle2 className="w-3 h-3" /> Akui Pendapatan
@@ -1013,7 +1045,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                   </span>
                   <button
                     type="button"
-                    onClick={() => handleToggleRevenueRecognition(selectedPackageForDetail)}
+                    onClick={() => handleUnrecognizeRevenue(selectedPackageForDetail)}
                     className="text-[10px] text-slate-400 hover:text-rose-500 inline-flex items-center gap-1 underline"
                   >
                     <RotateCcw className="w-3 h-3" /> Batalkan Pengakuan
@@ -1026,7 +1058,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                   </span>
                   <button
                     type="button"
-                    onClick={() => handleToggleRevenueRecognition(selectedPackageForDetail)}
+                    onClick={() => openRecognizeModal(selectedPackageForDetail)}
                     className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-[10px] font-medium inline-flex items-center gap-1"
                   >
                     <CheckCircle2 className="w-3 h-3" /> Akui Pendapatan Sekarang
@@ -1363,6 +1395,50 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </button>
                 <button type="submit" className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium">
                   Simpan Biaya Operasional
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showRecognizeModal && pkgToRecognize && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+            <button
+              onClick={() => { setShowRecognizeModal(false); setPkgToRecognize(null); }}
+              className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <CheckCircle2 className="w-5 h-5 text-blue-500" /> Akui Pendapatan Paket
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>
+              Paket: <strong className={styles.textTitle}>{pkgToRecognize.name}</strong>. Pilih tanggal pengakuan pendapatan — biasanya tanggal keberangkatan atau tanggal jasa benar-benar terealisasi. Omset & HPP paket ini akan masuk Laporan P&L di periode sesuai tanggal ini, bukan tanggal kamu klik tombol ini.
+            </p>
+
+            <form onSubmit={handleConfirmRecognizeRevenue} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div>
+                <label className="block mb-1 font-medium">Tanggal Pengakuan Pendapatan</label>
+                <input
+                  type="date" required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={recognizeDateInput}
+                  onChange={e => setRecognizeDateInput(e.target.value)}
+                />
+              </div>
+
+              <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button
+                  type="button"
+                  onClick={() => { setShowRecognizeModal(false); setPkgToRecognize(null); }}
+                  className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}
+                >
+                  Batal
+                </button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium">
+                  Konfirmasi & Akui Pendapatan
                 </button>
               </div>
             </form>
