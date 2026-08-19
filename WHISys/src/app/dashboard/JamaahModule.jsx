@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { Users, Plus, Search, Edit, Trash2, X, AlertCircle } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 
@@ -109,9 +109,18 @@ export default function JamaahModule({ theme = 'dark' }) {
     setShowModal(true);
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Apakah Anda yakin ingin menghapus data jamaah ini?')) return;
+  const handleDelete = async (id, name) => {
     try {
+      const q = query(collection(db, 'bookings'), where('jamaahId', '==', id));
+      const bookingSnap = await getDocs(q);
+
+      if (!bookingSnap.empty) {
+        alert(`Data jamaah "${name || ''}" tidak dapat dihapus karena masih memiliki ${bookingSnap.size} data booking di sistem.\n\nSilakan hapus/selesaikan dulu booking-nya di menu Booking & Manifest sebelum menghapus data jamaah ini.`);
+        return;
+      }
+
+      if (!confirm('Apakah Anda yakin ingin menghapus data jamaah ini?')) return;
+
       await deleteDoc(doc(db, 'jamaah', id));
       fetchJamaah();
     } catch (err) {
@@ -238,7 +247,7 @@ export default function JamaahModule({ theme = 'dark' }) {
                             <Edit className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => handleDelete(item.id)}
+                            onClick={() => handleDelete(item.id, item.fullName)}
                             className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
                             title="Hapus Jamaah"
                           >
