@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc } from 'firebase/firestore';
-import { Star, Send, CheckCircle2, Plane, ExternalLink } from 'lucide-react';
+import { Star, Send, CheckCircle2, Plane, ExternalLink, Copy, Check } from 'lucide-react';
 
 const GOOGLE_REVIEW_LINK = 'https://www.google.com/maps/place/Wisata+Halal+Indonesia/@-6.3127371,106.767536,17z/data=!3m1!4b1!4m6!3m5!1s0x2e69ef800cfab2df:0x6c9f79f91ef9de17!8m2!3d-6.3127424!4d106.7701109!16s%2Fg%2F11v0qsvbxm?hl=en-GB&entry=ttu';
 
@@ -19,6 +19,23 @@ export default function PublicFeedbackPage({ params, searchParams }) {
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
   const [submittedRating, setSubmittedRating] = useState(0);
+  const [submittedComment, setSubmittedComment] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const buildAutoReviewText = () => {
+    const place = packageName ? ` di program ${packageName}` : '';
+    return `Pengalaman perjalanan${place} bersama Wisata Halal Indonesia sangat memuaskan. Pelayanan ramah, terorganisir, dan sesuai jadwal. Terima kasih banyak!`;
+  };
+
+  const handleCopyReview = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -36,6 +53,7 @@ export default function PublicFeedbackPage({ params, searchParams }) {
         createdAt: new Date().toISOString()
       });
       setSubmittedRating(rating);
+      setSubmittedComment(comment.trim());
       setSubmitted(true);
     } catch (err) {
       setError('Gagal mengirim feedback. Silakan coba lagi dalam beberapa saat.');
@@ -96,9 +114,32 @@ export default function PublicFeedbackPage({ params, searchParams }) {
                 <p style={{ color: '#fbbf24', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.4rem' }}>
                   ⭐ Senang Anda puas dengan perjalanannya!
                 </p>
-                <p style={{ color: '#94a3b8', fontSize: '0.78rem', lineHeight: 1.6, marginBottom: '1rem' }}>
-                  Boleh bantu kami sekali lagi? Ulasan Anda di Google akan sangat membantu jamaah lain menemukan kami.
+                <p style={{ color: '#94a3b8', fontSize: '0.78rem', lineHeight: 1.6, marginBottom: '0.9rem' }}>
+                  Boleh bantu kami sekali lagi? Tinggal salin ulasan di bawah, lalu tempel di Google. Nggak perlu ngetik ulang.
                 </p>
+
+                <div style={{
+                  backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '0.6rem',
+                  padding: '0.75rem', color: '#cbd5e1', fontSize: '0.78rem', lineHeight: 1.6,
+                  marginBottom: '0.75rem', textAlign: 'left'
+                }}>
+                  {submittedComment || buildAutoReviewText()}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleCopyReview(submittedComment || buildAutoReviewText())}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
+                    width: '100%', padding: '0.7rem 1rem', backgroundColor: copied ? '#065f46' : '#1e293b',
+                    color: copied ? '#a7f3d0' : '#e2e8f0', fontWeight: 600, borderRadius: '0.75rem',
+                    border: '1px solid #334155', cursor: 'pointer', fontSize: '0.82rem', marginBottom: '0.6rem',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  {copied ? <><Check size={15} /> Tersalin!</> : <><Copy size={15} /> Salin Teks Ulasan</>}
+                </button>
+
                 <a
                   href={GOOGLE_REVIEW_LINK}
                   target="_blank"
@@ -110,7 +151,7 @@ export default function PublicFeedbackPage({ params, searchParams }) {
                     boxSizing: 'border-box'
                   }}
                 >
-                  Beri Ulasan di Google <ExternalLink size={15} />
+                  Buka Google & Tempel Ulasan <ExternalLink size={15} />
                 </a>
               </div>
             )}
