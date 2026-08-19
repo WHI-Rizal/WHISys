@@ -42,7 +42,9 @@ export default function SettingsModule({ theme = 'dark' }) {
   const [saving, setSaving] = useState(false);
 
   // State User & Role
-  const [currentUserRole, setCurrentUserRole] = useState('admin');
+  // PENTING: default-nya sengaja BUKAN 'admin'. Sebelum status role user beneran
+  // dikonfirmasi dari Firestore, anggap dia belum punya hak akses admin apapun.
+  const [currentUserRole, setCurrentUserRole] = useState('');
   const [usersList, setUsersList] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [showUserModal, setShowModal] = useState(false);
@@ -85,19 +87,28 @@ export default function SettingsModule({ theme = 'dark' }) {
   const fetchUsersAndRole = async () => {
     setLoadingUsers(true);
     try {
-      // Ambil user login saat ini
+      // Ambil role user login saat ini
       const currentUser = auth.currentUser;
+      let resolvedRole = '';
       if (currentUser) {
         const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-        if (userDoc.exists()) {
-          setCurrentUserRole(userDoc.data().role || 'admin');
-        }
+        // Kalau dokumen belum ada / field role kosong, JANGAN default ke 'admin' —
+        // biarkan resolvedRole tetap kosong (= tanpa akses admin apapun).
+        resolvedRole = userDoc.exists() ? (userDoc.data().role || '') : '';
+        setCurrentUserRole(resolvedRole);
       }
 
-      // Ambil seluruh daftar user dari koleksi 'users'
-      const usersSnap = await getDocs(collection(db, 'users'));
-      const list = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setUsersList(list);
+      // Daftar seluruh staf cuma boleh diambil kalau role-nya Super Admin — sesuai
+      // Firestore Security Rules. Kalau bukan, jangan coba query-nya sama sekali
+      // (query itu bakal ditolak rules & cuma nyampah error di console).
+      const isSuperAdminRole = resolvedRole.toLowerCase().includes('super') || resolvedRole.toLowerCase() === 'admin';
+      if (isSuperAdminRole) {
+        const usersSnap = await getDocs(collection(db, 'users'));
+        const list = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setUsersList(list);
+      } else {
+        setUsersList([]);
+      }
     } catch (err) {
       console.error("Gagal mengambil data user/role:", err);
     }
@@ -473,6 +484,11 @@ export default function SettingsModule({ theme = 'dark' }) {
             <div className="space-y-3">
               {loadingUsers ? (
                 <p className={`text-xs ${styles.textSub} py-6 text-center`}>Memuat daftar pengguna dari Firestore...</p>
+              ) : !isSuperAdmin ? (
+                <div className={`p-6 text-center ${styles.textSub} text-xs border border-dashed border-slate-800 rounded-xl flex flex-col items-center gap-2`}>
+                  <Lock className="w-4 h-4" />
+                  Cuma Super Admin yang bisa lihat & kelola daftar staf.
+                </div>
               ) : usersList.length === 0 ? (
                 <div className={`p-6 text-center ${styles.textSub} text-xs border border-dashed border-slate-800 rounded-xl`}>
                   Belum ada data user tersimpan di koleksi Firestore.
