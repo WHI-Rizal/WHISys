@@ -305,10 +305,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     e.preventDefault();
     try {
       const selectedPkg = packagesList.find(p => p.id === vendorForm.packageId);
+      if (!selectedPkg) {
+        alert("Pilih paket keberangkatan terkait dulu. Kalau ini biaya kantor yang bukan buat trip tertentu, catat lewat tombol \"Biaya Operasional Kantor\", bukan di sini.");
+        return;
+      }
 
       await addDoc(collection(db, 'payments_vendor'), {
-        packageId: selectedPkg?.id || 'GLOBAL',
-        packageName: selectedPkg?.name || 'Operasional Umum',
+        packageId: selectedPkg.id,
+        packageName: selectedPkg.name,
         vendorName: vendorForm.vendorName,
         category: vendorForm.category,
         amount: Number(vendorForm.amount),
@@ -752,7 +756,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                           {vp.category}
                         </span>
                       </td>
-                      <td className={`p-4 ${styles.textTitle}`}>{vp.packageName}</td>
+                      <td className={`p-4 ${styles.textTitle}`}>
+                        {vp.packageName}
+                        {vp.packageId === 'GLOBAL' && (
+                          <span className="block text-[10px] text-amber-500 font-medium mt-0.5">
+                            ⚠ Data lama tanpa paket — review manual
+                          </span>
+                        )}
+                      </td>
                       <td className={`p-4 ${styles.textSub}`}>
                         {vp.notes}
                         <span className="block text-[10px] text-slate-400">{formatDateDDMMYYYY(vp.createdAt)}</span>
@@ -1261,15 +1272,19 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
               <div>
                 <label className="block mb-1 font-medium">Paket Keberangkatan Terkait</label>
                 <select
+                  required
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                   value={vendorForm.packageId}
                   onChange={e => setVendorForm({ ...vendorForm, packageId: e.target.value })}
                 >
-                  <option value="">-- Bebas / Operasional Umum --</option>
+                  <option value="">-- Pilih Paket --</option>
                   {packagesList.map(p => (
                     <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
                   ))}
                 </select>
+                <p className={`text-[10.5px] ${styles.textSub} mt-1`}>
+                  Biaya kantor yang bukan buat trip tertentu (sewa, gaji, listrik, dll) dicatat lewat tombol <strong>"+ Biaya Operasional Kantor"</strong>, bukan di sini.
+                </p>
               </div>
 
               <div>
