@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 
@@ -163,8 +163,36 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
       alert("Cuma Super Admin & Operational yang boleh menghapus paket.");
       return;
     }
-    if (!confirm(`Apakah Anda yakin ingin menghapus paket "${pkg.name}"?`)) return;
     try {
+      const bookingQ = query(collection(db, 'bookings'), where('packageId', '==', pkg.id));
+      const bookingSnap = await getDocs(bookingQ);
+
+      if (!bookingSnap.empty) {
+        alert(`Paket "${pkg.name}" tidak dapat dihapus karena masih memiliki ${bookingSnap.size} data booking jamaah.\n\nSilakan pindahkan/hapus dulu booking-nya di menu Booking & Manifest sebelum menghapus paket ini.`);
+        return;
+      }
+
+      // Cek biaya vendor terkait paket ini. Collection ini cuma boleh dibaca
+      // Finance & Super Admin (aturan modul Keuangan) — kalau yang hapus
+      // paket adalah Operational, query ini bakal ditolak Firestore Rules.
+      // Itu wajar (bukan bug), jadi kita lewatin pengecekan ini khusus buat
+      // role yang memang nggak punya akses ke data Keuangan.
+      try {
+        const vendorQ = query(collection(db, 'payments_vendor'), where('packageId', '==', pkg.id));
+        const vendorSnap = await getDocs(vendorQ);
+
+        if (!vendorSnap.empty) {
+          alert(`Paket "${pkg.name}" tidak dapat dihapus karena masih memiliki ${vendorSnap.size} riwayat biaya vendor tercatat di modul Keuangan.\n\nSilakan hapus dulu biaya vendor terkait paket ini di menu Keuangan sebelum menghapus paketnya.`);
+          return;
+        }
+      } catch (vendorErr) {
+        if (vendorErr.code !== 'permission-denied') throw vendorErr;
+        // Role ini nggak punya akses baca data Keuangan — lanjut ke
+        // pengecekan booking di atas sebagai pengaman utama.
+      }
+
+      if (!confirm(`Apakah Anda yakin ingin menghapus paket "${pkg.name}"?`)) return;
+
       await deleteDoc(doc(db, 'packages', pkg.id));
       fetchData();
     } catch (err) {
