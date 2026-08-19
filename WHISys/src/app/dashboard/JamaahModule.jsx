@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { Users, Plus, Search, Edit, Trash2, X, AlertCircle } from 'lucide-react';
+import DateFieldID from '@/components/DateFieldID';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -331,11 +332,11 @@ export default function JamaahModule({ theme = 'dark' }) {
                 </div>
                 <div>
                   <label className="block mb-1 font-medium">Tanggal Expired Paspor</label>
-                  <input
-                    type="date"
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5 [color-scheme:${theme}]`}
+                  <DateFieldID
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    nativeClassName={`[color-scheme:${theme}]`}
                     value={formData.passportExpiry}
-                    onChange={(e) => setFormData({ ...formData, passportExpiry: e.target.value })}
+                    onChange={(val) => setFormData({ ...formData, passportExpiry: val })}
                   />
                 </div>
               </div>
