@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble } from 'lucide-react';
+import DateFieldID from '@/components/DateFieldID';
 
 // Helper Format Tanggal dd/mm/yyyy
 const formatDateDDMMYYYY = (dateString) => {
@@ -595,11 +596,12 @@ export default function PackagesModule({ theme = 'dark' }) {
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block mb-1 font-medium">Tgl Keberangkatan</label>
-                  <input
-                    type="date" required
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5 [color-scheme:${theme}]`}
+                  <DateFieldID
+                    required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    nativeClassName={`[color-scheme:${theme}]`}
                     value={formData.departureDate}
-                    onChange={e => setFormData({ ...formData, departureDate: e.target.value })}
+                    onChange={(val) => setFormData({ ...formData, departureDate: val })}
                   />
                 </div>
                 <div>
