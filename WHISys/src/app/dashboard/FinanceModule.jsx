@@ -3,7 +3,16 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where } from 'firebase/firestore';
-import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye } from 'lucide-react';
+import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2 } from 'lucide-react';
+
+const OPERATIONAL_CATEGORIES = [
+  'Sewa Kantor',
+  'Gaji Staff',
+  'Listrik & Internet',
+  'ATK',
+  'Marketing',
+  'Lain-lain'
+];
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -31,12 +40,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
   const [transactions, setTransactions] = useState([]);
   const [vendorPayments, setVendorPayments] = useState([]);
+  const [operationalExpenses, setOperationalExpenses] = useState([]);
   const [bookingsList, setBookingsList] = useState([]);
   const [packagesList, setPackagesList] = useState([]);
   const [loading, setLoading] = useState(true);
-  
+
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [showVendorModal, setShowVendorModal] = useState(false);
+  const [showOperationalModal, setShowOperationalModal] = useState(false);
   const [activeTab, setActiveTab] = useState('income');
 
   const [showProfitDetailModal, setShowProfitDetailModal] = useState(false);
@@ -57,6 +68,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     notes: 'DP Booking Seat'
   });
 
+  const [operationalForm, setOperationalForm] = useState({
+    category: OPERATIONAL_CATEGORIES[0],
+    amount: '',
+    notes: ''
+  });
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -71,6 +88,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       const vpSnap = await getDocs(collection(db, 'payments_vendor'));
       setVendorPayments(vpSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      const opSnap = await getDocs(collection(db, 'expenses_operational'));
+      setOperationalExpenses(opSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (err) {
       console.error("Gagal mengambil data keuangan:", err);
     }
@@ -128,6 +148,16 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     }
   };
 
+  const handleDeleteOperationalExpense = async (opId) => {
+    if (!confirm("Apakah Anda yakin ingin menghapus catatan biaya operasional ini?")) return;
+    try {
+      await deleteDoc(doc(db, 'expenses_operational', opId));
+      fetchData();
+    } catch (err) {
+      alert("Gagal menghapus biaya operasional: " + err.message);
+    }
+  };
+
   const handleIncomeSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -180,9 +210,28 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     }
   };
 
+  const handleOperationalSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await addDoc(collection(db, 'expenses_operational'), {
+        category: operationalForm.category,
+        amount: Number(operationalForm.amount),
+        notes: operationalForm.notes,
+        createdAt: new Date().toISOString()
+      });
+
+      setShowOperationalModal(false);
+      setOperationalForm({ category: OPERATIONAL_CATEGORIES[0], amount: '', notes: '' });
+      fetchData();
+    } catch (err) {
+      alert("Gagal mencatat biaya operasional: " + err.message);
+    }
+  };
+
   const totalIncome = transactions.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const totalVendorPaid = vendorPayments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-  const netCashflow = totalIncome - totalVendorPaid;
+  const totalOperational = operationalExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  const netCashflow = totalIncome - totalVendorPaid - totalOperational;
 
   const selectedPkgIncomes = selectedPackageForDetail
     ? transactions.filter(tx => tx.packageName === selectedPackageForDetail.name)
@@ -218,10 +267,16 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
           >
             <ArrowUpRight className="w-4 h-4" /> + Bayar Vendor
           </button>
+          <button
+            onClick={() => setShowOperationalModal(true)}
+            className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
+          >
+            <Building2 className="w-4 h-4" /> + Biaya Operasional Kantor
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
         <div className={`${styles.cardBg} border p-5 rounded-xl`}>
           <p className={`text-xs ${styles.textSub} mb-1`}>Total Kas Masuk (Jamaah)</p>
           <h3 className="text-2xl font-bold text-emerald-500">Rp {totalIncome.toLocaleString('id-ID')}</h3>
@@ -229,6 +284,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         <div className={`${styles.cardBg} border p-5 rounded-xl`}>
           <p className={`text-xs ${styles.textSub} mb-1`}>Total Keluar (Vendor & Flight)</p>
           <h3 className="text-2xl font-bold text-rose-500">Rp {totalVendorPaid.toLocaleString('id-ID')}</h3>
+        </div>
+        <div className={`${styles.cardBg} border p-5 rounded-xl`}>
+          <p className={`text-xs ${styles.textSub} mb-1`}>Total Biaya Operasional Kantor</p>
+          <h3 className="text-2xl font-bold text-amber-500">Rp {totalOperational.toLocaleString('id-ID')}</h3>
         </div>
         <div className={`${styles.cardBg} border p-5 rounded-xl`}>
           <p className={`text-xs ${styles.textSub} mb-1`}>Saldo Kas Bersih Operasional</p>
@@ -254,6 +313,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
           }`}
         >
           Riwayat Bayar Vendor ({vendorPayments.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('operational')}
+          className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${
+            activeTab === 'operational' ? `${styles.tabActive} text-amber-500 border` : `${styles.textSub} hover:${styles.textTitle}`
+          }`}
+        >
+          Biaya Operasional Kantor ({operationalExpenses.length})
         </button>
         <button
           onClick={() => setActiveTab('profit_loss')}
@@ -369,6 +436,56 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                           onClick={() => handleDeleteVendorPayment(vp.id)}
                           className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
                           title="Hapus Pembayaran Vendor"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'operational' && (
+        <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <tr>
+                  <th className="p-4">Kategori</th>
+                  <th className="p-4">Catatan & Tanggal</th>
+                  <th className="p-4 text-right">Nominal Keluar</th>
+                  <th className="p-4 text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                {operationalExpenses.length === 0 ? (
+                  <tr>
+                    <td colSpan="4" className={`p-8 text-center ${styles.textSub}`}>Belum ada catatan biaya operasional kantor.</td>
+                  </tr>
+                ) : (
+                  operationalExpenses.map((op) => (
+                    <tr key={op.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                      <td className="p-4">
+                        <span className="bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2.5 py-1 rounded-full font-medium">
+                          {op.category}
+                        </span>
+                      </td>
+                      <td className={`p-4 ${styles.textSub}`}>
+                        {op.notes || '-'}
+                        <span className="block text-[10px] text-slate-400">{formatDateDDMMYYYY(op.createdAt)}</span>
+                      </td>
+                      <td className="p-4 text-right font-bold text-amber-500">
+                        - Rp {Number(op.amount).toLocaleString('id-ID')}
+                      </td>
+                      <td className="p-4 text-center">
+                        <button
+                          onClick={() => handleDeleteOperationalExpense(op.id)}
+                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                          title="Hapus Biaya Operasional"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -745,6 +862,67 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </button>
                 <button type="submit" className="px-4 py-2 bg-rose-600 text-white rounded-lg font-medium">
                   Simpan Pengeluaran Vendor
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showOperationalModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+            <button onClick={() => setShowOperationalModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-4 flex items-center gap-2`}>
+              <Building2 className="w-5 h-5 text-amber-500" /> Catat Biaya Operasional Kantor
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>
+              Khusus buat pengeluaran yang bukan biaya trip/vendor — misalnya sewa kantor, gaji staff, listrik, ATK, dll.
+            </p>
+
+            <form onSubmit={handleOperationalSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1 font-medium">Kategori Biaya</label>
+                  <select
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={operationalForm.category}
+                    onChange={e => setOperationalForm({ ...operationalForm, category: e.target.value })}
+                  >
+                    {OPERATIONAL_CATEGORIES.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Nominal (Rp)</label>
+                  <input
+                    type="number" required placeholder="2500000"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={operationalForm.amount}
+                    onChange={e => setOperationalForm({ ...operationalForm, amount: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Keterangan Catatan</label>
+                <input
+                  type="text" placeholder="Contoh: Sewa kantor bulan Agustus 2026"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={operationalForm.notes}
+                  onChange={e => setOperationalForm({ ...operationalForm, notes: e.target.value })}
+                />
+              </div>
+
+              <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowOperationalModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium">
+                  Simpan Biaya Operasional
                 </button>
               </div>
             </form>
