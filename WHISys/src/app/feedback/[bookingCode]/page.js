@@ -1,17 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc } from 'firebase/firestore';
-import { Star, Send, CheckCircle2, Plane, ExternalLink, Copy, Check } from 'lucide-react';
+import { collection, addDoc, query, where, getDocs, limit } from 'firebase/firestore';
+import { Star, Send, CheckCircle2, Plane, ExternalLink, Copy, Check, AlertTriangle, Loader2 } from 'lucide-react';
 
 const GOOGLE_REVIEW_LINK = 'https://www.google.com/maps/place/Wisata+Halal+Indonesia/@-6.3127371,106.767536,17z/data=!3m1!4b1!4m6!3m5!1s0x2e69ef800cfab2df:0x6c9f79f91ef9de17!8m2!3d-6.3127424!4d106.7701109!16s%2Fg%2F11v0qsvbxm?hl=en-GB&entry=ttu';
 
-export default function PublicFeedbackPage({ params, searchParams }) {
+export default function PublicFeedbackPage({ params }) {
   const bookingCode = params?.bookingCode || '';
-  const jamaahName = searchParams?.j || '';
-  const packageName = searchParams?.p || '';
-  const packageId = searchParams?.pid || '';
+
+  // Verifikasi kode booking ke database — jangan pernah percaya nama/paket dari
+  // parameter URL, karena itu bisa diubah bebas oleh siapapun di address bar.
+  const [checkingBooking, setCheckingBooking] = useState(true);
+  const [verifiedBooking, setVerifiedBooking] = useState(null); // { jamaahName, packageName, packageId }
+  const [bookingNotFound, setBookingNotFound] = useState(false);
+
+  const jamaahName = verifiedBooking?.jamaahName || '';
+  const packageName = verifiedBooking?.packageName || '';
+  const packageId = verifiedBooking?.packageId || '';
 
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
@@ -21,6 +28,36 @@ export default function PublicFeedbackPage({ params, searchParams }) {
   const [submittedRating, setSubmittedRating] = useState(0);
   const [submittedComment, setSubmittedComment] = useState('');
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const verifyBooking = async () => {
+      if (!bookingCode) {
+        setBookingNotFound(true);
+        setCheckingBooking(false);
+        return;
+      }
+      try {
+        const q = query(collection(db, 'bookings'), where('bookingCode', '==', bookingCode), limit(1));
+        const snap = await getDocs(q);
+        if (snap.empty) {
+          setBookingNotFound(true);
+        } else {
+          const bk = snap.docs[0].data();
+          setVerifiedBooking({
+            jamaahName: bk.jamaahName || '',
+            packageName: bk.packageName || '',
+            packageId: bk.packageId || ''
+          });
+        }
+      } catch (err) {
+        console.error('Gagal verifikasi kode booking:', err);
+        setBookingNotFound(true);
+      }
+      setCheckingBooking(false);
+    };
+
+    verifyBooking();
+  }, [bookingCode]);
 
   const buildAutoReviewText = () => {
     const place = packageName ? ` di program ${packageName}` : '';
@@ -39,6 +76,7 @@ export default function PublicFeedbackPage({ params, searchParams }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!verifiedBooking) return; // jaga-jaga — tombol submit harusnya sudah nggak muncul kalau booking belum terverifikasi
     setSubmitting(true);
     setError('');
     try {
@@ -81,25 +119,42 @@ export default function PublicFeedbackPage({ params, searchParams }) {
         boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
         padding: '2rem'
       }}>
-        <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-          <div style={{
-            width: '3rem', height: '3rem', backgroundColor: '#059669', borderRadius: '0.75rem',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem'
-          }}>
-            <Plane color="#fff" size={24} />
+        {checkingBooking ? (
+          <div style={{ textAlign: 'center', padding: '2rem 0' }}>
+            <Loader2 color="#64748b" size={32} className="animate-spin" style={{ margin: '0 auto 1rem' }} />
+            <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Memverifikasi kode booking...</p>
           </div>
-          <h1 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#fff', margin: 0 }}>
-            {submitted ? 'Terima Kasih!' : 'Bagaimana Perjalanan Anda?'}
-          </h1>
-          {!submitted && (
-            <p style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: '0.4rem' }}>
-              {jamaahName ? `Halo ${jamaahName}, ` : ''}
-              {packageName ? `ceritakan pengalaman Anda di program ${packageName}` : 'ceritakan pengalaman perjalanan Anda bersama kami'}
+        ) : bookingNotFound ? (
+          <div style={{ textAlign: 'center', padding: '1rem 0' }}>
+            <AlertTriangle color="#f87171" size={40} style={{ margin: '0 auto 1rem' }} />
+            <h1 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#fff', margin: '0 0 0.5rem' }}>
+              Kode Booking Tidak Ditemukan
+            </h1>
+            <p style={{ color: '#94a3b8', fontSize: '0.82rem', lineHeight: 1.6 }}>
+              Link ini nggak cocok dengan data booking manapun di sistem kami. Pastikan Anda membuka link yang dikirim langsung oleh tim Wisata Halal Indonesia, atau hubungi kami kalau merasa ini keliru.
             </p>
-          )}
-        </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+              <div style={{
+                width: '3rem', height: '3rem', backgroundColor: '#059669', borderRadius: '0.75rem',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem'
+              }}>
+                <Plane color="#fff" size={24} />
+              </div>
+              <h1 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#fff', margin: 0 }}>
+                {submitted ? 'Terima Kasih!' : 'Bagaimana Perjalanan Anda?'}
+              </h1>
+              {!submitted && (
+                <p style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: '0.4rem' }}>
+                  {jamaahName ? `Halo ${jamaahName}, ` : ''}
+                  {packageName ? `ceritakan pengalaman Anda di program ${packageName}` : 'ceritakan pengalaman perjalanan Anda bersama kami'}
+                </p>
+              )}
+            </div>
 
-        {submitted ? (
+            {submitted ? (
           <div style={{ textAlign: 'center', padding: '1rem 0' }}>
             <CheckCircle2 color="#10b981" size={48} style={{ margin: '0 auto 1rem' }} />
             <p style={{ color: '#cbd5e1', fontSize: '0.85rem', lineHeight: 1.6 }}>
@@ -223,6 +278,8 @@ export default function PublicFeedbackPage({ params, searchParams }) {
               <Send size={16} /> {submitting ? 'Mengirim...' : 'Kirim Ulasan'}
             </button>
           </form>
+        )}
+          </>
         )}
       </div>
     </div>
