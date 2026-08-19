@@ -30,7 +30,12 @@ const REQUIRED_DOCUMENTS = [
   { key: 'ticket', label: 'Tiket Pesawat (Penerbitan Issued)' }
 ];
 
-export default function BookingsModule({ targetBookingId, theme = 'dark' }) {
+export default function BookingsModule({ targetBookingId, theme = 'dark', userRole = '' }) {
+  // Sinkron sama Firestore Rules: cuma Finance & Super Admin yang boleh edit/hapus
+  // riwayat setoran yang udah tercatat. Semua staf tetap boleh lihat & catat DP baru.
+  const roleLower = (userRole || '').toLowerCase();
+  const canManagePayments = roleLower.includes('super') || roleLower === 'admin' || roleLower === 'finance';
+
   const isDark = theme === 'dark';
 
   const styles = {
@@ -320,6 +325,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   };
 
   const handleDeletePayment = async (payId) => {
+    if (!canManagePayments) {
+      alert("Cuma Finance & Super Admin yang boleh menghapus riwayat pembayaran.");
+      return;
+    }
     if (!confirm("Apakah Anda yakin ingin menghapus catatan pembayaran ini?")) return;
     try {
       await deleteDoc(doc(db, 'payments_income', payId));
@@ -332,6 +341,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   };
 
   const handleSavePaymentEdit = async (payId) => {
+    if (!canManagePayments) {
+      alert("Cuma Finance & Super Admin yang boleh mengedit riwayat pembayaran.");
+      return;
+    }
     try {
       await updateDoc(doc(db, 'payments_income', payId), {
         amount: Number(paymentEditForm.amount),
@@ -1692,7 +1705,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                   ) : (
                     paymentHistory.map(pay => (
                       <tr key={pay.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
-                        {editingPaymentId === pay.id ? (
+                        {editingPaymentId === pay.id && canManagePayments ? (
                           <>
                             <td className="p-2" colSpan="3">
                               <div className="grid grid-cols-3 gap-2">
@@ -1741,18 +1754,24 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                               Rp {Number(pay.amount).toLocaleString('id-ID')}
                             </td>
                             <td className="p-3 text-center">
-                              <button
-                                onClick={() => {
-                                  setEditingPaymentId(pay.id);
-                                  setPaymentEditForm({ amount: pay.amount, paymentMethod: pay.paymentMethod, notes: pay.notes });
-                                }}
-                                className="text-emerald-500 hover:underline mr-2"
-                              >
-                                Edit
-                              </button>
-                              <button onClick={() => handleDeletePayment(pay.id)} className="text-rose-500 hover:underline">
-                                Hapus
-                              </button>
+                              {canManagePayments ? (
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      setEditingPaymentId(pay.id);
+                                      setPaymentEditForm({ amount: pay.amount, paymentMethod: pay.paymentMethod, notes: pay.notes });
+                                    }}
+                                    className="text-emerald-500 hover:underline mr-2"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button onClick={() => handleDeletePayment(pay.id)} className="text-rose-500 hover:underline">
+                                    Hapus
+                                  </button>
+                                </>
+                              ) : (
+                                <span className={styles.textSub}>—</span>
+                              )}
                             </td>
                           </>
                         )}
