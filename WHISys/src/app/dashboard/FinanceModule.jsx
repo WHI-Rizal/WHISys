@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where } from 'firebase/firestore';
-import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2 } from 'lucide-react';
+import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock } from 'lucide-react';
 
 const OPERATIONAL_CATEGORIES = [
   'Sewa Kantor',
@@ -22,6 +22,26 @@ const formatDateDDMMYYYY = (dateString) => {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = date.getFullYear();
   return `${day}/${month}/${year}`;
+};
+
+const todayISODate = () => new Date().toISOString().slice(0, 10);
+
+const MONTH_NAMES_ID = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+];
+
+const getPeriodKey = (dateString) => {
+  if (!dateString) return null;
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return null;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const formatPeriodLabel = (periodKey) => {
+  if (!periodKey || periodKey === 'all') return 'Semua Periode';
+  const [year, month] = periodKey.split('-');
+  return `${MONTH_NAMES_ID[Number(month) - 1]} ${year}`;
 };
 
 export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
@@ -71,8 +91,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const [operationalForm, setOperationalForm] = useState({
     category: OPERATIONAL_CATEGORIES[0],
     amount: '',
-    notes: ''
+    notes: '',
+    expenseDate: todayISODate()
   });
+
+  const [plPeriod, setPlPeriod] = useState('all');
 
   const fetchData = async () => {
     setLoading(true);
@@ -158,6 +181,28 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     }
   };
 
+  const handleToggleRevenueRecognition = async (pkg) => {
+    const isRecognized = !!pkg.revenueRecognized;
+    const confirmMsg = isRecognized
+      ? `Batalkan pengakuan pendapatan untuk paket "${pkg.name}"? Omset & HPP paket ini akan kembali berstatus Diterima/Dibayar Dimuka dan keluar dari Laporan P&L.`
+      : `Akui pendapatan & HPP untuk paket "${pkg.name}" sekarang? Omset dan biaya vendor paket ini akan masuk ke Laporan Laba Rugi periode berjalan.`;
+    if (!confirm(confirmMsg)) return;
+
+    try {
+      const newRecognizedAt = !isRecognized ? new Date().toISOString() : null;
+      await updateDoc(doc(db, 'packages', pkg.id), {
+        revenueRecognized: !isRecognized,
+        recognizedAt: newRecognizedAt
+      });
+      await fetchData();
+      setSelectedPackageForDetail(prev =>
+        prev && prev.id === pkg.id ? { ...prev, revenueRecognized: !isRecognized, recognizedAt: newRecognizedAt } : prev
+      );
+    } catch (err) {
+      alert("Gagal memperbarui status pengakuan pendapatan: " + err.message);
+    }
+  };
+
   const handleIncomeSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -217,11 +262,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         category: operationalForm.category,
         amount: Number(operationalForm.amount),
         notes: operationalForm.notes,
+        expenseDate: operationalForm.expenseDate || todayISODate(),
         createdAt: new Date().toISOString()
       });
 
       setShowOperationalModal(false);
-      setOperationalForm({ category: OPERATIONAL_CATEGORIES[0], amount: '', notes: '' });
+      setOperationalForm({ category: OPERATIONAL_CATEGORIES[0], amount: '', notes: '', expenseDate: todayISODate() });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat biaya operasional: " + err.message);
@@ -232,6 +278,65 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const totalVendorPaid = vendorPayments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const totalOperational = operationalExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const netCashflow = totalIncome - totalVendorPaid - totalOperational;
+
+  // Paket terkait suatu setoran/pembayaran vendor, dipakai buat cek status pengakuan pendapatan.
+  const findPackageForIncome = (tx) => packagesList.find(p => p.name === tx.packageName);
+  const findPackageForVendor = (vp) => {
+    if (!vp.packageId || vp.packageId === 'GLOBAL') return null;
+    return packagesList.find(p => p.id === vp.packageId) || packagesList.find(p => p.name === vp.packageName) || null;
+  };
+
+  // Kalau transaksi nggak nempel ke paket manapun (mis. biaya vendor umum / paket sudah dihapus),
+  // dianggap langsung diakui — nggak ada tombol pengakuan yang bisa diklik buat itu.
+  const isIncomeRecognized = (tx) => {
+    const pkg = findPackageForIncome(tx);
+    return pkg ? !!pkg.revenueRecognized : true;
+  };
+  const isVendorRecognized = (vp) => {
+    const pkg = findPackageForVendor(vp);
+    return pkg ? !!pkg.revenueRecognized : true;
+  };
+
+  const recognizedPeriodForIncome = (tx) => {
+    const pkg = findPackageForIncome(tx);
+    return pkg?.recognizedAt ? getPeriodKey(pkg.recognizedAt) : getPeriodKey(tx.createdAt);
+  };
+  const recognizedPeriodForVendor = (vp) => {
+    const pkg = findPackageForVendor(vp);
+    return pkg?.recognizedAt ? getPeriodKey(pkg.recognizedAt) : getPeriodKey(vp.createdAt);
+  };
+
+  const recognizedTransactions = transactions.filter(isIncomeRecognized);
+  const recognizedVendorPayments = vendorPayments.filter(isVendorRecognized);
+  const unrecognizedTransactions = transactions.filter(tx => !isIncomeRecognized(tx));
+  const unrecognizedVendorPayments = vendorPayments.filter(vp => !isVendorRecognized(vp));
+
+  const totalDeferredRevenue = unrecognizedTransactions.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  const totalPrepaidExpense = unrecognizedVendorPayments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+  const availablePeriods = Array.from(new Set([
+    ...recognizedTransactions.map(recognizedPeriodForIncome),
+    ...recognizedVendorPayments.map(recognizedPeriodForVendor),
+    ...operationalExpenses.map(op => getPeriodKey(op.expenseDate || op.createdAt))
+  ].filter(Boolean))).sort().reverse();
+
+  const incomeInPeriod = plPeriod === 'all'
+    ? recognizedTransactions
+    : recognizedTransactions.filter(tx => recognizedPeriodForIncome(tx) === plPeriod);
+
+  const vendorInPeriod = plPeriod === 'all'
+    ? recognizedVendorPayments
+    : recognizedVendorPayments.filter(vp => recognizedPeriodForVendor(vp) === plPeriod);
+
+  const operationalInPeriod = plPeriod === 'all'
+    ? operationalExpenses
+    : operationalExpenses.filter(op => getPeriodKey(op.expenseDate || op.createdAt) === plPeriod);
+
+  const plOmset = incomeInPeriod.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  const plHpp = vendorInPeriod.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  const plLabaKotor = plOmset - plHpp;
+  const plOpex = operationalInPeriod.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  const plLabaBersih = plLabaKotor - plOpex;
 
   const selectedPkgIncomes = selectedPackageForDetail
     ? transactions.filter(tx => tx.packageName === selectedPackageForDetail.name)
@@ -328,7 +433,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
             activeTab === 'profit_loss' ? `${styles.tabActive} text-amber-500 border` : `${styles.textSub} hover:${styles.textTitle}`
           }`}
         >
-          <TrendingUp className="w-3.5 h-3.5" /> Rekap Laba Rugi per Paket
+          <TrendingUp className="w-3.5 h-3.5" /> Laporan Keuangan (P&L)
         </button>
       </div>
 
@@ -476,7 +581,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                       </td>
                       <td className={`p-4 ${styles.textSub}`}>
                         {op.notes || '-'}
-                        <span className="block text-[10px] text-slate-400">{formatDateDDMMYYYY(op.createdAt)}</span>
+                        <span className="block text-[10px] text-slate-400">{formatDateDDMMYYYY(op.expenseDate || op.createdAt)}</span>
                       </td>
                       <td className="p-4 text-right font-bold text-amber-500">
                         - Rp {Number(op.amount).toLocaleString('id-ID')}
@@ -502,11 +607,76 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       {activeTab === 'profit_loss' && (
         <div className="space-y-4">
           <div className={`${styles.cardBg} border rounded-xl overflow-hidden p-4`}>
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
+              <div>
+                <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2`}>
+                  <TrendingUp className="w-4 h-4 text-amber-500" /> Laporan Laba Rugi (P&L) Perusahaan
+                </h4>
+                <p className={`text-xs ${styles.textSub} mt-1`}>
+                  Omset seluruh jamaah dikurangi HPP vendor dan biaya operasional kantor — {formatPeriodLabel(plPeriod)}.
+                </p>
+              </div>
+              <div>
+                <select
+                  className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
+                  value={plPeriod}
+                  onChange={e => setPlPeriod(e.target.value)}
+                >
+                  <option value="all">Semua Periode</option>
+                  {availablePeriods.map(p => (
+                    <option key={p} value={p}>{formatPeriodLabel(p)}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+              <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                <span className={`text-[10px] ${styles.textSub} uppercase`}>Omset (Pemasukan)</span>
+                <p className="text-sm font-bold text-emerald-500 mt-1">Rp {plOmset.toLocaleString('id-ID')}</p>
+              </div>
+              <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                <span className={`text-[10px] ${styles.textSub} uppercase`}>HPP Vendor</span>
+                <p className="text-sm font-bold text-rose-500 mt-1">Rp {plHpp.toLocaleString('id-ID')}</p>
+              </div>
+              <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                <span className={`text-[10px] ${styles.textSub} uppercase`}>Laba Kotor</span>
+                <p className={`text-sm font-bold mt-1 ${plLabaKotor >= 0 ? 'text-blue-500' : 'text-amber-500'}`}>Rp {plLabaKotor.toLocaleString('id-ID')}</p>
+              </div>
+              <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                <span className={`text-[10px] ${styles.textSub} uppercase`}>Biaya Operasional</span>
+                <p className="text-sm font-bold text-amber-500 mt-1">Rp {plOpex.toLocaleString('id-ID')}</p>
+              </div>
+              <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                <span className={`text-[10px] ${styles.textSub} uppercase`}>Laba Bersih</span>
+                <p className={`text-sm font-bold mt-1 ${plLabaBersih >= 0 ? 'text-blue-500' : 'text-amber-500'}`}>Rp {plLabaBersih.toLocaleString('id-ID')}</p>
+              </div>
+            </div>
+
+            <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded-lg border ${isDark ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50'}`}>
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+                <p className={`text-[11px] ${styles.textSub}`}>
+                  <span className={`font-bold ${styles.textTitle}`}>Pendapatan Diterima Dimuka: Rp {totalDeferredRevenue.toLocaleString('id-ID')}</span><br/>
+                  Setoran jamaah yang paketnya belum diklik "Akui Pendapatan" — belum masuk P&L.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+                <p className={`text-[11px] ${styles.textSub}`}>
+                  <span className={`font-bold ${styles.textTitle}`}>Biaya Dibayar Dimuka: Rp {totalPrepaidExpense.toLocaleString('id-ID')}</span><br/>
+                  Pembayaran vendor yang paketnya belum diklik "Akui Pendapatan" — belum masuk P&L.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className={`${styles.cardBg} border rounded-xl overflow-hidden p-4`}>
             <h4 className={`text-sm font-bold ${styles.textTitle} mb-2 flex items-center gap-2`}>
               <BarChart3 className="w-4 h-4 text-amber-500" /> Analisis Margin Laba Operasional per Program Paket
             </h4>
             <p className={`text-xs ${styles.textSub} mb-4`}>
-              Membandingkan total setoran jamaah yang masuk (Omset Real) terhadap realisasi pembayaran biaya vendor/operasional (HPP).
+              Membandingkan total setoran jamaah yang masuk (Omset Real) terhadap realisasi pembayaran biaya vendor (HPP). Klik <strong>Akui Pendapatan</strong> pada paket yang jasanya sudah terealisasi (mis. jamaah sudah berangkat) biar omset & HPP-nya masuk ke Laporan P&L. Sebelum diklik, nilainya tercatat sebagai Pendapatan/Biaya Dibayar Dimuka.
             </p>
 
             <div className="overflow-x-auto">
@@ -518,13 +688,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                     <th className="p-4 text-right">HPP / Biaya Vendor</th>
                     <th className="p-4 text-right">Laba / Margin Bersih</th>
                     <th className="p-4 text-center">Status Margin</th>
+                    <th className="p-4 text-center">Status Pengakuan</th>
                     <th className="p-4 text-center">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className={`divide-y ${styles.tableRowBorder}`}>
                   {packagesList.length === 0 ? (
                     <tr>
-                      <td colSpan="6" className={`p-8 text-center ${styles.textSub}`}>Belum ada paket perjalanan terdaftar.</td>
+                      <td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada paket perjalanan terdaftar.</td>
                     </tr>
                   ) : (
                     packagesList.map((pkg) => {
@@ -566,6 +737,36 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                             )}
                           </td>
                           <td className="p-4 text-center">
+                            {pkg.revenueRecognized ? (
+                              <div className="flex flex-col items-center gap-1">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full font-bold text-[10px]">
+                                  <CheckCircle2 className="w-3 h-3" /> DIAKUI
+                                </span>
+                                <span className="text-[10px] text-slate-400">{formatDateDDMMYYYY(pkg.recognizedAt)}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleRevenueRecognition(pkg)}
+                                  className="text-[10px] text-slate-400 hover:text-rose-500 inline-flex items-center gap-1 underline"
+                                >
+                                  <RotateCcw className="w-3 h-3" /> Batalkan
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center gap-1">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-500/10 text-slate-400 border border-slate-500/20 rounded-full font-bold text-[10px]">
+                                  <Clock className="w-3 h-3" /> DITERIMA DIMUKA
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleRevenueRecognition(pkg)}
+                                  className="mt-0.5 px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-[10px] font-medium inline-flex items-center gap-1"
+                                >
+                                  <CheckCircle2 className="w-3 h-3" /> Akui Pendapatan
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-4 text-center">
                             <button
                               onClick={() => {
                                 setSelectedPackageForDetail(pkg);
@@ -601,9 +802,39 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
             <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
               <BarChart3 className="w-5 h-5 text-amber-500" /> Breakdown Laba Rugi Program Paket
             </h3>
-            <p className={`text-xs ${styles.textSub} mb-4`}>
+            <p className={`text-xs ${styles.textSub} mb-3`}>
               Paket: <strong className={styles.textTitle}>{selectedPackageForDetail.name}</strong> • Kode: <span className="font-mono text-emerald-500">{selectedPackageForDetail.code}</span>
             </p>
+
+            <div className="mb-4">
+              {selectedPackageForDetail.revenueRecognized ? (
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full font-bold text-[10px]">
+                    <CheckCircle2 className="w-3 h-3" /> PENDAPATAN SUDAH DIAKUI ({formatDateDDMMYYYY(selectedPackageForDetail.recognizedAt)})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleRevenueRecognition(selectedPackageForDetail)}
+                    className="text-[10px] text-slate-400 hover:text-rose-500 inline-flex items-center gap-1 underline"
+                  >
+                    <RotateCcw className="w-3 h-3" /> Batalkan Pengakuan
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-500/10 text-slate-400 border border-slate-500/20 rounded-full font-bold text-[10px]">
+                    <Clock className="w-3 h-3" /> DITERIMA / DIBAYAR DIMUKA — BELUM MASUK P&L
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleRevenueRecognition(selectedPackageForDetail)}
+                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-[10px] font-medium inline-flex items-center gap-1"
+                  >
+                    <CheckCircle2 className="w-3 h-3" /> Akui Pendapatan Sekarang
+                  </button>
+                </div>
+              )}
+            </div>
 
             <div className="grid grid-cols-3 gap-3 mb-6">
               <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
@@ -905,6 +1136,16 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                     onChange={e => setOperationalForm({ ...operationalForm, amount: e.target.value })}
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Tanggal Biaya</label>
+                <input
+                  type="date" required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={operationalForm.expenseDate}
+                  onChange={e => setOperationalForm({ ...operationalForm, expenseDate: e.target.value })}
+                />
               </div>
 
               <div>
