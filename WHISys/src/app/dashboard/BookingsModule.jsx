@@ -1160,7 +1160,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       ? sortedPayments.map((pay, idx) => `
           <tr style="background-color: #f8fafc; font-size: 11px; color: #475569;">
             <td style="padding: 6px 12px; border-bottom: 1px solid #f1f5f9;">
-              • Setoran #${idx + 1} (${formatDateDDMMYYYY(pay.createdAt)}) - <span style="font-style: italic;">${pay.paymentMethod || 'Transfer'} (${pay.notes || 'Setoran'})</span> — a.n. ${pay.jamaahName || '-'}
+              • Setoran #${idx + 1} (${formatDateDDMMYYYY(pay.createdAt)}) - <span style="font-style: italic;">${pay.paymentMethod || 'Transfer'} (${pay.notes || 'Setoran'})</span>
             </td>
             <td style="text-align: right; padding: 6px 12px; font-weight: 600; color: #059669; border-bottom: 1px solid #f1f5f9; white-space: nowrap;">
               + Rp ${Number(pay.amount || 0).toLocaleString('id-ID')}
@@ -1198,7 +1198,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           </div>
           <div class="meta-card">
             <h4>Rincian Pemesanan:</h4>
-            <p>Kode Booking : <strong style="color: #059669; font-family: monospace;">${groupCode}</strong></p>
+            <p>Kode Booking (Rombongan): <strong style="color: #059669; font-family: monospace;">${groupCode}</strong></p>
             <p>Tanggal Terbit: <strong>${new Date().toLocaleDateString('id-ID')}</strong></p>
             <p>Status Setoran: <strong>${isLunas ? 'Lunas' : 'DP Paid / Cicilan'}</strong></p>
           </div>
