@@ -2192,33 +2192,40 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                         {editingPaymentId === pay.id && canManagePayments ? (
                           <>
                             <td className="p-2" colSpan="3">
-                              <div className="grid grid-cols-4 gap-2">
+                              {/* Susunan 3 kolom ini sengaja disamain sama urutan header tabel
+                                  (Tanggal | Metode & Catatan | Nominal) — Metode & Catatan digabung
+                                  jadi 1 sel biar nggak geser posisi kolom Nominal di sebelahnya. */}
+                              <div className="grid grid-cols-3 gap-2">
                                 <input
                                   type="date"
                                   className={`${styles.inputBg} p-1.5 rounded`}
                                   value={paymentEditForm.date}
                                   onChange={e => setPaymentEditForm({ ...paymentEditForm, date: e.target.value })}
                                 />
+                                <div className="flex gap-1">
+                                  <select
+                                    className={`${styles.inputBg} p-1.5 rounded w-1/2`}
+                                    value={paymentEditForm.paymentMethod}
+                                    onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentMethod: e.target.value })}
+                                  >
+                                    <option value="Transfer Bank">Transfer Bank</option>
+                                    <option value="Cash / Tunai">Cash / Tunai</option>
+                                    <option value="EDC / Kartu">EDC / Kartu</option>
+                                  </select>
+                                  <input
+                                    type="text"
+                                    placeholder="Catatan"
+                                    className={`${styles.inputBg} p-1.5 rounded w-1/2`}
+                                    value={paymentEditForm.notes}
+                                    onChange={e => setPaymentEditForm({ ...paymentEditForm, notes: e.target.value })}
+                                  />
+                                </div>
                                 <input
                                   type="number"
+                                  placeholder="Nominal"
                                   className={`${styles.inputBg} p-1.5 rounded`}
                                   value={paymentEditForm.amount}
                                   onChange={e => setPaymentEditForm({ ...paymentEditForm, amount: e.target.value })}
-                                />
-                                <select
-                                  className={`${styles.inputBg} p-1.5 rounded`}
-                                  value={paymentEditForm.paymentMethod}
-                                  onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentMethod: e.target.value })}
-                                >
-                                  <option value="Transfer Bank">Transfer Bank</option>
-                                  <option value="Cash / Tunai">Cash / Tunai</option>
-                                  <option value="EDC / Kartu">EDC / Kartu</option>
-                                </select>
-                                <input
-                                  type="text"
-                                  className={`${styles.inputBg} p-1.5 rounded`}
-                                  value={paymentEditForm.notes}
-                                  onChange={e => setPaymentEditForm({ ...paymentEditForm, notes: e.target.value })}
                                 />
                               </div>
                             </td>
