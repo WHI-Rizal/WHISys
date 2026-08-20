@@ -104,6 +104,26 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
     fetchData();
   }, []);
 
+  // Kode paket sekuensial & rapi, pola sama kayak Kode Unik Customer
+  // (CST000001) di Data Master Jamaah — biar nggak ada risiko tabrakan
+  // kode kayak format lama yang diambil dari 4 digit terakhir timestamp.
+  const getNextPackageCode = () => {
+    let maxNum = 0;
+
+    packagesList.forEach((p) => {
+      if (p.code && p.code.startsWith('PKG-')) {
+        const numPart = parseInt(p.code.replace('PKG-', ''), 10);
+        if (!isNaN(numPart) && numPart > maxNum) {
+          maxNum = numPart;
+        }
+      }
+    });
+
+    const nextNum = maxNum + 1;
+    const padded = String(nextNum).padStart(6, '0');
+    return `PKG-${padded}`;
+  };
+
   const handleOpenAdd = () => {
     if (!canManagePackages) {
       alert("Cuma Super Admin & Operational yang boleh menambah paket.");
@@ -111,7 +131,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
     }
     setEditingPackageId(null);
     setFormData({
-      code: `PK-${Date.now().toString().slice(-4)}`,
+      code: getNextPackageCode(),
       name: '',
       type: 'Umroh Regular',
       departureDate: '',
@@ -620,10 +640,9 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
                 <div>
                   <label className="block mb-1 font-medium">Kode Paket</label>
                   <input
-                    type="text" required
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5 font-mono`}
+                    type="text" readOnly required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5 font-mono font-bold text-emerald-500 opacity-80 cursor-not-allowed`}
                     value={formData.code}
-                    onChange={e => setFormData({ ...formData, code: e.target.value })}
                   />
                 </div>
                 <div>
