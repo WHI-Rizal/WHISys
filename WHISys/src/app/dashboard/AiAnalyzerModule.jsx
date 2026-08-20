@@ -239,13 +239,17 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
         hargaTriple: p.priceTriple,
         hargaDouble: p.priceDouble
       })),
+      // Data minimization: NIK, nomor paspor, dan nomor HP sengaja TIDAK
+      // dikirim ke Gemini API (pihak ketiga) — nomor identitas & kontak
+      // itu nggak dibutuhkan buat jawab pertanyaan bisnis (omset, margin,
+      // occupancy, dsb) dan termasuk data pribadi sensitif menurut UU PDP.
+      // Tanggal expired paspor tetap dikirim (bukan nomornya) karena masih
+      // relevan buat pertanyaan operasional semacam "siapa yang paspornya
+      // mau expired bulan ini".
       jamaahList: jamaah.map(j => ({
         kodeCustomer: j.customerCode,
         nama: j.fullName,
-        nik: j.nik,
-        paspor: j.passportNumber,
-        expiredPaspor: j.passportExpiry,
-        noHp: j.phone
+        expiredPaspor: j.passportExpiry
       })),
       bookingsList: bookings.map(b => ({
         kodeBooking: b.bookingCode,
