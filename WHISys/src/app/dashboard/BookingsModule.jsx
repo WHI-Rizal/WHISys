@@ -115,25 +115,21 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
 
   const [formData, setFormData] = useState({
     packageId: '',
-    jamaahId: '',
     ordererId: '',
+    // Daftar Peserta: array of { jamaahId: '' | '__new__' | <jamaah doc id>, newJamaah: { fullName, phone, nik, passportNumber } }.
+    // Panjang list ini SELALU sama dengan paxCount (Pax 1 nggak lagi field terpisah).
+    pesertaList: [{ jamaahId: '', newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '' } }],
     roomType: 'Quad',
     busGroup: 'Bus 1',
     paxCount: 1,
-    additionalPaxNames: [],
     initialPayment: '',
     paymentMethod: 'Transfer Bank',
     paymentNotes: 'Setoran Pembayaran'
   });
 
-  // State form jamaah baru yang ditambahkan langsung dari modal Booking
-  const [newJamaahForm, setNewJamaahForm] = useState({
-    fullName: '', phone: '', nik: '', passportNumber: ''
-  });
-
   // State form Pemesan (orderer) baru yang ditambahkan langsung dari modal Booking.
   // Pemesan cuma metadata booking (siapa yang mendaftarkan), bukan otomatis ikut
-  // sebagai peserta/jamaah yang berangkat — makanya form-nya dipisah dari newJamaahForm.
+  // sebagai peserta/jamaah yang berangkat — makanya form-nya dipisah dari peserta.
   const [newOrdererForm, setNewOrdererForm] = useState({
     fullName: '', phone: '', nik: '', passportNumber: ''
   });
@@ -405,10 +401,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     }
   };
 
+  // Bikin satu slot kosong Daftar Peserta (dipakai pas nambah pax / buka modal Tambah Booking)
+  const emptyPesertaEntry = () => ({ jamaahId: '', newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '' } });
+
   const handleOpenAddModal = () => {
     setEditingBookingId(null);
-    setFormData({ packageId: '', jamaahId: '', ordererId: '', roomType: 'Quad', busGroup: 'Bus 1', paxCount: 1, additionalPaxNames: [], initialPayment: '', paymentMethod: 'Transfer Bank', paymentNotes: 'DP Pendaftaran' });
-    setNewJamaahForm({ fullName: '', phone: '', nik: '', passportNumber: '' });
+    setFormData({
+      packageId: '', ordererId: '', pesertaList: [emptyPesertaEntry()],
+      roomType: 'Quad', busGroup: 'Bus 1', paxCount: 1,
+      initialPayment: '', paymentMethod: 'Transfer Bank', paymentNotes: 'DP Pendaftaran'
+    });
     setNewOrdererForm({ fullName: '', phone: '', nik: '', passportNumber: '' });
     setShowModal(true);
   };
@@ -421,46 +423,58 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     setEditingBookingId(item.id);
     setFormData({
       packageId: item.packageId || '',
-      jamaahId: item.jamaahId || '',
       // Booking lama belum punya field Pemesan. Kalau ada namanya tapi ID-nya
       // kosong, arahkan ke opsi "Tambah Pemesan Baru" & prefill namanya biar
       // Finance/Admin gampang lengkapi datanya lewat Edit Booking.
       ordererId: item.ordererId || (item.ordererName ? '__new__' : ''),
+      // Edit selalu berkaitan sama 1 booking/pax existing — Daftar Peserta cuma 1
+      // entry, di-preselect ke jamaahId booking ini, tapi tetap bisa diganti.
+      pesertaList: [{ jamaahId: item.jamaahId || '', newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '' } }],
       roomType: item.roomType || 'Quad',
       busGroup: item.busGroup || 'Bus 1',
       paxCount: 1,
-      additionalPaxNames: [],
       initialPayment: '',
       paymentMethod: 'Transfer Bank',
       paymentNotes: 'Setoran Tambahan'
     });
-    setNewJamaahForm({ fullName: '', phone: '', nik: '', passportNumber: '' });
     setNewOrdererForm({ fullName: item.ordererName || '', phone: '', nik: '', passportNumber: '' });
     setShowModal(true);
   };
 
-  // Sesuaikan panjang array nama pax tambahan saat Jumlah Pax berubah
+  // Sesuaikan panjang Daftar Peserta saat Jumlah Pax berubah: nambah -> tambah
+  // slot kosong di akhir, ngurangin -> potong dari akhir, minimal tetap 1.
   const handlePaxCountChange = (value) => {
     const count = Math.max(1, Math.min(20, Number(value) || 1));
     setFormData(prev => {
-      const needed = count - 1;
-      const currentNames = prev.additionalPaxNames || [];
-      const newNames = Array.from({ length: needed }, (_, i) => currentNames[i] || '');
-      return { ...prev, paxCount: count, additionalPaxNames: newNames };
+      const currentList = prev.pesertaList || [];
+      let newList;
+      if (count > currentList.length) {
+        const additions = Array.from({ length: count - currentList.length }, () => emptyPesertaEntry());
+        newList = [...currentList, ...additions];
+      } else {
+        newList = currentList.slice(0, Math.max(1, count));
+      }
+      return { ...prev, paxCount: count, pesertaList: newList };
     });
   };
 
-  const handleAdditionalPaxNameChange = (idx, value) => {
+  // Ganti pilihan jamaah (existing / __new__) utk satu slot Daftar Peserta
+  const handlePesertaJamaahIdChange = (idx, value) => {
     setFormData(prev => {
-      const updated = [...prev.additionalPaxNames];
-      updated[idx] = value;
-      return { ...prev, additionalPaxNames: updated };
+      const updated = [...prev.pesertaList];
+      updated[idx] = { ...updated[idx], jamaahId: value };
+      return { ...prev, pesertaList: updated };
     });
   };
 
-  // Cari jamaah existing berdasarkan nama (case-insensitive), buat menghindari duplikat data master
-  const findJamaahByName = (name, list) =>
-    list.find(j => j.fullName && j.fullName.trim().toLowerCase() === name.trim().toLowerCase());
+  // Ganti isian form "Tambah Jamaah Baru" utk satu slot Daftar Peserta
+  const handlePesertaNewJamaahChange = (idx, field, value) => {
+    setFormData(prev => {
+      const updated = [...prev.pesertaList];
+      updated[idx] = { ...updated[idx], newJamaah: { ...updated[idx].newJamaah, [field]: value } };
+      return { ...prev, pesertaList: updated };
+    });
+  };
 
   // Generate kode customer baru mengikuti pola CSTxxxxxx (sama seperti di Data Master Jamaah)
   const generateNextCustomerCode = (existingList) => {
@@ -973,55 +987,42 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.packageId || !formData.jamaahId) {
-      alert("Pilih Paket Travel dan Jamaah.");
+    if (!formData.packageId) {
+      alert("Pilih Paket Travel.");
       return;
     }
     if (!formData.ordererId) {
       alert("Pilih atau isi data Pemesan (yang melakukan pemesanan).");
       return;
     }
-    if (formData.jamaahId === '__new__' && !newJamaahForm.fullName.trim()) {
-      alert("Isi nama lengkap jamaah baru terlebih dahulu.");
-      return;
-    }
     if (formData.ordererId === '__new__' && !newOrdererForm.fullName.trim()) {
       alert("Isi nama lengkap pemesan baru terlebih dahulu.");
       return;
     }
+    const pesertaEntries = formData.pesertaList || [];
+    if (pesertaEntries.length === 0) {
+      alert("Tambahkan minimal 1 peserta.");
+      return;
+    }
+    for (let i = 0; i < pesertaEntries.length; i++) {
+      const entry = pesertaEntries[i];
+      if (!entry.jamaahId) {
+        alert(`Pilih atau isi data Peserta ${i + 1}.`);
+        return;
+      }
+      if (entry.jamaahId === '__new__' && !(entry.newJamaah?.fullName || '').trim()) {
+        alert(`Isi nama lengkap Peserta ${i + 1} (Jamaah Baru) terlebih dahulu.`);
+        return;
+      }
+    }
 
     try {
       const selectedPkg = packagesList.find(p => p.id === formData.packageId);
-      let selectedJamaah = jamaahList.find(j => j.id === formData.jamaahId);
 
       // Salinan kerja data jamaah — dipakai buat generate kode customer baru
-      // (baik utk jamaah/peserta maupun Pemesan) tanpa tabrakan kode kalau
-      // dua-duanya sama-sama "Tambah Baru" dalam satu submit yang sama.
+      // (utk Pemesan maupun tiap entry Daftar Peserta) tanpa tabrakan kode
+      // kalau lebih dari satu sama-sama "Tambah Baru" dalam satu submit yang sama.
       let workingJamaahList = [...jamaahList];
-
-      // Kalau CS pilih "Tambah Jamaah Baru", buat dulu data jamaahnya di sini
-      if (formData.jamaahId === '__new__') {
-        const newCode = generateNextCustomerCode(workingJamaahList);
-        const newJamaahRef = await addDoc(collection(db, 'jamaah'), {
-          customerCode: newCode,
-          fullName: newJamaahForm.fullName.trim(),
-          nik: newJamaahForm.nik || '',
-          gender: 'L',
-          phone: newJamaahForm.phone || '',
-          passportNumber: newJamaahForm.passportNumber || '',
-          passportExpiry: '',
-          address: '',
-          createdAt: new Date().toISOString()
-        });
-        selectedJamaah = {
-          id: newJamaahRef.id,
-          customerCode: newCode,
-          fullName: newJamaahForm.fullName.trim(),
-          phone: newJamaahForm.phone || '',
-          passportNumber: newJamaahForm.passportNumber || ''
-        };
-        workingJamaahList = [...workingJamaahList, selectedJamaah];
-      }
 
       // Resolusi data Pemesan (orderer) — independen dari peserta/jamaah yang
       // berangkat. Pemesan cuma metadata pada booking (siapa yang melakukan
@@ -1052,6 +1053,48 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       }
       const ordererId = selectedOrderer?.id || null;
       const ordererName = selectedOrderer?.fullName || '';
+
+      // Resolusi tiap entry Daftar Peserta — pola sama persis dengan Pemesan:
+      // pilih jamaah existing, atau bikin baru kalau "__new__". Nggak ada lagi
+      // fuzzy name-matching (findJamaahByName) — tiap peserta eksplisit dipilih
+      // dari Data Master Jamaah, atau eksplisit dibuatkan data barunya.
+      const paxList = [];
+      for (const entry of pesertaEntries) {
+        if (entry.jamaahId === '__new__') {
+          const newCode = generateNextCustomerCode(workingJamaahList);
+          const newJamaahRef = await addDoc(collection(db, 'jamaah'), {
+            customerCode: newCode,
+            fullName: entry.newJamaah.fullName.trim(),
+            nik: entry.newJamaah.nik || '',
+            gender: 'L',
+            phone: entry.newJamaah.phone || '',
+            passportNumber: entry.newJamaah.passportNumber || '',
+            passportExpiry: '',
+            address: '',
+            createdAt: new Date().toISOString()
+          });
+          const newJamaahData = {
+            id: newJamaahRef.id,
+            customerCode: newCode,
+            fullName: entry.newJamaah.fullName.trim(),
+            phone: entry.newJamaah.phone || '',
+            passportNumber: entry.newJamaah.passportNumber || ''
+          };
+          workingJamaahList = [...workingJamaahList, newJamaahData];
+          paxList.push({ jamaahId: newJamaahData.id, jamaahName: newJamaahData.fullName, passportNumber: newJamaahData.passportNumber || '-' });
+        } else {
+          const existing = workingJamaahList.find(j => j.id === entry.jamaahId);
+          if (!existing) {
+            throw new Error('Data jamaah peserta tidak ditemukan. Silakan pilih ulang.');
+          }
+          paxList.push({ jamaahId: existing.id, jamaahName: existing.fullName, passportNumber: existing.passportNumber || '-' });
+        }
+      }
+
+      // Pax pertama di Daftar Peserta dipakai sebagai "selectedJamaah" utk alur
+      // edit & registrasi 1 pax (perilaku sama seperti field "Pilih Jamaah" lama).
+      const primaryPax = paxList[0];
+      const selectedJamaah = { id: primaryPax.jamaahId, fullName: primaryPax.jamaahName, passportNumber: primaryPax.passportNumber };
 
       let price = Number(selectedPkg.priceQuad || selectedPkg.priceMain || 0);
       if (formData.roomType === 'Triple') price = Number(selectedPkg.priceTriple || price);
@@ -1104,7 +1147,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         await syncBookingTotalPaid(editingBookingId, price);
 
       } else {
-        const paxCount = Math.max(1, Number(formData.paxCount) || 1);
+        // paxCount diambil dari paxList yang sudah diresolusi di atas (Daftar
+        // Peserta) — bukan dari formData.paxCount lagi, biar selalu akurat
+        // sesuai jumlah entry peserta yang benar-benar berhasil diresolusi.
+        const paxCount = paxList.length;
 
         if (Number(selectedPkg.quotaRemaining || 0) < paxCount) {
           alert(`Kuota paket ini tidak cukup. Sisa seat: ${selectedPkg.quotaRemaining || 0}, dibutuhkan: ${paxCount}.`);
@@ -1158,43 +1204,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
         } else {
           // ===== REGISTRASI GROUP / MULTI-PAX (jadi 1 manifest, kode grup sama) =====
-          const additionalNames = (formData.additionalPaxNames || []).map(n => n.trim());
-          if (additionalNames.some(n => !n)) {
-            alert(`Lengkapi nama semua tamu tambahan (${paxCount - 1} nama dibutuhkan).`);
-            return;
-          }
-
+          // paxList udah lengkap & final dari hasil resolusi Daftar Peserta di
+          // atas (semua entry, termasuk Pax 1) — nggak perlu disusun ulang di sini.
           const groupBookingCode = `GRP-${Date.now().toString().slice(-6)}`;
-
-          // Susun daftar pax: pax pertama = jamaah utama yang dipilih, sisanya dari nama tambahan
-          const paxList = [{ jamaahId: selectedJamaah.id, jamaahName: selectedJamaah.fullName, passportNumber: selectedJamaah.passportNumber || '-' }];
-
-          // Catatan: workingJamaahList dipakai ulang dari deklarasi di atas (bukan
-          // dideklarasikan ulang) — biar generate kode customer baru buat tamu
-          // tambahan di sini nggak tabrakan sama kode yang baru dibuat utk
-          // jamaah utama/Pemesan yang juga "Tambah Baru" di submit yang sama.
-          for (const name of additionalNames) {
-            const existing = findJamaahByName(name, workingJamaahList);
-            if (existing) {
-              paxList.push({ jamaahId: existing.id, jamaahName: existing.fullName, passportNumber: existing.passportNumber || '-' });
-            } else {
-              const newCode = generateNextCustomerCode(workingJamaahList);
-              const newJamaahRef = await addDoc(collection(db, 'jamaah'), {
-                customerCode: newCode,
-                fullName: name,
-                gender: 'L',
-                nik: '',
-                phone: '',
-                passportNumber: '',
-                passportExpiry: '',
-                address: '',
-                createdAt: new Date().toISOString()
-              });
-              const newJamaahData = { id: newJamaahRef.id, customerCode: newCode, fullName: name };
-              workingJamaahList = [...workingJamaahList, newJamaahData];
-              paxList.push({ jamaahId: newJamaahRef.id, jamaahName: name, passportNumber: '-' });
-            }
-          }
 
           // Bagi rata setoran awal ke semua pax (sisa pembagian masuk ke pax pertama)
           const baseShare = Math.floor(paymentVal / paxCount);
@@ -1761,7 +1773,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
               {/* PEMESAN (ORDERER) — siapa yang melakukan pemesanan, belum tentu ikut
                   berangkat. Integrasi ke Data Master Jamaah, pola UX-nya sama persis
-                  dengan "Pilih Jamaah" (peserta) di bawah: pilih existing atau Tambah Baru. */}
+                  dengan Daftar Peserta di bawah: pilih existing atau Tambah Baru. */}
               <div>
                 <label className="block mb-1 font-medium">Pemesan (Yang Melakukan Pemesanan)</label>
                 <select
@@ -1820,64 +1832,6 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 </div>
               )}
 
-              <div>
-                <label className="block mb-1 font-medium">Pilih Jamaah</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={formData.jamaahId}
-                  onChange={e => setFormData({ ...formData, jamaahId: e.target.value })}
-                >
-                  <option value="">-- Pilih Data Master Jamaah --</option>
-                  <option value="__new__">➕ Tambah Jamaah Baru (Belum Terdaftar)</option>
-                  {jamaahList.map(j => (
-                    <option key={j.id} value={j.id}>
-                      {j.fullName} - {j.customerCode || 'CST'} - Paspor: {j.passportNumber || 'Belum Ada'}
-                    </option>
-                  ))}
-                </select>
-                {formData.paxCount > 1 && (
-                  <p className="text-[10px] mt-1 opacity-70">Jamaah di atas jadi Pax 1 / penanggung jawab rombongan.</p>
-                )}
-              </div>
-
-              {formData.jamaahId === '__new__' && (
-                <div className={`${styles.innerBg} p-3 rounded-xl border space-y-2.5`}>
-                  <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">Data Jamaah Baru</p>
-                  <input
-                    type="text" required
-                    placeholder="Nama Lengkap (wajib)"
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    value={newJamaahForm.fullName}
-                    onChange={e => setNewJamaahForm({ ...newJamaahForm, fullName: e.target.value })}
-                  />
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <input
-                      type="text"
-                      placeholder="No. HP / WhatsApp"
-                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                      value={newJamaahForm.phone}
-                      onChange={e => setNewJamaahForm({ ...newJamaahForm, phone: e.target.value })}
-                    />
-                    <input
-                      type="text"
-                      placeholder="NIK"
-                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                      value={newJamaahForm.nik}
-                      onChange={e => setNewJamaahForm({ ...newJamaahForm, nik: e.target.value })}
-                    />
-                  </div>
-                  <input
-                    type="text"
-                    placeholder="No. Paspor (opsional)"
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    value={newJamaahForm.passportNumber}
-                    onChange={e => setNewJamaahForm({ ...newJamaahForm, passportNumber: e.target.value })}
-                  />
-                  <p className="text-[10px] opacity-70">Data lengkap lainnya (KTP, alamat, dll) bisa dilengkapi belakangan di menu Data Master Jamaah.</p>
-                </div>
-              )}
-
               {!editingBookingId && (
                 <div>
                   <label className="block mb-1 font-medium">Jumlah Pax</label>
@@ -1891,28 +1845,73 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 </div>
               )}
 
-              {!editingBookingId && formData.paxCount > 1 && (
-                <div className={`${styles.innerBg} p-3 rounded-xl border space-y-2.5`}>
-                  <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">
-                    Nama Tamu Tambahan ({formData.paxCount - 1} orang)
-                  </p>
-                  {formData.additionalPaxNames.map((name, idx) => (
-                    <input
-                      key={idx}
-                      type="text" required
-                      list="jamaah-name-suggestions"
-                      placeholder={`Nama lengkap Pax ${idx + 2}`}
+              {/* DAFTAR PESERTA — tiap slot pakai pola select + quick-add persis
+                  seperti Pemesan di atas: pilih jamaah existing dari Data Master
+                  Jamaah, atau "Tambah Jamaah Baru". Peserta = orang yang beneran
+                  berangkat & masuk manifest/dokumen — independen dari Pemesan.
+                  Panjang list ini selalu = Jumlah Pax (Pax 1 bukan field terpisah lagi). */}
+              <div className="space-y-3">
+                <label className="block font-medium">
+                  Daftar Peserta {formData.pesertaList.length > 1 ? `(${formData.pesertaList.length} orang)` : ''}
+                </label>
+                {formData.pesertaList.map((entry, idx) => (
+                  <div key={idx} className={`${styles.innerBg} p-3 rounded-xl border space-y-2.5`}>
+                    <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">
+                      Peserta {idx + 1}{idx === 0 && formData.pesertaList.length > 1 ? ' (Penanggung Jawab Rombongan)' : ''}
+                    </p>
+                    <select
+                      required
                       className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                      value={name}
-                      onChange={e => handleAdditionalPaxNameChange(idx, e.target.value)}
-                    />
-                  ))}
-                  <datalist id="jamaah-name-suggestions">
-                    {jamaahList.map(j => <option key={j.id} value={j.fullName} />)}
-                  </datalist>
-                  <p className="text-[10px] opacity-70">Ketik nama yang sudah ada di Data Master Jamaah biar otomatis kepakai datanya, atau ketik nama baru — nanti otomatis dibuatkan data jamaah barunya.</p>
-                </div>
-              )}
+                      value={entry.jamaahId}
+                      onChange={e => handlePesertaJamaahIdChange(idx, e.target.value)}
+                    >
+                      <option value="">-- Pilih Data Master Jamaah --</option>
+                      <option value="__new__">➕ Tambah Jamaah Baru (Belum Terdaftar)</option>
+                      {jamaahList.map(j => (
+                        <option key={j.id} value={j.id}>
+                          {j.fullName} - {j.customerCode || 'CST'} - Paspor: {j.passportNumber || 'Belum Ada'}
+                        </option>
+                      ))}
+                    </select>
+
+                    {entry.jamaahId === '__new__' && (
+                      <div className="space-y-2.5">
+                        <input
+                          type="text" required
+                          placeholder="Nama Lengkap (wajib)"
+                          className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                          value={entry.newJamaah.fullName}
+                          onChange={e => handlePesertaNewJamaahChange(idx, 'fullName', e.target.value)}
+                        />
+                        <div className="grid grid-cols-2 gap-2.5">
+                          <input
+                            type="text"
+                            placeholder="No. HP / WhatsApp"
+                            className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                            value={entry.newJamaah.phone}
+                            onChange={e => handlePesertaNewJamaahChange(idx, 'phone', e.target.value)}
+                          />
+                          <input
+                            type="text"
+                            placeholder="NIK"
+                            className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                            value={entry.newJamaah.nik}
+                            onChange={e => handlePesertaNewJamaahChange(idx, 'nik', e.target.value)}
+                          />
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="No. Paspor (opsional)"
+                          className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                          value={entry.newJamaah.passportNumber}
+                          onChange={e => handlePesertaNewJamaahChange(idx, 'passportNumber', e.target.value)}
+                        />
+                        <p className="text-[10px] opacity-70">Data lengkap lainnya (KTP, alamat, dll) bisa dilengkapi belakangan di menu Data Master Jamaah.</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
