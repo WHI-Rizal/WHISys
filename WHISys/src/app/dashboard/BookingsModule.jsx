@@ -965,7 +965,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           </div>
           <div class="meta-card">
             <h4>Rincian Dokumen:</h4>
-            <p>Kode Booking: <strong style="color: #059669; font-family: monospace;">${booking.bookingCode}</strong></p>
+            <p>Kode Booking: <strong style="color: #059669; font-family: monospace;">${booking.groupBookingCode || booking.bookingCode}</strong></p>
             <p>Tanggal Terbit: <strong>${new Date().toLocaleDateString('id-ID')}</strong></p>
             <p>Status Setoran: <strong>${booking.paymentStatus || 'DP Paid'}</strong></p>
           </div>
