@@ -124,7 +124,11 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     paxCount: 1,
     initialPayment: '',
     paymentMethod: 'Transfer Bank',
-    paymentNotes: 'Setoran Pembayaran'
+    paymentNotes: 'Setoran Pembayaran',
+    // Tanggal setoran (bisa diubah staff kalau nyatet setoran yg telat
+    // diinput) — default hari ini. Nilai awalnya di-inline (bukan panggil
+    // todayDateStr()) soalnya helper itu dideklarasikan belakangan di bawah.
+    paymentDate: new Date().toISOString().slice(0, 10)
   });
 
   // State form Pemesan (orderer) baru yang ditambahkan langsung dari modal Booking.
@@ -140,7 +144,8 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [paymentEditForm, setPaymentEditForm] = useState({
     amount: '',
     paymentMethod: 'Transfer Bank',
-    notes: ''
+    notes: '',
+    date: ''
   });
 
   // State Filter Tampilan (Aktif / Semua / Dibatalkan / Reschedule)
@@ -172,7 +177,10 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [groupPaymentForm, setGroupPaymentForm] = useState({
     amount: '',
     paymentMethod: 'Transfer Bank',
-    notes: 'Setoran Tambahan'
+    notes: 'Setoran Tambahan',
+    // Sama kayak formData.paymentDate — nilai awalnya di-inline (bukan
+    // panggil todayDateStr()) soalnya helper itu dideklarasikan belakangan.
+    date: new Date().toISOString().slice(0, 10)
   });
 
   // State Modal Rooming List
@@ -309,6 +317,23 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(message)}`, '_blank');
   };
 
+  // Tanggal hari ini dlm format yyyy-mm-dd, dipakai sebagai default value
+  // field input tanggal setoran (type="date") di berbagai form pembayaran.
+  const todayDateStr = () => new Date().toISOString().slice(0, 10);
+
+  // Gabungin tanggal yang dipilih staff (dari field <input type="date">) sama
+  // jam-menit-detik SEKARANG, jadi field createdAt di payments_income tetap
+  // bisa diurutkan kronologis dgn wajar meski tanggalnya di-set mundur/maju
+  // (misal nyatet setoran yg baru ketauan/telat diinput). Kalau field
+  // tanggalnya kosong/invalid, fallback ke waktu sekarang penuh.
+  const resolvePaymentCreatedAt = (dateStr) => {
+    if (!dateStr) return new Date().toISOString();
+    const now = new Date();
+    const timePart = now.toTimeString().slice(0, 8); // HH:MM:SS
+    const combined = new Date(`${dateStr}T${timePart}`);
+    return isNaN(combined.getTime()) ? now.toISOString() : combined.toISOString();
+  };
+
   const syncBookingTotalPaid = async (bookingId, totalTagihan) => {
     try {
       const q = query(collection(db, 'payments_income'), where('bookingId', '==', bookingId));
@@ -400,7 +425,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       await updateDoc(doc(db, 'payments_income', payId), {
         amount: Number(paymentEditForm.amount),
         paymentMethod: paymentEditForm.paymentMethod,
-        notes: paymentEditForm.notes
+        notes: paymentEditForm.notes,
+        // Kalau field tanggalnya dikosongin, biarin createdAt lama (jangan
+        // dipaksa ke waktu sekarang) — cuma di-update kalau staff emang
+        // sengaja ganti tanggalnya.
+        ...(paymentEditForm.date ? { createdAt: resolvePaymentCreatedAt(paymentEditForm.date) } : {})
       });
 
       setEditingPaymentId(null);
@@ -420,7 +449,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     setFormData({
       packageId: '', ordererId: '', pesertaList: [emptyPesertaEntry()],
       roomType: 'Quad', busGroup: 'Bus 1', paxCount: 1,
-      initialPayment: '', paymentMethod: 'Transfer Bank', paymentNotes: 'DP Pendaftaran'
+      initialPayment: '', paymentMethod: 'Transfer Bank', paymentNotes: 'DP Pendaftaran',
+      paymentDate: todayDateStr()
     });
     setNewOrdererForm({ fullName: '', phone: '', nik: '', passportNumber: '' });
     setShowModal(true);
@@ -446,7 +476,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       paxCount: 1,
       initialPayment: '',
       paymentMethod: 'Transfer Bank',
-      paymentNotes: 'Setoran Tambahan'
+      paymentNotes: 'Setoran Tambahan',
+      paymentDate: todayDateStr()
     });
     setNewOrdererForm({ fullName: item.ordererName || '', phone: '', nik: '', passportNumber: '' });
     setShowModal(true);
@@ -702,7 +733,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       return;
     }
     setGroupPaymentTarget(group);
-    setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', notes: 'Setoran Tambahan' });
+    setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', notes: 'Setoran Tambahan', date: todayDateStr() });
     setShowGroupPaymentModal(true);
   };
 
@@ -749,7 +780,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             amount: paxShare,
             paymentMethod: groupPaymentForm.paymentMethod,
             notes: `${groupPaymentForm.notes} (Grup ${groupPaymentTarget.code})`,
-            createdAt: new Date().toISOString()
+            createdAt: resolvePaymentCreatedAt(groupPaymentForm.date)
           });
         }
 
@@ -760,7 +791,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       }
 
       setShowGroupPaymentModal(false);
-      setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', notes: 'Setoran Tambahan' });
+      setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', notes: 'Setoran Tambahan', date: todayDateStr() });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat setoran grup: " + err.message);
@@ -1224,7 +1255,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             amount: paymentVal,
             paymentMethod: formData.paymentMethod,
             notes: formData.paymentNotes,
-            createdAt: new Date().toISOString()
+            createdAt: resolvePaymentCreatedAt(formData.paymentDate)
           });
         }
 
@@ -1280,7 +1311,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               amount: paymentVal,
               paymentMethod: formData.paymentMethod,
               notes: formData.paymentNotes,
-              createdAt: new Date().toISOString()
+              createdAt: resolvePaymentCreatedAt(formData.paymentDate)
             });
           }
 
@@ -1336,7 +1367,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 amount: paxShare,
                 paymentMethod: formData.paymentMethod,
                 notes: `${formData.paymentNotes} (Grup ${groupBookingCode}, ${paxCount} pax)`,
-                createdAt: new Date().toISOString()
+                createdAt: resolvePaymentCreatedAt(formData.paymentDate)
               });
             }
           }
@@ -2088,6 +2119,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                       </div>
                     </div>
                     <div>
+                      <label className="block mb-1 font-medium">Tanggal Setoran</label>
+                      <input
+                        type="date"
+                        className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                        value={formData.paymentDate}
+                        onChange={e => setFormData({ ...formData, paymentDate: e.target.value })}
+                      />
+                      <p className="text-[10px] mt-1 opacity-70">Ganti tanggalnya kalau setoran ini sebenarnya diterima di hari lain (misal telat diinput ke sistem).</p>
+                    </div>
+                    <div>
                       <label className="block mb-1 font-medium">Catatan Pembayaran</label>
                       <input
                         type="text" placeholder="Catatan setoran..."
@@ -2151,7 +2192,13 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                         {editingPaymentId === pay.id && canManagePayments ? (
                           <>
                             <td className="p-2" colSpan="3">
-                              <div className="grid grid-cols-3 gap-2">
+                              <div className="grid grid-cols-4 gap-2">
+                                <input
+                                  type="date"
+                                  className={`${styles.inputBg} p-1.5 rounded`}
+                                  value={paymentEditForm.date}
+                                  onChange={e => setPaymentEditForm({ ...paymentEditForm, date: e.target.value })}
+                                />
                                 <input
                                   type="number"
                                   className={`${styles.inputBg} p-1.5 rounded`}
@@ -2202,7 +2249,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                                   <button
                                     onClick={() => {
                                       setEditingPaymentId(pay.id);
-                                      setPaymentEditForm({ amount: pay.amount, paymentMethod: pay.paymentMethod, notes: pay.notes });
+                                      setPaymentEditForm({ amount: pay.amount, paymentMethod: pay.paymentMethod, notes: pay.notes, date: (pay.createdAt || '').slice(0, 10) });
                                     }}
                                     className="text-emerald-500 hover:underline mr-2"
                                   >
@@ -2423,6 +2470,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                     <option value="EDC / Kartu">EDC / Kartu</option>
                   </select>
                 </div>
+              </div>
+              <div>
+                <label className="block mb-1 font-medium">Tanggal Setoran</label>
+                <input
+                  type="date"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={groupPaymentForm.date}
+                  onChange={e => setGroupPaymentForm({ ...groupPaymentForm, date: e.target.value })}
+                />
               </div>
               <div>
                 <label className="block mb-1 font-medium">Catatan Pembayaran</label>
