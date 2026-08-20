@@ -1415,27 +1415,27 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   const renderStatusBadge = (item) => {
     if (item.status === 'cancelled') {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-500/10 text-rose-500 border border-rose-500/20 rounded-full font-semibold">
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-500/10 text-rose-500 border border-rose-500/20 rounded-full font-semibold whitespace-nowrap">
           <Ban className="w-3 h-3" /> Dibatalkan
         </span>
       );
     }
     if (item.status === 'rescheduled') {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full font-semibold">
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full font-semibold whitespace-nowrap">
           <RotateCcw className="w-3 h-3" /> Reschedule
         </span>
       );
     }
     if (item.paymentStatus === 'Full Payment') {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-full font-semibold">
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-full font-semibold whitespace-nowrap">
           <CheckCircle className="w-3 h-3" /> Lunas
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-full font-semibold">
+      <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-full font-semibold whitespace-nowrap">
         <Clock className="w-3 h-3" /> DP / Cicilan
       </span>
     );
@@ -1739,7 +1739,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                     onClick={() => setActiveGroupCode(group.code)}
                     className={`${isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'} transition-colors cursor-pointer`}
                   >
-                    <td className="p-4 font-mono text-emerald-500 font-semibold">{group.code}</td>
+                    <td className="p-4 font-mono text-emerald-500 font-semibold whitespace-nowrap">{group.code}</td>
                     <td className={`p-4 ${styles.textTitle}`}>{group.primary.packageName || '-'}</td>
                     <td className={`p-4 ${styles.textTitle}`}>{group.primary.ordererName || '-'}</td>
                     <td className={`p-4 ${styles.textSub}`}>{formatDateDDMMYYYY(group.primary.departureDate)}</td>
