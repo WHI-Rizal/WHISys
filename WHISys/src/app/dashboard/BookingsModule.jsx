@@ -1751,10 +1751,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                       {canManageBookings ? (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleOpenGroupPaymentModal(group); }}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-500 hover:text-white rounded-lg text-[11px] font-medium transition-colors"
+                          className="inline-flex items-center justify-center p-2 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-500 hover:text-white rounded-lg transition-colors"
                           title="Catat Setoran Grup"
                         >
-                          <Wallet className="w-3.5 h-3.5" /> + Bayar
+                          <Wallet className="w-3.5 h-3.5" />
                         </button>
                       ) : (
                         <span className={styles.textSub}>—</span>
