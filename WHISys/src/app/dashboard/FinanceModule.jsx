@@ -353,7 +353,16 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const netCashflow = totalIncome - totalVendorPaid - totalOperational;
 
   // Paket terkait suatu setoran/pembayaran vendor, dipakai buat cek status pengakuan pendapatan.
-  const findPackageForIncome = (tx) => packagesList.find(p => p.name === tx.packageName);
+  // Prioritas cari lewat packageId (akurat, nggak ambigu). packageName cuma
+  // fallback buat setoran lama yang dicatat sebelum field packageId ada —
+  // matching pakai nama rawan salah kalau ada 2 paket dengan nama sama persis.
+  const findPackageForIncome = (tx) => {
+    if (tx.packageId) {
+      const byId = packagesList.find(p => p.id === tx.packageId);
+      if (byId) return byId;
+    }
+    return packagesList.find(p => p.name === tx.packageName) || null;
+  };
   const findPackageForVendor = (vp) => {
     if (!vp.packageId || vp.packageId === 'GLOBAL') return null;
     return packagesList.find(p => p.id === vp.packageId) || packagesList.find(p => p.name === vp.packageName) || null;
@@ -412,11 +421,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const plLabaBersih = plLabaKotor - plOpex;
 
   const selectedPkgIncomes = selectedPackageForDetail
-    ? transactions.filter(tx => tx.packageName === selectedPackageForDetail.name)
+    ? transactions.filter(tx => tx.packageId === selectedPackageForDetail.id || (!tx.packageId && tx.packageName === selectedPackageForDetail.name))
     : [];
 
   const selectedPkgVendorCosts = selectedPackageForDetail
-    ? vendorPayments.filter(vp => vp.packageId === selectedPackageForDetail.id || vp.packageName === selectedPackageForDetail.name)
+    ? vendorPayments.filter(vp => vp.packageId === selectedPackageForDetail.id || (!vp.packageId && vp.packageName === selectedPackageForDetail.name))
     : [];
 
   const totalSelectedPkgIncome = selectedPkgIncomes.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
@@ -430,10 +439,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     return getPeriodKey(pkg.recognizedAt) === plPeriod;
   }).map(pkg => {
     const pkgIncome = transactions
-      .filter(tx => tx.packageName === pkg.name)
+      .filter(tx => tx.packageId === pkg.id || (!tx.packageId && tx.packageName === pkg.name))
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
     const pkgVendorCost = vendorPayments
-      .filter(vp => vp.packageId === pkg.id || vp.packageName === pkg.name)
+      .filter(vp => vp.packageId === pkg.id || (!vp.packageId && vp.packageName === pkg.name))
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
     return { pkg, pkgIncome, pkgVendorCost, profit: pkgIncome - pkgVendorCost };
   });
@@ -943,11 +952,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                   ) : (
                     packagesList.map((pkg) => {
                       const pkgIncome = transactions
-                        .filter(tx => tx.packageName === pkg.name)
+                        .filter(tx => tx.packageId === pkg.id || (!tx.packageId && tx.packageName === pkg.name))
                         .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
 
                       const pkgVendorCost = vendorPayments
-                        .filter(vp => vp.packageId === pkg.id || vp.packageName === pkg.name)
+                        .filter(vp => vp.packageId === pkg.id || (!vp.packageId && vp.packageName === pkg.name))
                         .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
 
                       const profit = pkgIncome - pkgVendorCost;
