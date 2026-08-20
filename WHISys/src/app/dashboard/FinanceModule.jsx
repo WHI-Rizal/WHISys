@@ -284,6 +284,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         bookingId: selectedBooking.id,
         bookingCode: selectedBooking.bookingCode,
         jamaahName: selectedBooking.jamaahName,
+        packageId: selectedBooking.packageId,
         packageName: selectedBooking.packageName,
         amount: amountVal,
         paymentMethod: incomeForm.paymentMethod,
