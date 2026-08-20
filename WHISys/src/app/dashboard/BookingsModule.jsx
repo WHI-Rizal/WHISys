@@ -35,6 +35,73 @@ const formatPercentID = (value) => {
   return `${num.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
 };
 
+// Bungkus 1 baris "transaksi" hasil gabungan sejumlah dokumen payments_income
+// (bisa 1 dokumen doang / beberapa dokumen hasil split ke banyak pax).
+const buildTransactionRow = (docs, isFallbackMerge) => {
+  const totalAmount = docs.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
+  const first = docs[0];
+  const isMerged = docs.length > 1;
+  let notes = first.notes || '';
+  if (isMerged) {
+    notes = `${notes} (Dibagi ke ${docs.length} peserta)`;
+    if (isFallbackMerge) notes += ' (digabung otomatis, estimasi)';
+  }
+  return {
+    key: isMerged ? `merged_${docs.map(d => d.id).join('_')}` : first.id,
+    docs,
+    isMerged,
+    amount: totalAmount,
+    paymentMethod: first.paymentMethod,
+    notes,
+    createdAt: first.createdAt
+  };
+};
+
+// Gabungkan seluruh payments_income yang keambil (lintas semua peserta dalam 1
+// grup) jadi baris TRANSAKSI seperti yang aslinya dialami staff yang nyetor —
+// bukan per-pax hasil split. Dokumen yang share `groupTransactionId` yang sama
+// digabung sebagai 1 transaksi (akurat — field ini ditulis pas app benar-benar
+// nge-split 1 setoran jadi beberapa dokumen). Buat data lama sebelum field ini
+// ada (`groupTransactionId` kosong), dicoba fallback heuristik: dokumen yang
+// metode & catatannya sama PERSIS dan createdAt-nya jatuh di menit yang sama
+// dianggap 1 transaksi juga — tapi ini cuma tebakan (nggak ada bukti pasti),
+// makanya ditandai jelas "(digabung otomatis, estimasi)" di catatannya.
+const buildMergedGroupTransactions = (paymentsFlat) => {
+  const withGtx = paymentsFlat.filter(p => p.groupTransactionId);
+  const withoutGtx = paymentsFlat.filter(p => !p.groupTransactionId);
+
+  const rows = [];
+
+  // 1. Gabungan AKURAT — sama groupTransactionId
+  const gtxMap = {};
+  withGtx.forEach(p => {
+    if (!gtxMap[p.groupTransactionId]) gtxMap[p.groupTransactionId] = [];
+    gtxMap[p.groupTransactionId].push(p);
+  });
+  Object.values(gtxMap).forEach(docs => rows.push(buildTransactionRow(docs, false)));
+
+  // 2. Fallback heuristik buat data lama tanpa groupTransactionId — sama
+  // metode+catatan persis & createdAt di menit yang sama (slice 0,16 dari ISO
+  // string) dianggap 1 transaksi. Kalau cuma ketemu 1 dokumen yang cocok
+  // (nggak ada pasangannya), tetap ditampilkan berdiri sendiri sebagai
+  // transaksi tunggal biasa — nggak dipaksa gabung.
+  const fallbackMap = {};
+  withoutGtx.forEach(p => {
+    const key = `${p.paymentMethod || ''}||${p.notes || ''}||${(p.createdAt || '').slice(0, 16)}`;
+    if (!fallbackMap[key]) fallbackMap[key] = [];
+    fallbackMap[key].push(p);
+  });
+  Object.values(fallbackMap).forEach(docs => {
+    if (docs.length >= 2) {
+      rows.push(buildTransactionRow(docs, true));
+    } else {
+      docs.forEach(p => rows.push(buildTransactionRow([p], false)));
+    }
+  });
+
+  return rows.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+};
+
 // Kapasitas orang per tipe kamar (dipakai untuk Rooming List)
 const ROOM_CAPACITY = { Quad: 4, Triple: 3, Double: 2 };
 
@@ -817,6 +884,13 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       const baseShare = Math.floor(amount / paxCount);
       const remainder = amount - (baseShare * paxCount);
 
+      // Semua dokumen payments_income yang lahir dari 1 kali submit setoran
+      // grup ini ditandai groupTransactionId yang SAMA, biar nanti bisa
+      // digabung balik jadi 1 baris transaksi pas ditampilkan di modal
+      // Riwayat Pembayaran (yang dilihat staff = nominal aslinya, bukan
+      // pecahan per-pax hasil split).
+      const groupTransactionId = `gtx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
       for (let i = 0; i < groupItems.length; i++) {
         const item = groupItems[i];
         const paxShare = baseShare + (i === 0 ? remainder : 0);
@@ -831,7 +905,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             amount: paxShare,
             paymentMethod: groupPaymentForm.paymentMethod,
             notes: `${groupPaymentForm.notes} (Grup ${groupPaymentTarget.code})`,
-            createdAt: resolvePaymentCreatedAt(groupPaymentForm.date)
+            createdAt: resolvePaymentCreatedAt(groupPaymentForm.date),
+            groupTransactionId
           });
         }
 
@@ -856,10 +931,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   // per-peserta itu TETAP ada & TETAP jalan apa adanya, buat kasus cuma 1 orang
   // dalam grup yang perlu ditangani sendirian.
 
-  // ---- 1. Riwayat & Setoran Pembayaran (Grup) ----
-  // Ambil riwayat setoran tiap peserta dalam grup, di-keyed by bookingId — ini
-  // cuma agregator kenyamanan (biar nggak buka Wallet 1-1 per baris), BUKAN
-  // penggabungan data: nominal antar orang tetap kepisah, nggak dijumlah jadi 1.
+  // ---- 1. Riwayat Pembayaran ----
+  // Ambil dulu SEMUA payments_income lintas tiap peserta dalam grup, di-keyed
+  // by bookingId (dipakai jg buat cari booking mana yang perlu disinkronkan
+  // pas edit/hapus). Data mentah ini baru digabung jadi baris TRANSAKSI (bukan
+  // per-pax) pas dirender — lihat buildMergedGroupTransactions di atas.
   const fetchGroupHistoryPayments = async (items) => {
     const entries = await Promise.all(items.map(async (b) => {
       try {
@@ -924,6 +1000,35 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       fetchData();
     } catch (err) {
       alert("Gagal memperbarui pembayaran: " + err.message);
+    }
+  };
+
+  // Hapus 1 baris TRANSAKSI GABUNGAN (hasil split ke beberapa pax sekaligus)
+  // dari modal Riwayat Pembayaran — semua dokumen payments_income yang
+  // digabung jadi baris itu ikut kehapus, terus totalPaid/paymentStatus tiap
+  // booking yang kena dampak disinkronkan ulang. Baris gabungan sengaja nggak
+  // punya opsi Edit (redistribusi ulang totalnya ke N porsi berisiko salah
+  // hitung) — kalau perlu dikoreksi, hapus di sini terus catat ulang lewat "+Bayar".
+  const handleDeleteMergedGroupPayment = async (docs) => {
+    if (!canManagePayments) {
+      alert("Cuma Finance & Super Admin yang boleh menghapus riwayat pembayaran.");
+      return;
+    }
+    if (!confirm(`Apakah Anda yakin ingin menghapus transaksi setoran ini? ${docs.length} catatan pembagian ke peserta akan ikut terhapus.`)) return;
+    try {
+      await Promise.all(docs.map(d => deleteDoc(doc(db, 'payments_income', d.id))));
+
+      // Sinkronkan totalPaid/paymentStatus tiap booking unik yang kena dampak
+      const uniqueBookingIds = [...new Set(docs.map(d => d.bookingId))];
+      await Promise.all(uniqueBookingIds.map(bid => {
+        const bookingItem = groupHistoryItems.find(b => b.id === bid);
+        return bookingItem ? syncBookingTotalPaid(bookingItem.id, bookingItem.totalAmount) : Promise.resolve();
+      }));
+
+      await fetchGroupHistoryPayments(groupHistoryItems);
+      fetchData();
+    } catch (err) {
+      alert("Gagal menghapus transaksi setoran: " + err.message);
     }
   };
 
@@ -1052,6 +1157,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         });
         const baseShare = Math.floor(addAmount / sortedActive.length);
         const remainder = addAmount - (baseShare * sortedActive.length);
+        // Sama kayak handleGroupPaymentSubmit — tandai seluruh dokumen split
+        // dari 1 kali submit setoran ini dgn groupTransactionId yang sama,
+        // biar bisa digabung balik jadi 1 baris di modal Riwayat Pembayaran.
+        const groupTransactionId = `gtx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
         for (let i = 0; i < sortedActive.length; i++) {
           const item = sortedActive[i];
@@ -1066,7 +1175,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               amount: share,
               paymentMethod: groupEditForm.addPaymentMethod,
               notes: `${groupEditForm.addPaymentNotes} (Grup ${groupEditTarget.code})`,
-              createdAt: resolvePaymentCreatedAt(groupEditForm.addPaymentDate)
+              createdAt: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
+              groupTransactionId
             });
           }
         }
@@ -2061,6 +2171,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           // Bagi rata setoran awal ke semua pax (sisa pembagian masuk ke pax pertama)
           const baseShare = Math.floor(paymentVal / paxCount);
           const remainder = paymentVal - (baseShare * paxCount);
+          // Tandai seluruh dokumen payments_income hasil split DP awal grup ini
+          // dgn groupTransactionId yang sama, biar bisa digabung balik jadi 1
+          // baris transaksi pas ditampilkan di modal Riwayat Pembayaran.
+          const groupTransactionId = `gtx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
           for (let i = 0; i < paxList.length; i++) {
             const pax = paxList[i];
@@ -2102,7 +2216,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 amount: paxShare,
                 paymentMethod: formData.paymentMethod,
                 notes: `${formData.paymentNotes} (Grup ${groupBookingCode}, ${paxCount} pax)`,
-                createdAt: resolvePaymentCreatedAt(formData.paymentDate)
+                createdAt: resolvePaymentCreatedAt(formData.paymentDate),
+                groupTransactionId
               });
             }
           }
@@ -2303,14 +2418,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 Aksi per-peserta TETAP ada & TETAP jalan, ini cuma tambahan
                 supaya nangani grup sekaligus nggak perlu buka baris satu-satu. */}
 
-            {/* 1. RIWAYAT & SETORAN PEMBAYARAN (GRUP) — selalu tampil, kayak
-                tombol Riwayat per-peserta yang juga nggak digembok permission. */}
+            {/* 1. RIWAYAT PEMBAYARAN — selalu tampil, kayak tombol Riwayat
+                per-peserta yang juga nggak digembok permission. Nampilin
+                transaksi setoran ASLI (udah digabung balik), bukan pecahan
+                per-pax hasil split. */}
             <button
               onClick={() => handleOpenGroupHistory(activeGroupBookings)}
               className={`flex items-center gap-1.5 px-3 py-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} rounded-lg text-[11px] font-medium transition-colors`}
-              title="Riwayat & Setoran Pembayaran Seluruh Peserta di Grup Ini"
+              title="Riwayat Pembayaran Pemesanan Ini"
             >
-              <History className="w-3.5 h-3.5" /> Riwayat Grup
+              <History className="w-3.5 h-3.5" /> Riwayat Pembayaran
             </button>
 
             {/* 2. EDIT BOOKING (GRUP) */}
@@ -3341,151 +3458,152 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         </div>
       )}
 
-      {/* MODAL RIWAYAT & SETORAN PEMBAYARAN GRUP — aggregator kenyamanan,
-          nampilin riwayat setoran tiap peserta dalam 1 grup sebagai subsection
-          sendiri-sendiri (bukan digabung jadi 1 angka). */}
-      {showGroupHistoryModal && (
+      {/* MODAL RIWAYAT PEMBAYARAN — nampilin TRANSAKSI setoran seperti yang
+          aslinya dialami staff yang nyetor (mis. sekali setor 9 juta buat 3
+          pax = 1 baris "Rp 9.000.000"), bukan pecahan per-pax hasil split yang
+          kesimpen di payments_income. Baris yang beneran gabungan dari
+          beberapa dokumen ditandai "(Dibagi ke N peserta)" di catatannya. */}
+      {showGroupHistoryModal && (() => {
+        const paymentsFlat = Object.values(groupHistoryPayments).flat();
+        const transactions = buildMergedGroupTransactions(paymentsFlat);
+        return (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-3xl p-6 relative max-h-[90vh] overflow-y-auto`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-2xl p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => { setShowGroupHistoryModal(false); setEditingGroupPaymentId(null); }} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
 
             <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
-              <History className="w-5 h-5 text-emerald-500" /> Riwayat Pembayaran Grup
+              <History className="w-5 h-5 text-emerald-500" /> Riwayat Pembayaran
             </h3>
             <p className={`text-xs ${styles.textSub} mb-4`}>
-              {groupHistoryItems.length} peserta • setiap orang punya riwayat setoran sendiri-sendiri (nominalnya nggak digabung).
+              Riwayat transaksi setoran masuk untuk pemesanan ini.
             </p>
 
-            <div className="space-y-4">
-              {groupHistoryItems.length === 0 ? (
-                <p className={`text-xs text-center py-6 ${styles.textSub}`}>Belum ada data peserta di grup ini.</p>
-              ) : (
-                groupHistoryItems.map(item => {
-                  const payments = groupHistoryPayments[item.id] || [];
-                  return (
-                    <div key={item.id} className={`border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg overflow-hidden`}>
-                      <div className={`px-3 py-2 ${styles.innerBg} border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                        <span className={`text-xs font-semibold ${styles.textTitle}`}>{item.jamaahName || '-'}</span>
-                        <span className="block text-[10px] font-mono text-emerald-500">{item.bookingCode}</span>
-                      </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs">
-                          <thead className={`${styles.tableHeaderBg} uppercase`}>
-                            <tr>
-                              <th className="p-2">Tanggal</th>
-                              <th className="p-2">Metode & Catatan</th>
-                              <th className="p-2">Nominal</th>
-                              <th className="p-2 text-center">Aksi</th>
-                            </tr>
-                          </thead>
-                          <tbody className={`divide-y ${styles.tableRowBorder}`}>
-                            {payments.length === 0 ? (
-                              <tr><td colSpan="4" className={`p-3 text-center ${styles.textSub}`}>Belum ada riwayat setoran pembayaran.</td></tr>
-                            ) : (
-                              payments.map(pay => (
-                                <tr key={pay.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
-                                  {editingGroupPaymentId === pay.id && canManagePayments ? (
-                                    <>
-                                      <td className="p-2" colSpan="3">
-                                        <div className="grid grid-cols-3 gap-2">
-                                          <input
-                                            type="date"
-                                            className={`${styles.inputBg} p-1.5 rounded`}
-                                            value={paymentEditForm.date}
-                                            onChange={e => setPaymentEditForm({ ...paymentEditForm, date: e.target.value })}
-                                          />
-                                          <div className="flex gap-1">
-                                            <select
-                                              className={`${styles.inputBg} p-1.5 rounded w-1/2`}
-                                              value={paymentEditForm.paymentMethod}
-                                              onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentMethod: e.target.value })}
-                                            >
-                                              <option value="Transfer Bank">Transfer Bank</option>
-                                              <option value="Cash / Tunai">Cash / Tunai</option>
-                                              <option value="EDC / Kartu">EDC / Kartu</option>
-                                            </select>
-                                            <input
-                                              type="text"
-                                              placeholder="Catatan"
-                                              className={`${styles.inputBg} p-1.5 rounded w-1/2`}
-                                              value={paymentEditForm.notes}
-                                              onChange={e => setPaymentEditForm({ ...paymentEditForm, notes: e.target.value })}
-                                            />
-                                          </div>
-                                          <input
-                                            type="number"
-                                            placeholder="Nominal"
-                                            className={`${styles.inputBg} p-1.5 rounded`}
-                                            value={paymentEditForm.amount}
-                                            onChange={e => setPaymentEditForm({ ...paymentEditForm, amount: e.target.value })}
-                                          />
-                                        </div>
-                                      </td>
-                                      <td className="p-2 text-center">
-                                        <button onClick={() => handleSaveGroupPaymentEdit(pay)} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded mr-1">
-                                          Simpan
-                                        </button>
-                                        <button onClick={() => setEditingGroupPaymentId(null)} className={`px-2 py-1 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-200 text-slate-700'} text-[10px] rounded`}>
-                                          Batal
-                                        </button>
-                                      </td>
-                                    </>
+            <div className={`overflow-x-auto max-h-[60vh] overflow-y-auto mb-4 border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg`}>
+              <table className="w-full text-left text-xs">
+                <thead className={`${styles.tableHeaderBg} uppercase`}>
+                  <tr>
+                    <th className="p-3">Tanggal</th>
+                    <th className="p-3">Metode & Catatan</th>
+                    <th className="p-3">Nominal</th>
+                    <th className="p-3 text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                  {transactions.length === 0 ? (
+                    <tr><td colSpan="4" className={`p-6 text-center ${styles.textSub}`}>Belum ada riwayat setoran pembayaran.</td></tr>
+                  ) : (
+                    transactions.map(tx => {
+                      const singlePay = !tx.isMerged ? tx.docs[0] : null;
+                      const isEditingThis = singlePay && editingGroupPaymentId === singlePay.id;
+                      return (
+                        <tr key={tx.key} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                          {isEditingThis && canManagePayments ? (
+                            <>
+                              <td className="p-2" colSpan="3">
+                                <div className="grid grid-cols-3 gap-2">
+                                  <input
+                                    type="date"
+                                    className={`${styles.inputBg} p-1.5 rounded`}
+                                    value={paymentEditForm.date}
+                                    onChange={e => setPaymentEditForm({ ...paymentEditForm, date: e.target.value })}
+                                  />
+                                  <div className="flex gap-1">
+                                    <select
+                                      className={`${styles.inputBg} p-1.5 rounded w-1/2`}
+                                      value={paymentEditForm.paymentMethod}
+                                      onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentMethod: e.target.value })}
+                                    >
+                                      <option value="Transfer Bank">Transfer Bank</option>
+                                      <option value="Cash / Tunai">Cash / Tunai</option>
+                                      <option value="EDC / Kartu">EDC / Kartu</option>
+                                    </select>
+                                    <input
+                                      type="text"
+                                      placeholder="Catatan"
+                                      className={`${styles.inputBg} p-1.5 rounded w-1/2`}
+                                      value={paymentEditForm.notes}
+                                      onChange={e => setPaymentEditForm({ ...paymentEditForm, notes: e.target.value })}
+                                    />
+                                  </div>
+                                  <input
+                                    type="number"
+                                    placeholder="Nominal"
+                                    className={`${styles.inputBg} p-1.5 rounded`}
+                                    value={paymentEditForm.amount}
+                                    onChange={e => setPaymentEditForm({ ...paymentEditForm, amount: e.target.value })}
+                                  />
+                                </div>
+                              </td>
+                              <td className="p-2 text-center">
+                                <button onClick={() => handleSaveGroupPaymentEdit(singlePay)} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded mr-1">
+                                  Simpan
+                                </button>
+                                <button onClick={() => setEditingGroupPaymentId(null)} className={`px-2 py-1 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-200 text-slate-700'} text-[10px] rounded`}>
+                                  Batal
+                                </button>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className={`p-3 ${styles.textSub}`}>
+                                {formatDateDDMMYYYY(tx.createdAt)}
+                              </td>
+                              <td className="p-3">
+                                <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{tx.paymentMethod}</span>
+                                <span className={styles.textSub}>{tx.notes}</span>
+                              </td>
+                              <td className="p-3 font-bold text-emerald-500">
+                                Rp {Number(tx.amount).toLocaleString('id-ID')}
+                              </td>
+                              <td className="p-3 text-center">
+                                {canManagePayments ? (
+                                  tx.isMerged ? (
+                                    // Transaksi gabungan cuma bisa dihapus (bukan diedit) — redistribusi
+                                    // ulang totalnya ke N porsi peserta berisiko salah hitung.
+                                    <button onClick={() => handleDeleteMergedGroupPayment(tx.docs)} className="text-rose-500 hover:underline">
+                                      Hapus
+                                    </button>
                                   ) : (
                                     <>
-                                      <td className={`p-2 ${styles.textSub}`}>
-                                        {formatDateDDMMYYYY(pay.createdAt)}
-                                      </td>
-                                      <td className="p-2">
-                                        <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{pay.paymentMethod}</span>
-                                        <span className={styles.textSub}>{pay.notes}</span>
-                                      </td>
-                                      <td className="p-2 font-bold text-emerald-500">
-                                        Rp {Number(pay.amount).toLocaleString('id-ID')}
-                                      </td>
-                                      <td className="p-2 text-center">
-                                        {canManagePayments ? (
-                                          <>
-                                            <button
-                                              onClick={() => {
-                                                setEditingGroupPaymentId(pay.id);
-                                                setPaymentEditForm({ amount: pay.amount, paymentMethod: pay.paymentMethod, notes: pay.notes, date: (pay.createdAt || '').slice(0, 10) });
-                                              }}
-                                              className="text-emerald-500 hover:underline mr-2"
-                                            >
-                                              Edit
-                                            </button>
-                                            <button onClick={() => handleDeleteGroupPayment(pay)} className="text-rose-500 hover:underline">
-                                              Hapus
-                                            </button>
-                                          </>
-                                        ) : (
-                                          <span className={styles.textSub}>—</span>
-                                        )}
-                                      </td>
+                                      <button
+                                        onClick={() => {
+                                          setEditingGroupPaymentId(singlePay.id);
+                                          setPaymentEditForm({ amount: singlePay.amount, paymentMethod: singlePay.paymentMethod, notes: singlePay.notes, date: (singlePay.createdAt || '').slice(0, 10) });
+                                        }}
+                                        className="text-emerald-500 hover:underline mr-2"
+                                      >
+                                        Edit
+                                      </button>
+                                      <button onClick={() => handleDeleteGroupPayment(singlePay)} className="text-rose-500 hover:underline">
+                                        Hapus
+                                      </button>
                                     </>
-                                  )}
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
+                                  )
+                                ) : (
+                                  <span className={styles.textSub}>—</span>
+                                )}
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
 
-            <div className={`flex justify-end pt-4 mt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'} text-xs`}>
+            <div className={`flex justify-end pt-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'} text-xs`}>
               <button onClick={() => { setShowGroupHistoryModal(false); setEditingGroupPaymentId(null); }} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                 Tutup
               </button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* MODAL EDIT BOOKING GRUP — cuma field yang emang shared se-grup (Paket,
           Pemesan, Tipe Kamar, Alokasi Bus) + opsional Tambah Setoran. Identitas
