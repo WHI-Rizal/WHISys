@@ -111,11 +111,26 @@ export default function JamaahModule({ theme = 'dark' }) {
 
   const handleDelete = async (id, name) => {
     try {
-      const q = query(collection(db, 'bookings'), where('jamaahId', '==', id));
-      const bookingSnap = await getDocs(q);
+      // Cek dobel: berdasarkan jamaahId (cara normal) DAN berdasarkan nama
+      // (jaga-jaga buat data booking lama yang jamaahId-nya sempat nggak
+      // sinkron — sama kayak logika fallback yang sudah dipakai di modul
+      // Booking buat mencocokkan data jamaah).
+      const qById = query(collection(db, 'bookings'), where('jamaahId', '==', id));
+      const byIdSnap = await getDocs(qById);
 
-      if (!bookingSnap.empty) {
-        alert(`Data jamaah "${name || ''}" tidak dapat dihapus karena masih memiliki ${bookingSnap.size} data booking di sistem.\n\nSilakan hapus/selesaikan dulu booking-nya di menu Booking & Manifest sebelum menghapus data jamaah ini.`);
+      let byNameSnap = { empty: true, size: 0 };
+      if (name) {
+        const qByName = query(collection(db, 'bookings'), where('jamaahName', '==', name));
+        byNameSnap = await getDocs(qByName);
+      }
+
+      const relatedIds = new Set([
+        ...byIdSnap.docs.map(d => d.id),
+        ...byNameSnap.docs.map(d => d.id)
+      ]);
+
+      if (relatedIds.size > 0) {
+        alert(`Data jamaah "${name || ''}" tidak dapat dihapus karena masih memiliki ${relatedIds.size} data booking di sistem.\n\nSilakan hapus/selesaikan dulu booking-nya di menu Booking & Manifest sebelum menghapus data jamaah ini.`);
         return;
       }
 
