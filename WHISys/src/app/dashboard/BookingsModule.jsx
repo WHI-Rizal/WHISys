@@ -1198,7 +1198,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           </div>
           <div class="meta-card">
             <h4>Rincian Pemesanan:</h4>
-            <p>Kode Booking (Rombongan): <strong style="color: #059669; font-family: monospace;">${groupCode}</strong></p>
+            <p>Kode Booking : <strong style="color: #059669; font-family: monospace;">${groupCode}</strong></p>
             <p>Tanggal Terbit: <strong>${new Date().toLocaleDateString('id-ID')}</strong></p>
             <p>Status Setoran: <strong>${isLunas ? 'Lunas' : 'DP Paid / Cicilan'}</strong></p>
           </div>
