@@ -902,18 +902,22 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   // Bangun HTML "kotak invoice" utk SATU booking/pax (dipanggil baik dari cetak
   // 1 invoice doang, maupun dari cetak invoice sekaligus 1 grup — hasilnya
   // digabung jadi beberapa halaman dlm 1 dokumen print).
+  // Variabel Dinamis Profil Perusahaan & Bank — dipakai bareng-bareng oleh
+  // invoice per-pax maupun invoice gabungan 1 grup, biar konsisten.
+  const getCompanyInvoiceVars = () => ({
+    compName: companyInfo?.name || 'PT. WISATA HALAL INTERNASIONAL',
+    compAddress: companyInfo?.address || 'Ruko Graha Cirendeu No.1C Jl. Cirendeu Raya, Tangerang Selatan, Banten, Indonesia, 15445',
+    compPpiu: companyInfo?.ppiuNumber || 'PPIU No. U.123 / 2024',
+    compPhone: companyInfo?.phone || '+62 812-0000-0000',
+    compEmail: companyInfo?.email || 'admin@wisatahalalindonesia.id',
+    bankName: companyInfo?.bankName || 'Bank Syariah Indonesia (BSI)',
+    bankAccount: companyInfo?.bankAccount || '788-9900-112 a.n. PT. Wisata Halal Internasional'
+  });
+
   const buildInvoiceBoxHtml = (booking, payments) => {
     const isLunas = booking.paymentStatus === 'Full Payment';
     const totalAmount = Number(booking.totalAmount) || 0;
-
-    // Variabel Dinamis Profil Perusahaan & Bank
-    const compName = companyInfo?.name || 'PT. WISATA HALAL INTERNASIONAL';
-    const compAddress = companyInfo?.address || 'Ruko Graha Cirendeu No.1C Jl. Cirendeu Raya, Tangerang Selatan, Banten, Indonesia, 15445';
-    const compPpiu = companyInfo?.ppiuNumber || 'PPIU No. U.123 / 2024';
-    const compPhone = companyInfo?.phone || '+62 812-0000-0000';
-    const compEmail = companyInfo?.email || 'admin@wisatahalalindonesia.id';
-    const bankName = companyInfo?.bankName || 'Bank Syariah Indonesia (BSI)';
-    const bankAccount = companyInfo?.bankAccount || '788-9900-112 a.n. PT. Wisata Halal Internasional';
+    const { compName, compAddress, compPpiu, compPhone, compEmail, bankName, bankAccount } = getCompanyInvoiceVars();
 
     const totalPaid = payments.length > 0
       ? payments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
@@ -1122,23 +1126,178 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     printHtmlDocument(docContent);
   };
 
-  // Cetak invoice SEMUA pax dlm 1 grup booking sekaligus — digabung jadi 1
-  // dokumen (1 invoice per halaman, page-break di antaranya) & 1x print
-  // dialog, bukan pax-per-pax kayak sebelumnya. Dipanggil dari tombol Cetak
-  // yang ada di header grup (bukan lagi di baris masing-masing peserta).
+  // Bangun HTML invoice GABUNGAN buat 1 grup booking — beda dari
+  // buildInvoiceBoxHtml (yang per-pax): di sini nominalnya dijumlah jadi 1
+  // (kode booking rombongan, total pax, & total harga keseluruhan pemesanan),
+  // bukan 1 invoice terpisah per peserta. Daftar nama peserta tetap
+  // ditampilkan sebagai rincian, tapi cuma jadi 1 baris tabel per orang di
+  // DALAM 1 invoice yang sama, bukan halaman terpisah-pisah.
+  const buildGroupInvoiceBoxHtml = (items, allPayments) => {
+    const first = items[0];
+    const groupCode = first.groupBookingCode || first.bookingCode;
+    const totalAmount = items.reduce((acc, b) => acc + (Number(b.totalAmount) || 0), 0);
+    const totalPaid = allPayments.length > 0
+      ? allPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
+      : items.reduce((acc, b) => acc + (Number(b.totalPaid) || 0), 0);
+    const sisaTagihan = totalAmount - totalPaid;
+    const isLunas = sisaTagihan <= 0;
+    const { compName, compAddress, compPpiu, compPhone, compEmail, bankName, bankAccount } = getCompanyInvoiceVars();
+
+    const pesertaRowsHtml = items.map((b, idx) => `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${b.jamaahName || '-'}</td>
+        <td>${b.roomType || '-'} / ${b.busGroup || '-'}</td>
+        <td style="text-align: right; white-space: nowrap;">Rp ${Number(b.totalAmount || 0).toLocaleString('id-ID')}</td>
+      </tr>
+    `).join('');
+
+    // Gabungan semua setoran dari SELURUH pax dlm grup ini, diurutkan
+    // kronologis, & ditandai atas nama siapa — biar tetap jelas rinciannya
+    // walau nominalnya udah ditotal jadi 1 invoice.
+    const sortedPayments = [...allPayments].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    const paymentRowsHtml = sortedPayments.length > 0
+      ? sortedPayments.map((pay, idx) => `
+          <tr style="background-color: #f8fafc; font-size: 11px; color: #475569;">
+            <td style="padding: 6px 12px; border-bottom: 1px solid #f1f5f9;">
+              • Setoran #${idx + 1} (${formatDateDDMMYYYY(pay.createdAt)}) - <span style="font-style: italic;">${pay.paymentMethod || 'Transfer'} (${pay.notes || 'Setoran'})</span> — a.n. ${pay.jamaahName || '-'}
+            </td>
+            <td style="text-align: right; padding: 6px 12px; font-weight: 600; color: #059669; border-bottom: 1px solid #f1f5f9; white-space: nowrap;">
+              + Rp ${Number(pay.amount || 0).toLocaleString('id-ID')}
+            </td>
+          </tr>
+        `).join('')
+      : `
+          <tr style="background-color: #f8fafc; font-size: 11px; color: #94a3b8;">
+            <td style="padding: 6px 12px;" colspan="2">• Belum ada catatan setoran masuk</td>
+          </tr>
+        `;
+
+    return `
+      <div class="invoice-box">
+        <div class="kop-header">
+          <div>
+            <h1 class="company-logo-title">${compName}</h1>
+            <p class="company-sub">Penyelenggara Perjalanan Ibadah Umrah, Haji & Wisata Halal • ${compPpiu}</p>
+            <p class="company-address">
+              ${compAddress}<br>
+              Telp/WA: ${compPhone} | Email: ${compEmail}
+            </p>
+          </div>
+          <div>
+            <div class="invoice-type" style="color: ${isLunas ? '#059669' : '#d97706'};">${isLunas ? 'INVOICE' : 'PROFORMA INVOICE'}</div>
+            <div class="badge" style="background-color: ${isLunas ? '#d1fae5' : '#fef3c7'}; color: ${isLunas ? '#065f46' : '#92400e'};">${isLunas ? 'LUNAS / PAID' : 'BELUM LUNAS / UNPAID'}</div>
+          </div>
+        </div>
+
+        <div class="meta-grid">
+          <div class="meta-card">
+            <h4>Ditagihkan Kepada (Pemesan):</h4>
+            <p>Nama Pemesan: <strong>${first.ordererName || '-'}</strong></p>
+            <p>Jumlah Peserta: <strong>${items.length} Pax</strong></p>
+          </div>
+          <div class="meta-card">
+            <h4>Rincian Pemesanan:</h4>
+            <p>Kode Booking (Rombongan): <strong style="color: #059669; font-family: monospace;">${groupCode}</strong></p>
+            <p>Tanggal Terbit: <strong>${new Date().toLocaleDateString('id-ID')}</strong></p>
+            <p>Status Setoran: <strong>${isLunas ? 'Lunas' : 'DP Paid / Cicilan'}</strong></p>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Program Paket Travel</th>
+              <th>Tgl Keberangkatan</th>
+              <th>Jumlah Pax</th>
+              <th style="text-align: right;">Total Harga Pemesanan</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>${first.packageName || '-'}</strong></td>
+              <td>${formatDateDDMMYYYY(first.departureDate)}</td>
+              <td>${items.length} Pax</td>
+              <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <table>
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Nama Peserta</th>
+              <th>Kamar / Bus</th>
+              <th style="text-align: right;">Tagihan Peserta</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pesertaRowsHtml}
+          </tbody>
+        </table>
+
+        <table class="summary-table">
+          <tr class="summary-header-row">
+            <td>Total Harga Keseluruhan Pemesanan:</td>
+            <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
+          </tr>
+          <tr style="background-color: #f1f5f9; border-top: 1px solid #e2e8f0;">
+            <td colspan="2" style="font-weight: bold; font-size: 11px; color: #047857; text-transform: uppercase;">
+              Rincian Setoran Pembayaran Diterima (Seluruh Peserta):
+            </td>
+          </tr>
+          ${paymentRowsHtml}
+          <tr style="border-top: 1px dashed #cbd5e1;">
+            <td style="font-weight: bold;">Total Terbayar:</td>
+            <td style="text-align: right; font-weight: bold; color: #059669; white-space: nowrap;">
+              Rp ${totalPaid.toLocaleString('id-ID')}
+            </td>
+          </tr>
+          <tr class="total-row">
+            <td>Sisa Tagihan / Saldo:</td>
+            <td style="text-align: right; color: ${sisaTagihan > 0 ? '#d97706' : '#059669'}; white-space: nowrap;">
+              Rp ${sisaTagihan.toLocaleString('id-ID')}
+            </td>
+          </tr>
+        </table>
+
+        <div class="footer-section">
+          <div class="bank-info">
+            <h5>Informasi Pembayaran / Transfer:</h5>
+            <div>Silakan lakukan pembayaran melalui rekening resmi perusahaan:</div>
+            <div class="bank-details" style="margin-top: 6px;">
+              Bank: <strong>${bankName}</strong><br>
+              No. Rekening & A.N: <strong>${bankAccount}</strong>
+            </div>
+          </div>
+          <div class="signature-box">
+            <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
+            <div class="signature-space"></div>
+            <p><strong>( ${compName} )</strong></p>
+          </div>
+        </div>
+
+        <div class="footer-note">
+          <p>Terima kasih atas kepercayaan Anda. Dokumen ini sah dan diterbitkan secara otomatis oleh sistem ERP WHISys.</p>
+        </div>
+      </div>
+    `;
+  };
+
+  // Cetak invoice buat 1 grup booking — HASILNYA 1 INVOICE AJA (bukan
+  // per-pax/per-halaman), nominalnya udah ditotal: kode booking rombongan,
+  // total pax, & total harga keseluruhan pemesanan. Dipanggil dari tombol
+  // Cetak di header grup (bukan lagi dari baris masing-masing peserta).
   const handlePrintGroupInvoices = async (items) => {
     if (!items || items.length === 0) return;
     try {
-      const boxes = await Promise.all(items.map(async (booking, idx) => {
-        const payments = await fetchPaymentsForBooking(booking.id);
-        const boxHtml = buildInvoiceBoxHtml(booking, payments);
-        return idx < items.length - 1 ? `<div style="page-break-after: always;">${boxHtml}</div>` : boxHtml;
-      }));
+      const paymentsPerBooking = await Promise.all(items.map(b => fetchPaymentsForBooking(b.id)));
+      const allPayments = paymentsPerBooking.flat();
+      const boxHtml = buildGroupInvoiceBoxHtml(items, allPayments);
       const first = items[0];
-      const title = items.length > 1
-        ? `Invoice Grup - ${first.groupBookingCode || first.bookingCode}`
-        : `Invoice - ${first.bookingCode}`;
-      const docContent = wrapInvoiceDocument(title, boxes.join(''));
+      const title = `Invoice - ${first.groupBookingCode || first.bookingCode}`;
+      const docContent = wrapInvoiceDocument(title, boxHtml);
       printHtmlDocument(docContent);
     } catch (err) {
       alert("Gagal menyiapkan invoice: " + err.message);
