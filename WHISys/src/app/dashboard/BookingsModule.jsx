@@ -1718,12 +1718,12 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 <th className="p-4">Kode</th>
                 <th className="p-4">Paket Wisata</th>
                 <th className="p-4">Pemesan</th>
-                <th className="p-4">Tanggal Berangkat</th>
+                <th className="p-4">Keberangkatan</th>
                 <th className="p-4">Jumlah Pax</th>
                 <th className="p-4">Waktu Transaksi</th>
                 <th className="p-4">Status</th>
                 <th className="p-4">% Bayar</th>
-                <th className="p-4 text-center">Setoran</th>
+                <th className="p-4 text-center">Setor</th>
                 <th className="p-4 text-center">Opsi</th>
               </tr>
             </thead>
