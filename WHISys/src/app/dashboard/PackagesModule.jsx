@@ -376,8 +376,22 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
       };
 
       if (editingPackageId) {
+        // Kalau Kuota Total diubah, sesuaikan Sisa Kuota dengan selisihnya —
+        // supaya jumlah seat yang udah kepake (booking existing) tetap
+        // konsisten, bukan malah ke-reset balik penuh.
+        const originalPkg = packagesList.find(p => p.id === editingPackageId);
+        if (originalPkg) {
+          const oldTotal = Number(originalPkg.quotaTotal || 0);
+          const oldRemaining = Number(originalPkg.quotaRemaining ?? originalPkg.quotaTotal ?? 0);
+          const delta = payload.quotaTotal - oldTotal;
+          payload.quotaRemaining = Math.max(0, oldRemaining + delta);
+        }
         await updateDoc(doc(db, 'packages', editingPackageId), payload);
       } else {
+        // Paket baru: Sisa Kuota harus diisi penuh sama dengan Kuota Total
+        // saat dibuat — kalau nggak, field ini kosong (undefined) dan semua
+        // booking ke paket ini bakal ditolak sistem karena dianggap 0 seat.
+        payload.quotaRemaining = payload.quotaTotal;
         payload.createdAt = new Date().toISOString();
         await addDoc(collection(db, 'packages'), payload);
       }
