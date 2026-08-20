@@ -164,6 +164,17 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     busGroup: 'Bus 1'
   });
 
+  // State Modal Setoran Grup — catat 1 pembayaran buat 1 grup booking sekaligus,
+  // nominalnya dibagi rata ke semua pax dalam grup (sama kayak alur DP awal pas
+  // registrasi grup baru).
+  const [showGroupPaymentModal, setShowGroupPaymentModal] = useState(false);
+  const [groupPaymentTarget, setGroupPaymentTarget] = useState(null);
+  const [groupPaymentForm, setGroupPaymentForm] = useState({
+    amount: '',
+    paymentMethod: 'Transfer Bank',
+    notes: 'Setoran Tambahan'
+  });
+
   // State Modal Rooming List
   const [showRoomingModal, setShowRoomingModal] = useState(false);
   const [roomingPackageId, setRoomingPackageId] = useState('');
@@ -680,6 +691,79 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       fetchData();
     } catch (err) {
       alert("Gagal memproses reschedule: " + err.message);
+    }
+  };
+
+  // ============ SETORAN GRUP (BAYAR SEKALIGUS UTK 1 GRUP BOOKING) ============
+
+  const handleOpenGroupPaymentModal = (group) => {
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh mencatat setoran tambahan lewat sini.");
+      return;
+    }
+    setGroupPaymentTarget(group);
+    setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', notes: 'Setoran Tambahan' });
+    setShowGroupPaymentModal(true);
+  };
+
+  const handleGroupPaymentSubmit = async (e) => {
+    e.preventDefault();
+    if (!groupPaymentTarget) return;
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh mencatat setoran tambahan lewat sini.");
+      return;
+    }
+
+    const amount = Number(groupPaymentForm.amount || 0);
+    if (amount <= 0) {
+      alert("Isi nominal setoran yang valid (lebih dari 0).");
+      return;
+    }
+
+    try {
+      // Urutan pax dalam grup harus sama kayak pas grup ini pertama kali
+      // dibuat (biar sisa pembagian tetap konsisten jatuh ke pax pertama) —
+      // urutkan berdasarkan groupPaxIndex kalau ada, fallback ke urutan array asli.
+      const groupItems = [...groupPaymentTarget.items].sort((a, b) => {
+        if (a.groupPaxIndex != null && b.groupPaxIndex != null) return a.groupPaxIndex - b.groupPaxIndex;
+        return 0;
+      });
+      const paxCount = groupItems.length;
+
+      // Bagi rata nominal setoran ke semua pax (sisa pembagian masuk ke pax pertama)
+      // — pola yang sama persis dengan pembagian DP awal pas registrasi grup baru.
+      const baseShare = Math.floor(amount / paxCount);
+      const remainder = amount - (baseShare * paxCount);
+
+      for (let i = 0; i < groupItems.length; i++) {
+        const item = groupItems[i];
+        const paxShare = baseShare + (i === 0 ? remainder : 0);
+
+        if (paxShare > 0) {
+          await addDoc(collection(db, 'payments_income'), {
+            bookingId: item.id,
+            bookingCode: item.bookingCode,
+            jamaahName: item.jamaahName,
+            packageId: item.packageId,
+            packageName: item.packageName,
+            amount: paxShare,
+            paymentMethod: groupPaymentForm.paymentMethod,
+            notes: `${groupPaymentForm.notes} (Grup ${groupPaymentTarget.code})`,
+            createdAt: new Date().toISOString()
+          });
+        }
+
+        // Sinkronkan totalPaid/paymentStatus tiap pax dari data payments_income
+        // asli — dijalankan utk semua pax di grup, bukan cuma yang kebagian
+        // setoran nonzero, biar tetap konsisten kalau ada penyesuaian rounding.
+        await syncBookingTotalPaid(item.id, item.totalAmount);
+      }
+
+      setShowGroupPaymentModal(false);
+      setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', notes: 'Setoran Tambahan' });
+      fetchData();
+    } catch (err) {
+      alert("Gagal mencatat setoran grup: " + err.message);
     }
   };
 
@@ -1639,14 +1723,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 <th className="p-4">Waktu Transaksi</th>
                 <th className="p-4">Status</th>
                 <th className="p-4">% Bayar</th>
+                <th className="p-4 text-center">Setoran</th>
                 <th className="p-4 text-center">Opsi</th>
               </tr>
             </thead>
             <tbody className={`divide-y ${styles.tableRowBorder}`}>
               {loading ? (
-                <tr><td colSpan="9" className={`p-8 text-center ${styles.textSub}`}>Memuat data manifest...</td></tr>
+                <tr><td colSpan="10" className={`p-8 text-center ${styles.textSub}`}>Memuat data manifest...</td></tr>
               ) : groupedBookingSummary.length === 0 ? (
-                <tr><td colSpan="9" className={`p-8 text-center ${styles.textSub}`}>Belum ada data booking.</td></tr>
+                <tr><td colSpan="10" className={`p-8 text-center ${styles.textSub}`}>Belum ada data booking.</td></tr>
               ) : (
                 groupedBookingSummary.map((group) => (
                   <tr
@@ -1662,6 +1747,19 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                     <td className={`p-4 ${styles.textSub}`}>{formatDateTimeID(group.earliestCreatedAt)}</td>
                     <td className="p-4">{renderStatusBadge(group.primary)}</td>
                     <td className={`p-4 font-semibold ${styles.textTitle}`}>{formatPercentID(group.percentBayar)}</td>
+                    <td className="p-4 text-center">
+                      {canManageBookings ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleOpenGroupPaymentModal(group); }}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-500 hover:text-white rounded-lg text-[11px] font-medium transition-colors"
+                          title="Catat Setoran Grup"
+                        >
+                          <Wallet className="w-3.5 h-3.5" /> + Bayar
+                        </button>
+                      ) : (
+                        <span className={styles.textSub}>—</span>
+                      )}
+                    </td>
                     <td className="p-4 text-center">
                       <button
                         onClick={(e) => { e.stopPropagation(); setActiveGroupCode(group.code); }}
@@ -2275,6 +2373,75 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL SETORAN GRUP — catat 1 setoran buat 1 grup booking sekaligus,
+          nominalnya dibagi rata otomatis ke semua pax di grup itu. */}
+      {showGroupPaymentModal && groupPaymentTarget && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+            <button onClick={() => setShowGroupPaymentModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <Wallet className="w-5 h-5 text-emerald-500" /> Catat Setoran Grup
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>
+              Kode: <span className="font-mono text-emerald-500">{groupPaymentTarget.code}</span> • Paket: <strong className={styles.textTitle}>{groupPaymentTarget.primary?.packageName || '-'}</strong>
+            </p>
+
+            <div className={`${styles.innerBg} p-3 rounded-lg border text-[11px] mb-4 space-y-1`}>
+              <div>Pemesan: <strong className={styles.textTitle}>{groupPaymentTarget.primary?.ordererName || '-'}</strong></div>
+              <div>Jumlah Pax: <strong className={styles.textTitle}>{groupPaymentTarget.paxCount} Pax</strong></div>
+              <div className="opacity-70 mt-1">Nominal setoran di bawah akan dibagi rata otomatis ke {groupPaymentTarget.paxCount} pax dalam grup ini.</div>
+            </div>
+
+            <form onSubmit={handleGroupPaymentSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block mb-1 font-medium">Nominal Setoran (Rp)</label>
+                  <input
+                    type="number" required min="1"
+                    placeholder="5000000"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={groupPaymentForm.amount}
+                    onChange={e => setGroupPaymentForm({ ...groupPaymentForm, amount: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Metode Bayar</label>
+                  <select
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={groupPaymentForm.paymentMethod}
+                    onChange={e => setGroupPaymentForm({ ...groupPaymentForm, paymentMethod: e.target.value })}
+                  >
+                    <option value="Transfer Bank">Transfer Bank</option>
+                    <option value="Cash / Tunai">Cash / Tunai</option>
+                    <option value="EDC / Kartu">EDC / Kartu</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block mb-1 font-medium">Catatan Pembayaran</label>
+                <input
+                  type="text" placeholder="Catatan setoran..."
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={groupPaymentForm.notes}
+                  onChange={e => setGroupPaymentForm({ ...groupPaymentForm, notes: e.target.value })}
+                />
+              </div>
+              <div className={`pt-3 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowGroupPaymentModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium">
+                  Simpan Setoran
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
