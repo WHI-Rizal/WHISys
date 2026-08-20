@@ -15,6 +15,26 @@ const formatDateDDMMYYYY = (dateString) => {
   return `${day}/${month}/${year}`;
 };
 
+// Nama bulan Indonesia, dipakai buat format tanggal+jam "Waktu Transaksi" di ringkasan grup
+const MONTHS_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+const formatDateTimeID = (dateString) => {
+  if (!dateString) return '-';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '-';
+  const day = date.getDate();
+  const month = MONTHS_ID[date.getMonth()];
+  const year = date.getFullYear();
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${day} ${month} ${year}, ${hh}:${mm}`;
+};
+
+// Format persentase gaya Indonesia (koma desimal), mis. 16,70%
+const formatPercentID = (value) => {
+  const num = isFinite(value) ? value : 0;
+  return `${num.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+};
+
 // Kapasitas orang per tipe kamar (dipakai untuk Rooming List)
 const ROOM_CAPACITY = { Quad: 4, Triple: 3, Double: 2 };
 
@@ -96,6 +116,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [formData, setFormData] = useState({
     packageId: '',
     jamaahId: '',
+    ordererId: '',
     roomType: 'Quad',
     busGroup: 'Bus 1',
     paxCount: 1,
@@ -109,6 +130,16 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [newJamaahForm, setNewJamaahForm] = useState({
     fullName: '', phone: '', nik: '', passportNumber: ''
   });
+
+  // State form Pemesan (orderer) baru yang ditambahkan langsung dari modal Booking.
+  // Pemesan cuma metadata booking (siapa yang mendaftarkan), bukan otomatis ikut
+  // sebagai peserta/jamaah yang berangkat — makanya form-nya dipisah dari newJamaahForm.
+  const [newOrdererForm, setNewOrdererForm] = useState({
+    fullName: '', phone: '', nik: '', passportNumber: ''
+  });
+
+  // State grup mana yang lagi dibuka detailnya di Booking & Manifest (null = tampilan ringkasan grup)
+  const [activeGroupCode, setActiveGroupCode] = useState(null);
 
   const [paymentEditForm, setPaymentEditForm] = useState({
     amount: '',
@@ -376,8 +407,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
   const handleOpenAddModal = () => {
     setEditingBookingId(null);
-    setFormData({ packageId: '', jamaahId: '', roomType: 'Quad', busGroup: 'Bus 1', paxCount: 1, additionalPaxNames: [], initialPayment: '', paymentMethod: 'Transfer Bank', paymentNotes: 'DP Pendaftaran' });
+    setFormData({ packageId: '', jamaahId: '', ordererId: '', roomType: 'Quad', busGroup: 'Bus 1', paxCount: 1, additionalPaxNames: [], initialPayment: '', paymentMethod: 'Transfer Bank', paymentNotes: 'DP Pendaftaran' });
     setNewJamaahForm({ fullName: '', phone: '', nik: '', passportNumber: '' });
+    setNewOrdererForm({ fullName: '', phone: '', nik: '', passportNumber: '' });
     setShowModal(true);
   };
 
@@ -390,6 +422,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     setFormData({
       packageId: item.packageId || '',
       jamaahId: item.jamaahId || '',
+      // Booking lama belum punya field Pemesan. Kalau ada namanya tapi ID-nya
+      // kosong, arahkan ke opsi "Tambah Pemesan Baru" & prefill namanya biar
+      // Finance/Admin gampang lengkapi datanya lewat Edit Booking.
+      ordererId: item.ordererId || (item.ordererName ? '__new__' : ''),
       roomType: item.roomType || 'Quad',
       busGroup: item.busGroup || 'Bus 1',
       paxCount: 1,
@@ -399,6 +435,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       paymentNotes: 'Setoran Tambahan'
     });
     setNewJamaahForm({ fullName: '', phone: '', nik: '', passportNumber: '' });
+    setNewOrdererForm({ fullName: item.ordererName || '', phone: '', nik: '', passportNumber: '' });
     setShowModal(true);
   };
 
@@ -579,6 +616,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         jamaahId: oldBooking.jamaahId,
         jamaahName: oldBooking.jamaahName,
         passportNumber: oldBooking.passportNumber || '-',
+        // Bawa terus data Pemesan dari booking lama ke booking hasil reschedule
+        ordererId: oldBooking.ordererId || null,
+        ordererName: oldBooking.ordererName || '',
         roomType: rescheduleForm.roomType,
         busGroup: rescheduleForm.busGroup,
         totalAmount: newPrice,
@@ -937,8 +977,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       alert("Pilih Paket Travel dan Jamaah.");
       return;
     }
+    if (!formData.ordererId) {
+      alert("Pilih atau isi data Pemesan (yang melakukan pemesanan).");
+      return;
+    }
     if (formData.jamaahId === '__new__' && !newJamaahForm.fullName.trim()) {
       alert("Isi nama lengkap jamaah baru terlebih dahulu.");
+      return;
+    }
+    if (formData.ordererId === '__new__' && !newOrdererForm.fullName.trim()) {
+      alert("Isi nama lengkap pemesan baru terlebih dahulu.");
       return;
     }
 
@@ -946,9 +994,14 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       const selectedPkg = packagesList.find(p => p.id === formData.packageId);
       let selectedJamaah = jamaahList.find(j => j.id === formData.jamaahId);
 
+      // Salinan kerja data jamaah — dipakai buat generate kode customer baru
+      // (baik utk jamaah/peserta maupun Pemesan) tanpa tabrakan kode kalau
+      // dua-duanya sama-sama "Tambah Baru" dalam satu submit yang sama.
+      let workingJamaahList = [...jamaahList];
+
       // Kalau CS pilih "Tambah Jamaah Baru", buat dulu data jamaahnya di sini
       if (formData.jamaahId === '__new__') {
-        const newCode = generateNextCustomerCode(jamaahList);
+        const newCode = generateNextCustomerCode(workingJamaahList);
         const newJamaahRef = await addDoc(collection(db, 'jamaah'), {
           customerCode: newCode,
           fullName: newJamaahForm.fullName.trim(),
@@ -967,7 +1020,38 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           phone: newJamaahForm.phone || '',
           passportNumber: newJamaahForm.passportNumber || ''
         };
+        workingJamaahList = [...workingJamaahList, selectedJamaah];
       }
+
+      // Resolusi data Pemesan (orderer) — independen dari peserta/jamaah yang
+      // berangkat. Pemesan cuma metadata pada booking (siapa yang melakukan
+      // pemesanan), BUKAN entry pax/manifest — jadi nggak pernah didorong ke
+      // documents/participant array manapun.
+      let selectedOrderer = null;
+      if (formData.ordererId === '__new__') {
+        const newOrdererCode = generateNextCustomerCode(workingJamaahList);
+        const newOrdererRef = await addDoc(collection(db, 'jamaah'), {
+          customerCode: newOrdererCode,
+          fullName: newOrdererForm.fullName.trim(),
+          nik: newOrdererForm.nik || '',
+          gender: 'L',
+          phone: newOrdererForm.phone || '',
+          passportNumber: newOrdererForm.passportNumber || '',
+          passportExpiry: '',
+          address: '',
+          createdAt: new Date().toISOString()
+        });
+        selectedOrderer = {
+          id: newOrdererRef.id,
+          customerCode: newOrdererCode,
+          fullName: newOrdererForm.fullName.trim()
+        };
+        workingJamaahList = [...workingJamaahList, selectedOrderer];
+      } else {
+        selectedOrderer = jamaahList.find(j => j.id === formData.ordererId) || null;
+      }
+      const ordererId = selectedOrderer?.id || null;
+      const ordererName = selectedOrderer?.fullName || '';
 
       let price = Number(selectedPkg.priceQuad || selectedPkg.priceMain || 0);
       if (formData.roomType === 'Triple') price = Number(selectedPkg.priceTriple || price);
@@ -995,6 +1079,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           jamaahId: selectedJamaah.id,
           jamaahName: selectedJamaah.fullName,
           passportNumber: selectedJamaah.passportNumber || '-',
+          ordererId,
+          ordererName,
           roomType: formData.roomType,
           busGroup: formData.busGroup,
           totalAmount: price,
@@ -1043,6 +1129,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             jamaahId: selectedJamaah.id,
             jamaahName: selectedJamaah.fullName,
             passportNumber: selectedJamaah.passportNumber || '-',
+            ordererId,
+            ordererName,
             roomType: formData.roomType,
             busGroup: formData.busGroup,
             totalAmount: price,
@@ -1081,9 +1169,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           // Susun daftar pax: pax pertama = jamaah utama yang dipilih, sisanya dari nama tambahan
           const paxList = [{ jamaahId: selectedJamaah.id, jamaahName: selectedJamaah.fullName, passportNumber: selectedJamaah.passportNumber || '-' }];
 
-          // Salinan kerja data jamaah, dipakai buat cari/generate kode customer baru tanpa tabrakan
-          let workingJamaahList = [...jamaahList];
-
+          // Catatan: workingJamaahList dipakai ulang dari deklarasi di atas (bukan
+          // dideklarasikan ulang) — biar generate kode customer baru buat tamu
+          // tambahan di sini nggak tabrakan sama kode yang baru dibuat utk
+          // jamaah utama/Pemesan yang juga "Tambah Baru" di submit yang sama.
           for (const name of additionalNames) {
             const existing = findJamaahByName(name, workingJamaahList);
             if (existing) {
@@ -1128,6 +1217,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               jamaahId: pax.jamaahId,
               jamaahName: pax.jamaahName,
               passportNumber: pax.passportNumber,
+              // Semua pax dalam satu grup berbagi Pemesan yang sama — Pemesan
+              // cuma metadata, bukan entry pax.
+              ordererId,
+              ordererName,
               roomType: formData.roomType,
               busGroup: formData.busGroup,
               totalAmount: price,
@@ -1175,8 +1268,42 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       (b.jamaahName && b.jamaahName.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (b.packageName && b.packageName.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (b.bookingCode && b.bookingCode.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (b.groupBookingCode && b.groupBookingCode.toLowerCase().includes(searchTerm.toLowerCase()))
+      (b.groupBookingCode && b.groupBookingCode.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (b.ordererName && b.ordererName.toLowerCase().includes(searchTerm.toLowerCase()))
     );
+
+  // ============ RINGKASAN GRUP UNTUK TAMPILAN DEFAULT BOOKING & MANIFEST ============
+  // Kelompokkan booking berdasarkan groupBookingCode; booking single-pax (tanpa
+  // groupBookingCode) diperlakukan sebagai grup isi 1 orang sendiri.
+  const groupedBookingSummary = (() => {
+    const map = {};
+    filteredBookings.forEach(b => {
+      const code = b.groupBookingCode || b.bookingCode;
+      if (!map[code]) map[code] = [];
+      map[code].push(b);
+    });
+
+    return Object.entries(map).map(([code, items]) => {
+      const primary = items[0];
+      const totalAmount = items.reduce((acc, i) => acc + (Number(i.totalAmount) || 0), 0);
+      const totalPaid = items.reduce((acc, i) => acc + (Number(i.totalPaid) || 0), 0);
+      const percentBayar = totalAmount > 0 ? (totalPaid / totalAmount) * 100 : 0;
+
+      // Waktu Transaksi grup = createdAt paling awal di antara pax-pax dalam grup
+      const earliestCreatedAt = items.reduce((earliest, i) => {
+        if (!i.createdAt) return earliest;
+        if (!earliest) return i.createdAt;
+        return new Date(i.createdAt) < new Date(earliest) ? i.createdAt : earliest;
+      }, null);
+
+      return { code, items, primary, paxCount: items.length, totalAmount, totalPaid, percentBayar, earliestCreatedAt };
+    }).sort((a, b) => new Date(b.earliestCreatedAt || 0) - new Date(a.earliestCreatedAt || 0));
+  })();
+
+  // Daftar booking per-pax (tampilan detail lama) untuk grup yang lagi dibuka
+  const activeGroupBookings = activeGroupCode
+    ? filteredBookings.filter(b => (b.groupBookingCode || b.bookingCode) === activeGroupCode)
+    : [];
 
   const roomingBookingsForPackage = bookings.filter(
     b => b.packageId === roomingPackageId && (b.status || 'active') === 'active'
@@ -1186,6 +1313,37 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   const bulkFeedbackBookings = bookings.filter(
     b => b.packageId === bulkFeedbackPackageId && (b.status || 'active') === 'active'
   );
+
+  // Badge status booking — dipakai di ringkasan grup maupun tabel detail per-pax,
+  // reuse logic/label/warna yang sama persis (Aktif = Lunas/DP, Dibatalkan, Reschedule).
+  const renderStatusBadge = (item) => {
+    if (item.status === 'cancelled') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-500/10 text-rose-500 border border-rose-500/20 rounded-full font-semibold">
+          <Ban className="w-3 h-3" /> Dibatalkan
+        </span>
+      );
+    }
+    if (item.status === 'rescheduled') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full font-semibold">
+          <RotateCcw className="w-3 h-3" /> Reschedule
+        </span>
+      );
+    }
+    if (item.paymentStatus === 'Full Payment') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-full font-semibold">
+          <CheckCircle className="w-3 h-3" /> Lunas
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-full font-semibold">
+        <Clock className="w-3 h-3" /> DP / Cicilan
+      </span>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -1253,6 +1411,17 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       </div>
 
       <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
+        {activeGroupCode ? (
+        <>
+        <div className={`flex items-center justify-between p-4 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+          <button
+            onClick={() => setActiveGroupCode(null)}
+            className={`flex items-center gap-1.5 text-xs font-semibold ${isDark ? 'text-slate-300 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}
+          >
+            ‹ Kembali ke Ringkasan Booking
+          </button>
+          <span className="text-xs font-mono text-emerald-500">Grup: {activeGroupCode}</span>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className={`${styles.tableHeaderBg} uppercase tracking-wider border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
@@ -1269,10 +1438,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             <tbody className={`divide-y ${styles.tableRowBorder}`}>
               {loading ? (
                 <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Memuat data manifest...</td></tr>
-              ) : filteredBookings.length === 0 ? (
+              ) : activeGroupBookings.length === 0 ? (
                 <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada data booking.</td></tr>
               ) : (
-                filteredBookings.map((item) => {
+                activeGroupBookings.map((item) => {
                   const docs = item.documents || {};
                   const collectedCount = REQUIRED_DOCUMENTS.filter(d => docs[d.key]).length;
                   const docPercent = Math.round((collectedCount / REQUIRED_DOCUMENTS.length) * 100);
@@ -1330,23 +1499,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                         </div>
                       </td>
                       <td className="p-4">
-                        {item.status === 'cancelled' ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-500/10 text-rose-500 border border-rose-500/20 rounded-full font-semibold">
-                            <Ban className="w-3 h-3" /> Dibatalkan
-                          </span>
-                        ) : item.status === 'rescheduled' ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full font-semibold">
-                            <RotateCcw className="w-3 h-3" /> Reschedule
-                          </span>
-                        ) : item.paymentStatus === 'Full Payment' ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-full font-semibold">
-                            <CheckCircle className="w-3 h-3" /> Lunas
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-full font-semibold">
-                            <Clock className="w-3 h-3" /> DP / Cicilan
-                          </span>
-                        )}
+                        {renderStatusBadge(item)}
                         {item.status === 'cancelled' && (
                           <div className="text-[10px] text-rose-400 mt-1">Refund: Rp {Number(item.refundAmount || 0).toLocaleString('id-ID')}</div>
                         )}
@@ -1460,6 +1613,58 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             </tbody>
           </table>
         </div>
+        </>
+        ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className={`${styles.tableHeaderBg} uppercase tracking-wider border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <tr>
+                <th className="p-4">Kode</th>
+                <th className="p-4">Paket Wisata</th>
+                <th className="p-4">Pemesan</th>
+                <th className="p-4">Tanggal Berangkat</th>
+                <th className="p-4">Jumlah Pax</th>
+                <th className="p-4">Waktu Transaksi</th>
+                <th className="p-4">Status</th>
+                <th className="p-4">% Bayar</th>
+                <th className="p-4 text-center">Opsi</th>
+              </tr>
+            </thead>
+            <tbody className={`divide-y ${styles.tableRowBorder}`}>
+              {loading ? (
+                <tr><td colSpan="9" className={`p-8 text-center ${styles.textSub}`}>Memuat data manifest...</td></tr>
+              ) : groupedBookingSummary.length === 0 ? (
+                <tr><td colSpan="9" className={`p-8 text-center ${styles.textSub}`}>Belum ada data booking.</td></tr>
+              ) : (
+                groupedBookingSummary.map((group) => (
+                  <tr
+                    key={group.code}
+                    onClick={() => setActiveGroupCode(group.code)}
+                    className={`${isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'} transition-colors cursor-pointer`}
+                  >
+                    <td className="p-4 font-mono text-emerald-500 font-semibold">{group.code}</td>
+                    <td className={`p-4 ${styles.textTitle}`}>{group.primary.packageName || '-'}</td>
+                    <td className={`p-4 ${styles.textTitle}`}>{group.primary.ordererName || '-'}</td>
+                    <td className={`p-4 ${styles.textSub}`}>{formatDateDDMMYYYY(group.primary.departureDate)}</td>
+                    <td className={`p-4 ${styles.textTitle}`}>{group.paxCount} Pax</td>
+                    <td className={`p-4 ${styles.textSub}`}>{formatDateTimeID(group.earliestCreatedAt)}</td>
+                    <td className="p-4">{renderStatusBadge(group.primary)}</td>
+                    <td className={`p-4 font-semibold ${styles.textTitle}`}>{formatPercentID(group.percentBayar)}</td>
+                    <td className="p-4 text-center">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setActiveGroupCode(group.code); }}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium"
+                      >
+                        Opsi ›
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        )}
       </div>
 
       {/* MODAL CHECKLIST MONITORING DOKUMEN JAMAAH */}
@@ -1553,6 +1758,67 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                   ))}
                 </select>
               </div>
+
+              {/* PEMESAN (ORDERER) — siapa yang melakukan pemesanan, belum tentu ikut
+                  berangkat. Integrasi ke Data Master Jamaah, pola UX-nya sama persis
+                  dengan "Pilih Jamaah" (peserta) di bawah: pilih existing atau Tambah Baru. */}
+              <div>
+                <label className="block mb-1 font-medium">Pemesan (Yang Melakukan Pemesanan)</label>
+                <select
+                  required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={formData.ordererId}
+                  onChange={e => setFormData({ ...formData, ordererId: e.target.value })}
+                >
+                  <option value="">-- Pilih Data Master Jamaah --</option>
+                  <option value="__new__">➕ Tambah Pemesan Baru (Belum Terdaftar)</option>
+                  {jamaahList.map(j => (
+                    <option key={j.id} value={j.id}>
+                      {j.fullName} - {j.customerCode || 'CST'} - Paspor: {j.passportNumber || 'Belum Ada'}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] mt-1 opacity-70">
+                  Pemesan bukan otomatis peserta. Kalau Pemesan juga ikut berangkat, pilih/ketik lagi namanya di bagian Peserta di bawah.
+                </p>
+              </div>
+
+              {formData.ordererId === '__new__' && (
+                <div className={`${styles.innerBg} p-3 rounded-xl border space-y-2.5`}>
+                  <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">Data Pemesan Baru</p>
+                  <input
+                    type="text" required
+                    placeholder="Nama Lengkap (wajib)"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={newOrdererForm.fullName}
+                    onChange={e => setNewOrdererForm({ ...newOrdererForm, fullName: e.target.value })}
+                  />
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <input
+                      type="text"
+                      placeholder="No. HP / WhatsApp"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={newOrdererForm.phone}
+                      onChange={e => setNewOrdererForm({ ...newOrdererForm, phone: e.target.value })}
+                    />
+                    <input
+                      type="text"
+                      placeholder="NIK"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={newOrdererForm.nik}
+                      onChange={e => setNewOrdererForm({ ...newOrdererForm, nik: e.target.value })}
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="No. Paspor (opsional)"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={newOrdererForm.passportNumber}
+                    onChange={e => setNewOrdererForm({ ...newOrdererForm, passportNumber: e.target.value })}
+                  />
+                  <p className="text-[10px] opacity-70">Data lengkap lainnya (KTP, alamat, dll) bisa dilengkapi belakangan di menu Data Master Jamaah.</p>
+                </div>
+              )}
 
               <div>
                 <label className="block mb-1 font-medium">Pilih Jamaah</label>
