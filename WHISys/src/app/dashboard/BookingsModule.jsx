@@ -183,6 +183,57 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     date: new Date().toISOString().slice(0, 10)
   });
 
+  // State Modal Riwayat & Setoran Pembayaran GRUP — agregator kenyamanan yang
+  // nampilin riwayat setoran SEMUA peserta dalam 1 grup sekaligus (per orang
+  // tetap punya subsection sendiri, nominalnya nggak digabung/dijumlah jadi 1).
+  const [showGroupHistoryModal, setShowGroupHistoryModal] = useState(false);
+  const [groupHistoryItems, setGroupHistoryItems] = useState([]);
+  // Riwayat setoran per booking, di-keyed by bookingId: { [bookingId]: payment[] }
+  const [groupHistoryPayments, setGroupHistoryPayments] = useState({});
+  const [editingGroupPaymentId, setEditingGroupPaymentId] = useState(null);
+
+  // State Modal Edit Booking GRUP — modal kecil terpisah dari modal registrasi
+  // besar, cuma buat field yang emang shared ke SELURUH grup (Paket, Pemesan,
+  // Tipe Kamar, Alokasi Bus). Identitas peserta TETAP cuma bisa diubah lewat
+  // Edit Booking per-peserta di "Aksi Lainnya".
+  const [showGroupEditModal, setShowGroupEditModal] = useState(false);
+  const [groupEditTarget, setGroupEditTarget] = useState(null);
+  const [groupEditForm, setGroupEditForm] = useState({
+    packageId: '',
+    ordererId: '',
+    roomType: 'Quad',
+    busGroup: 'Bus 1',
+    // Bagian "Tambah Setoran" opsional — kalau diisi, dibagi rata ke semua
+    // pax aktif di grup ini (pola sama persis kayak modal Setoran Grup).
+    addPaymentAmount: '',
+    addPaymentMethod: 'Transfer Bank',
+    addPaymentNotes: 'Setoran Tambahan',
+    addPaymentDate: new Date().toISOString().slice(0, 10)
+  });
+  const [groupEditNewOrdererForm, setGroupEditNewOrdererForm] = useState({
+    fullName: '', phone: '', nik: '', passportNumber: ''
+  });
+
+  // State Modal Reschedule GRUP — reschedule SEMUA pax aktif dalam grup
+  // sekaligus ke 1 paket tujuan yang sama, jadi 1 grup baru.
+  const [showGroupRescheduleModal, setShowGroupRescheduleModal] = useState(false);
+  const [groupRescheduleTarget, setGroupRescheduleTarget] = useState(null);
+  const [groupRescheduleForm, setGroupRescheduleForm] = useState({
+    newPackageId: '',
+    roomType: 'Quad',
+    busGroup: 'Bus 1'
+  });
+
+  // State Modal Batalkan / Refund GRUP — nominal refund total dibagi rata ke
+  // semua pax aktif di grup (pola sama kayak Setoran Grup / DP awal grup).
+  const [showGroupCancelModal, setShowGroupCancelModal] = useState(false);
+  const [groupCancelTarget, setGroupCancelTarget] = useState(null);
+  const [groupCancelForm, setGroupCancelForm] = useState({
+    refundAmount: '',
+    refundMethod: 'Transfer Bank',
+    reason: ''
+  });
+
   // State Modal Rooming List
   const [showRoomingModal, setShowRoomingModal] = useState(false);
   const [roomingPackageId, setRoomingPackageId] = useState('');
@@ -795,6 +846,486 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       fetchData();
     } catch (err) {
       alert("Gagal mencatat setoran grup: " + err.message);
+    }
+  };
+
+  // ============ 5 AKSI UTAMA LEVEL GRUP (Riwayat, Edit, Reschedule, Batalkan, Hapus) ============
+  // Owner sekarang mikirin "1 booking" itu ya 1 GRUP (kode di kolom Kode ringkasan),
+  // bukan per baris peserta. 5 aksi di bawah ini jadi versi PRIMER level grup dari
+  // aksi yang UDAH ADA per-peserta di dropdown "Aksi Lainnya" tiap baris — versi
+  // per-peserta itu TETAP ada & TETAP jalan apa adanya, buat kasus cuma 1 orang
+  // dalam grup yang perlu ditangani sendirian.
+
+  // ---- 1. Riwayat & Setoran Pembayaran (Grup) ----
+  // Ambil riwayat setoran tiap peserta dalam grup, di-keyed by bookingId — ini
+  // cuma agregator kenyamanan (biar nggak buka Wallet 1-1 per baris), BUKAN
+  // penggabungan data: nominal antar orang tetap kepisah, nggak dijumlah jadi 1.
+  const fetchGroupHistoryPayments = async (items) => {
+    const entries = await Promise.all(items.map(async (b) => {
+      try {
+        const q = query(collection(db, 'payments_income'), where('bookingId', '==', b.id));
+        const snap = await getDocs(q);
+        return [b.id, snap.docs.map(d => ({ id: d.id, ...d.data() }))];
+      } catch (err) {
+        console.error('Gagal mengambil riwayat setoran grup:', err);
+        return [b.id, []];
+      }
+    }));
+    const map = {};
+    entries.forEach(([bid, list]) => { map[bid] = list; });
+    setGroupHistoryPayments(map);
+  };
+
+  const handleOpenGroupHistory = async (items) => {
+    setGroupHistoryItems(items);
+    setEditingGroupPaymentId(null);
+    setShowGroupHistoryModal(true);
+    await fetchGroupHistoryPayments(items);
+  };
+
+  // Adaptasi kecil dari handleDeletePayment/handleSavePaymentEdit: di modal grup
+  // nggak ada 1 "selectedBookingForHistory" tunggal (isinya beberapa booking
+  // sekaligus), jadi booking mana yang perlu di-syncBookingTotalPaid ditentukan
+  // dari field bookingId yang emang udah nempel di tiap dokumen payments_income.
+  const handleDeleteGroupPayment = async (pay) => {
+    if (!canManagePayments) {
+      alert("Cuma Finance & Super Admin yang boleh menghapus riwayat pembayaran.");
+      return;
+    }
+    if (!confirm("Apakah Anda yakin ingin menghapus catatan pembayaran ini?")) return;
+    try {
+      await deleteDoc(doc(db, 'payments_income', pay.id));
+      const bookingItem = groupHistoryItems.find(b => b.id === pay.bookingId);
+      if (bookingItem) await syncBookingTotalPaid(bookingItem.id, bookingItem.totalAmount);
+      await fetchGroupHistoryPayments(groupHistoryItems);
+      fetchData();
+    } catch (err) {
+      alert("Gagal menghapus pembayaran: " + err.message);
+    }
+  };
+
+  const handleSaveGroupPaymentEdit = async (pay) => {
+    if (!canManagePayments) {
+      alert("Cuma Finance & Super Admin yang boleh mengedit riwayat pembayaran.");
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'payments_income', pay.id), {
+        amount: Number(paymentEditForm.amount),
+        paymentMethod: paymentEditForm.paymentMethod,
+        notes: paymentEditForm.notes,
+        ...(paymentEditForm.date ? { createdAt: resolvePaymentCreatedAt(paymentEditForm.date) } : {})
+      });
+
+      setEditingGroupPaymentId(null);
+      const bookingItem = groupHistoryItems.find(b => b.id === pay.bookingId);
+      if (bookingItem) await syncBookingTotalPaid(bookingItem.id, bookingItem.totalAmount);
+      await fetchGroupHistoryPayments(groupHistoryItems);
+      fetchData();
+    } catch (err) {
+      alert("Gagal memperbarui pembayaran: " + err.message);
+    }
+  };
+
+  // ---- 2. Edit Booking (Grup) ----
+  // Modal kecil TERPISAH dari modal registrasi besar — sengaja nggak dipakai
+  // ulang biar nggak keruwetan sama alur single/multi-pax & Edit per-peserta
+  // yang udah jalan. Cuma edit field yang emang shared se-grup: Paket, Pemesan,
+  // Tipe Kamar, Alokasi Bus. Identitas peserta TETAP di Edit per-peserta.
+  const handleOpenGroupEditModal = (group) => {
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh mengedit booking.");
+      return;
+    }
+    setGroupEditTarget(group);
+    setGroupEditForm({
+      packageId: group.primary?.packageId || '',
+      ordererId: group.primary?.ordererId || (group.primary?.ordererName ? '__new__' : ''),
+      roomType: group.primary?.roomType || 'Quad',
+      busGroup: group.primary?.busGroup || 'Bus 1',
+      addPaymentAmount: '',
+      addPaymentMethod: 'Transfer Bank',
+      addPaymentNotes: 'Setoran Tambahan',
+      addPaymentDate: todayDateStr()
+    });
+    setGroupEditNewOrdererForm({ fullName: group.primary?.ordererName || '', phone: '', nik: '', passportNumber: '' });
+    setShowGroupEditModal(true);
+  };
+
+  const handleGroupEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!groupEditTarget) return;
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh mengedit booking.");
+      return;
+    }
+    if (!groupEditForm.packageId) {
+      alert("Pilih Paket Travel.");
+      return;
+    }
+    if (!groupEditForm.ordererId) {
+      alert("Pilih atau isi data Pemesan (yang melakukan pemesanan).");
+      return;
+    }
+    if (groupEditForm.ordererId === '__new__' && !groupEditNewOrdererForm.fullName.trim()) {
+      alert("Isi nama lengkap pemesan baru terlebih dahulu.");
+      return;
+    }
+
+    try {
+      // Cuma booking yang statusnya masih 'active' yang kena edit/quota math —
+      // yang udah cancelled/rescheduled dibiarin apa adanya (histori lama).
+      const activeItems = groupEditTarget.items.filter(b => (b.status || 'active') === 'active');
+      if (activeItems.length === 0) {
+        alert("Tidak ada booking aktif di grup ini yang bisa diedit.");
+        return;
+      }
+
+      const newPkg = packagesList.find(p => p.id === groupEditForm.packageId);
+      if (!newPkg) return;
+
+      // Resolusi Pemesan — pola sama persis dgn Pemesan di form registrasi/edit per-peserta
+      let selectedOrderer = null;
+      if (groupEditForm.ordererId === '__new__') {
+        const newOrdererCode = generateNextCustomerCode(jamaahList);
+        const newOrdererRef = await addDoc(collection(db, 'jamaah'), {
+          customerCode: newOrdererCode,
+          fullName: groupEditNewOrdererForm.fullName.trim(),
+          nik: groupEditNewOrdererForm.nik || '',
+          gender: 'L',
+          phone: groupEditNewOrdererForm.phone || '',
+          passportNumber: groupEditNewOrdererForm.passportNumber || '',
+          passportExpiry: '',
+          address: '',
+          createdAt: new Date().toISOString()
+        });
+        selectedOrderer = { id: newOrdererRef.id, fullName: groupEditNewOrdererForm.fullName.trim() };
+      } else {
+        selectedOrderer = jamaahList.find(j => j.id === groupEditForm.ordererId) || null;
+      }
+      const ordererId = selectedOrderer?.id || null;
+      const ordererName = selectedOrderer?.fullName || '';
+
+      let price = Number(newPkg.priceQuad || newPkg.priceMain || 0);
+      if (groupEditForm.roomType === 'Triple') price = Number(newPkg.priceTriple || price);
+      if (groupEditForm.roomType === 'Double') price = Number(newPkg.priceDouble || price);
+
+      const oldPackageId = groupEditTarget.primary?.packageId;
+      const packageChanged = newPkg.id !== oldPackageId;
+
+      if (packageChanged && Number(newPkg.quotaRemaining || 0) < activeItems.length) {
+        alert(`Kuota paket tujuan tidak cukup. Sisa seat: ${newPkg.quotaRemaining || 0}, dibutuhkan: ${activeItems.length}.`);
+        return;
+      }
+
+      // Update field2 yang emang shared ke SEMUA booking aktif di grup ini —
+      // identitas peserta (jamaahId/jamaahName/dst) SENGAJA nggak disentuh.
+      await Promise.all(activeItems.map(item => updateDoc(doc(db, 'bookings', item.id), {
+        packageId: newPkg.id,
+        packageName: newPkg.name,
+        packageCode: newPkg.code,
+        departureDate: newPkg.departureDate,
+        ordererId,
+        ordererName,
+        roomType: groupEditForm.roomType,
+        busGroup: groupEditForm.busGroup,
+        totalAmount: price,
+        updatedAt: new Date().toISOString()
+      })));
+
+      if (packageChanged) {
+        // 1 updateDoc per paket pakai increment(activeItems.length) — lebih
+        // efisien drpd loop +1/-1 per pax kayak alur hapus per-booking.
+        if (oldPackageId) {
+          await updateDoc(doc(db, 'packages', oldPackageId), { quotaRemaining: increment(activeItems.length) });
+        }
+        await updateDoc(doc(db, 'packages', newPkg.id), { quotaRemaining: increment(-activeItems.length) });
+      }
+
+      // Bagian "Tambah Setoran" opsional — dibagi rata ke activeItems, pola
+      // baseShare/remainder yang sama persis dgn handleGroupPaymentSubmit.
+      const addAmount = Number(groupEditForm.addPaymentAmount || 0);
+      if (addAmount > 0) {
+        const sortedActive = [...activeItems].sort((a, b) => {
+          if (a.groupPaxIndex != null && b.groupPaxIndex != null) return a.groupPaxIndex - b.groupPaxIndex;
+          return 0;
+        });
+        const baseShare = Math.floor(addAmount / sortedActive.length);
+        const remainder = addAmount - (baseShare * sortedActive.length);
+
+        for (let i = 0; i < sortedActive.length; i++) {
+          const item = sortedActive[i];
+          const share = baseShare + (i === 0 ? remainder : 0);
+          if (share > 0) {
+            await addDoc(collection(db, 'payments_income'), {
+              bookingId: item.id,
+              bookingCode: item.bookingCode,
+              jamaahName: item.jamaahName,
+              packageId: newPkg.id,
+              packageName: newPkg.name,
+              amount: share,
+              paymentMethod: groupEditForm.addPaymentMethod,
+              notes: `${groupEditForm.addPaymentNotes} (Grup ${groupEditTarget.code})`,
+              createdAt: resolvePaymentCreatedAt(groupEditForm.addPaymentDate)
+            });
+          }
+        }
+      }
+
+      // Sinkronkan totalPaid/paymentStatus tiap booking aktif dari data
+      // payments_income asli (totalAmount-nya bisa aja berubah kalau paket/kamar ganti)
+      await Promise.all(activeItems.map(item => syncBookingTotalPaid(item.id, price)));
+
+      setShowGroupEditModal(false);
+      fetchData();
+    } catch (err) {
+      alert("Gagal mengedit booking grup: " + err.message);
+    }
+  };
+
+  // ---- 3. Reschedule (Grup) ----
+  const handleOpenGroupRescheduleModal = (group) => {
+    if (!canReschedule) {
+      alert("Cuma Finance & Super Admin yang boleh reschedule booking.");
+      return;
+    }
+    setGroupRescheduleTarget(group);
+    setGroupRescheduleForm({
+      newPackageId: '',
+      roomType: group.primary?.roomType || 'Quad',
+      busGroup: group.primary?.busGroup || 'Bus 1'
+    });
+    setShowGroupRescheduleModal(true);
+  };
+
+  const handleGroupRescheduleSubmit = async (e) => {
+    e.preventDefault();
+    if (!groupRescheduleTarget) return;
+    if (!canReschedule) {
+      alert("Cuma Finance & Super Admin yang boleh memproses reschedule.");
+      return;
+    }
+    if (!groupRescheduleForm.newPackageId) {
+      alert("Pilih paket/keberangkatan tujuan reschedule.");
+      return;
+    }
+
+    try {
+      const activeItems = groupRescheduleTarget.items.filter(b => (b.status || 'active') === 'active');
+      if (activeItems.length === 0) {
+        alert("Tidak ada booking aktif di grup ini yang bisa di-reschedule.");
+        return;
+      }
+      // Urutan pax dipertahankan sama kayak pas grup ini pertama kali dibuat
+      // (groupPaxIndex), biar pax 1 tetap pax 1 di grup hasil reschedule.
+      const sortedActive = [...activeItems].sort((a, b) => {
+        if (a.groupPaxIndex != null && b.groupPaxIndex != null) return a.groupPaxIndex - b.groupPaxIndex;
+        return 0;
+      });
+
+      const newPkg = packagesList.find(p => p.id === groupRescheduleForm.newPackageId);
+      if (!newPkg) return;
+
+      if (Number(newPkg.quotaRemaining || 0) < sortedActive.length) {
+        alert(`Kuota paket tujuan tidak cukup. Sisa seat: ${newPkg.quotaRemaining || 0}, dibutuhkan: ${sortedActive.length}.`);
+        return;
+      }
+
+      let newPrice = Number(newPkg.priceQuad || newPkg.priceMain || 0);
+      if (groupRescheduleForm.roomType === 'Triple') newPrice = Number(newPkg.priceTriple || newPrice);
+      if (groupRescheduleForm.roomType === 'Double') newPrice = Number(newPkg.priceDouble || newPrice);
+
+      const newGroupBookingCode = `GRP-${Date.now().toString().slice(-6)}`;
+      const nowIso = new Date().toISOString();
+
+      for (let i = 0; i < sortedActive.length; i++) {
+        const oldBooking = sortedActive[i];
+        // Setoran yg udah dibayar pax ini dibawa APA ADANYA (nggak dibagi rata
+        // ulang) — persis kayak alur reschedule per-peserta yang udah jalan.
+        const carryOverAmount = Number(oldBooking.totalPaid || 0);
+        const newBookingCode = `${newGroupBookingCode}-${i + 1}`;
+
+        const newBookingRef = await addDoc(collection(db, 'bookings'), {
+          bookingCode: newBookingCode,
+          groupBookingCode: newGroupBookingCode,
+          groupPaxIndex: i + 1,
+          groupTotalPax: sortedActive.length,
+          packageId: newPkg.id,
+          packageName: newPkg.name,
+          packageCode: newPkg.code,
+          departureDate: newPkg.departureDate,
+          jamaahId: oldBooking.jamaahId,
+          jamaahName: oldBooking.jamaahName,
+          passportNumber: oldBooking.passportNumber || '-',
+          ordererId: oldBooking.ordererId || null,
+          ordererName: oldBooking.ordererName || '',
+          roomType: groupRescheduleForm.roomType,
+          busGroup: groupRescheduleForm.busGroup,
+          totalAmount: newPrice,
+          totalPaid: carryOverAmount,
+          paymentStatus: carryOverAmount >= newPrice ? 'Full Payment' : 'DP Paid',
+          documents: oldBooking.documents || {
+            passport: false, ktp_foto: false, family_cert: false, sponsor_letter: false,
+            bank_statement: false, vaccine_cert: false, visa: false, ticket: false
+          },
+          rescheduledFromBookingId: oldBooking.id,
+          rescheduledFromBookingCode: oldBooking.bookingCode,
+          createdAt: nowIso
+        });
+
+        if (carryOverAmount > 0) {
+          await addDoc(collection(db, 'payments_income'), {
+            bookingId: newBookingRef.id,
+            bookingCode: newBookingCode,
+            jamaahName: oldBooking.jamaahName,
+            packageId: newPkg.id,
+            packageName: newPkg.name,
+            amount: carryOverAmount,
+            paymentMethod: 'Carry-Over Reschedule',
+            notes: `Pindahan setoran dari booking ${oldBooking.bookingCode} (reschedule grup ${groupRescheduleTarget.code})`,
+            createdAt: nowIso
+          });
+        }
+
+        await updateDoc(doc(db, 'bookings', oldBooking.id), {
+          status: 'rescheduled',
+          rescheduledAt: nowIso,
+          rescheduledToBookingId: newBookingRef.id,
+          rescheduledToBookingCode: newBookingCode
+        });
+      }
+
+      // Lepas kuota dari paket lama & kurangi dari paket baru — 1 updateDoc
+      // per paket (bukan loop +1/-1 per pax).
+      const oldPackageId = groupRescheduleTarget.primary?.packageId;
+      if (oldPackageId) {
+        await updateDoc(doc(db, 'packages', oldPackageId), { quotaRemaining: increment(sortedActive.length) });
+      }
+      await updateDoc(doc(db, 'packages', newPkg.id), { quotaRemaining: increment(-sortedActive.length) });
+
+      setShowGroupRescheduleModal(false);
+      // Grup lama udah nggak aktif lagi (semua pax-nya pindah ke grup baru) —
+      // balik ke tampilan ringkasan, bukan nyoba nampilin grup lama yang kosong.
+      setActiveGroupCode(null);
+      fetchData();
+    } catch (err) {
+      alert("Gagal memproses reschedule grup: " + err.message);
+    }
+  };
+
+  // ---- 4. Batalkan / Refund (Grup) ----
+  const handleOpenGroupCancelModal = (group) => {
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh membatalkan booking & proses refund.");
+      return;
+    }
+    const activeItems = group.items.filter(b => (b.status || 'active') === 'active');
+    setGroupCancelTarget(group);
+    setGroupCancelForm({
+      refundAmount: activeItems.reduce((acc, b) => acc + Number(b.totalPaid || 0), 0),
+      refundMethod: 'Transfer Bank',
+      reason: ''
+    });
+    setShowGroupCancelModal(true);
+  };
+
+  const handleGroupCancelSubmit = async (e) => {
+    e.preventDefault();
+    if (!groupCancelTarget) return;
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh memproses pembatalan/refund.");
+      return;
+    }
+
+    try {
+      const activeItems = groupCancelTarget.items.filter(b => (b.status || 'active') === 'active');
+      if (activeItems.length === 0) {
+        alert("Tidak ada booking aktif di grup ini yang bisa dibatalkan.");
+        return;
+      }
+      const sortedActive = [...activeItems].sort((a, b) => {
+        if (a.groupPaxIndex != null && b.groupPaxIndex != null) return a.groupPaxIndex - b.groupPaxIndex;
+        return 0;
+      });
+
+      // Nominal refund total dibagi rata ke semua pax aktif (sisa pembagian
+      // masuk ke pax pertama) — pola sama persis dgn Setoran Grup/DP awal grup.
+      const totalRefund = Number(groupCancelForm.refundAmount || 0);
+      const baseShare = Math.floor(totalRefund / sortedActive.length);
+      const remainder = totalRefund - (baseShare * sortedActive.length);
+      const nowIso = new Date().toISOString();
+
+      await Promise.all(sortedActive.map((item, i) => {
+        const share = baseShare + (i === 0 ? remainder : 0);
+        return updateDoc(doc(db, 'bookings', item.id), {
+          status: 'cancelled',
+          cancelReason: groupCancelForm.reason || '-',
+          refundAmount: share,
+          refundMethod: groupCancelForm.refundMethod,
+          cancelledAt: nowIso
+        });
+      }));
+
+      // Kuota seat yang dibatalkan dikembalikan ke paket — 1 updateDoc pakai
+      // increment(sortedActive.length), bukan loop +1 per pax.
+      const oldPackageId = groupCancelTarget.primary?.packageId;
+      if (oldPackageId) {
+        await updateDoc(doc(db, 'packages', oldPackageId), { quotaRemaining: increment(sortedActive.length) });
+      }
+
+      setShowGroupCancelModal(false);
+      fetchData();
+    } catch (err) {
+      alert("Gagal memproses pembatalan grup: " + err.message);
+    }
+  };
+
+  // ---- 5. Hapus Booking (Grup) ----
+  const handleGroupDeleteBooking = async (group) => {
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh menghapus booking.");
+      return;
+    }
+    try {
+      // Pengecekan riwayat pembayaran pakai SELURUH booking di grup (bukan cuma
+      // yang aktif) — booking yang udah cancelled/rescheduled pun bisa aja masih
+      // nyisain riwayat transaksi yang perlu dibersihin dulu.
+      const allItems = group.items;
+      const ids = allItems.map(b => b.id);
+      if (ids.length === 0) return;
+
+      // 1 query pakai where(..., 'in', ids) drpd loop query per booking satu-satu
+      // — Firestore 'in' support s.d. 30 value, jauh lebih dari cukup buat 1 grup travel.
+      const q = query(collection(db, 'payments_income'), where('bookingId', 'in', ids));
+      const paySnap = await getDocs(q);
+
+      if (!paySnap.empty) {
+        const bookingIdsWithPayments = new Set(paySnap.docs.map(d => d.data().bookingId));
+        alert(`Grup ${group.code} tidak dapat dihapus karena ${bookingIdsWithPayments.size} dari ${allItems.length} booking di grup ini masih memiliki riwayat transaksi pembayaran di Arus Kas.\n\nSilakan hapus semua riwayat pembayaran jamaah-jamaah tsb terlebih dahulu di menu Arus Kas/Riwayat Setoran.`);
+        return;
+      }
+
+      if (!confirm(`Apakah Anda yakin ingin menghapus SELURUH ${allItems.length} booking dalam grup ${group.code}?`)) return;
+
+      await Promise.all(allItems.map(item => deleteDoc(doc(db, 'bookings', item.id))));
+
+      // Kuota cuma dilepas buat booking yang statusnya masih 'active' — yang
+      // udah cancelled/rescheduled sebelumnya udah dilepas kuotanya duluan,
+      // jangan sampai di-double release di sini.
+      const activeCount = allItems.filter(b => (b.status || 'active') === 'active').length;
+      const packageId = group.primary?.packageId;
+      if (packageId && activeCount > 0) {
+        try {
+          await updateDoc(doc(db, 'packages', packageId), { quotaRemaining: increment(activeCount) });
+        } catch (quotaErr) {
+          console.error('Gagal mengembalikan kuota paket:', quotaErr);
+        }
+      }
+
+      setActiveGroupCode(null);
+      fetchData();
+    } catch (err) {
+      alert("Gagal menghapus booking grup: " + err.message);
     }
   };
 
@@ -1636,6 +2167,19 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     ? filteredBookings.filter(b => (b.groupBookingCode || b.bookingCode) === activeGroupCode)
     : [];
 
+  // Objek "group" ad-hoc buat grup yang lagi dibuka di tampilan detail — bentuknya
+  // disamain kayak entry groupedBookingSummary (code/items/primary/paxCount) biar
+  // ke-5 handler aksi level grup bisa dipakai dari header manapun (ringkasan / detail).
+  const activeGroupSummary = {
+    code: activeGroupCode,
+    items: activeGroupBookings,
+    primary: activeGroupBookings[0] || {},
+    paxCount: activeGroupBookings.length
+  };
+  // Subset pax yang statusnya masih aktif di grup yang lagi dibuka — dipakai buat
+  // nentuin kapan tombol Reschedule/Batalkan Grup muncul & buat kuota math-nya.
+  const activeGroupItems = activeGroupBookings.filter(b => (b.status || 'active') === 'active');
+
   const roomingBookingsForPackage = bookings.filter(
     b => b.packageId === roomingPackageId && (b.status || 'active') === 'active'
   );
@@ -1744,15 +2288,75 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
         {activeGroupCode ? (
         <>
-        <div className={`flex items-center justify-between p-4 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+        <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
           <button
             onClick={() => setActiveGroupCode(null)}
             className={`flex items-center gap-1.5 text-xs font-semibold ${isDark ? 'text-slate-300 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}
           >
             ‹ Kembali ke Ringkasan Booking
           </button>
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-mono text-emerald-500">Grup: {activeGroupCode}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-mono text-emerald-500 mr-1">Grup: {activeGroupCode}</span>
+
+            {/* 5 AKSI UTAMA LEVEL GRUP — versi primer/menonjol dari aksi yang
+                udah ada per-peserta di dropdown "Aksi Lainnya" tiap baris.
+                Aksi per-peserta TETAP ada & TETAP jalan, ini cuma tambahan
+                supaya nangani grup sekaligus nggak perlu buka baris satu-satu. */}
+
+            {/* 1. RIWAYAT & SETORAN PEMBAYARAN (GRUP) — selalu tampil, kayak
+                tombol Riwayat per-peserta yang juga nggak digembok permission. */}
+            <button
+              onClick={() => handleOpenGroupHistory(activeGroupBookings)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} rounded-lg text-[11px] font-medium transition-colors`}
+              title="Riwayat & Setoran Pembayaran Seluruh Peserta di Grup Ini"
+            >
+              <History className="w-3.5 h-3.5" /> Riwayat Grup
+            </button>
+
+            {/* 2. EDIT BOOKING (GRUP) */}
+            {canManageBookings && (
+              <button
+                onClick={() => handleOpenGroupEditModal(activeGroupSummary)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium transition-colors"
+                title="Edit Data Bersama Seluruh Peserta di Grup Ini"
+              >
+                <Edit className="w-3.5 h-3.5" /> Edit Grup
+              </button>
+            )}
+
+            {/* 3. RESCHEDULE (GRUP) — cuma muncul kalau masih ada pax aktif */}
+            {activeGroupItems.length > 0 && canReschedule && (
+              <button
+                onClick={() => handleOpenGroupRescheduleModal(activeGroupSummary)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[11px] font-medium transition-colors"
+                title="Reschedule Seluruh Peserta Aktif di Grup Ini"
+              >
+                <RotateCcw className="w-3.5 h-3.5" /> Reschedule Grup
+              </button>
+            )}
+
+            {/* 4. BATALKAN / REFUND (GRUP) — cuma muncul kalau masih ada pax aktif */}
+            {activeGroupItems.length > 0 && canManageBookings && (
+              <button
+                onClick={() => handleOpenGroupCancelModal(activeGroupSummary)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[11px] font-medium transition-colors"
+                title="Batalkan & Refund Seluruh Peserta Aktif di Grup Ini"
+              >
+                <Ban className="w-3.5 h-3.5" /> Batalkan Grup
+              </button>
+            )}
+
+            {/* 5. HAPUS BOOKING (GRUP) */}
+            {canManageBookings && (
+              <button
+                onClick={() => handleGroupDeleteBooking(activeGroupSummary)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg text-[11px] font-medium transition-colors`}
+                title="Hapus Seluruh Booking di Grup Ini"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Hapus Grup
+              </button>
+            )}
+
             {/* TOMBOL CETAK — dipindah ke sini (level kode booking/grup), cetak
                 sekaligus semua invoice pax dlm grup ini jadi 1 dokumen, bukan
                 tombol print terpisah per baris peserta kayak sebelumnya. */}
@@ -2730,6 +3334,470 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 </button>
                 <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium">
                   Simpan Setoran
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL RIWAYAT & SETORAN PEMBAYARAN GRUP — aggregator kenyamanan,
+          nampilin riwayat setoran tiap peserta dalam 1 grup sebagai subsection
+          sendiri-sendiri (bukan digabung jadi 1 angka). */}
+      {showGroupHistoryModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-3xl p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => { setShowGroupHistoryModal(false); setEditingGroupPaymentId(null); }} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <History className="w-5 h-5 text-emerald-500" /> Riwayat Pembayaran Grup
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>
+              {groupHistoryItems.length} peserta • setiap orang punya riwayat setoran sendiri-sendiri (nominalnya nggak digabung).
+            </p>
+
+            <div className="space-y-4">
+              {groupHistoryItems.length === 0 ? (
+                <p className={`text-xs text-center py-6 ${styles.textSub}`}>Belum ada data peserta di grup ini.</p>
+              ) : (
+                groupHistoryItems.map(item => {
+                  const payments = groupHistoryPayments[item.id] || [];
+                  return (
+                    <div key={item.id} className={`border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg overflow-hidden`}>
+                      <div className={`px-3 py-2 ${styles.innerBg} border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                        <span className={`text-xs font-semibold ${styles.textTitle}`}>{item.jamaahName || '-'}</span>
+                        <span className="block text-[10px] font-mono text-emerald-500">{item.bookingCode}</span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className={`${styles.tableHeaderBg} uppercase`}>
+                            <tr>
+                              <th className="p-2">Tanggal</th>
+                              <th className="p-2">Metode & Catatan</th>
+                              <th className="p-2">Nominal</th>
+                              <th className="p-2 text-center">Aksi</th>
+                            </tr>
+                          </thead>
+                          <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                            {payments.length === 0 ? (
+                              <tr><td colSpan="4" className={`p-3 text-center ${styles.textSub}`}>Belum ada riwayat setoran pembayaran.</td></tr>
+                            ) : (
+                              payments.map(pay => (
+                                <tr key={pay.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                                  {editingGroupPaymentId === pay.id && canManagePayments ? (
+                                    <>
+                                      <td className="p-2" colSpan="3">
+                                        <div className="grid grid-cols-3 gap-2">
+                                          <input
+                                            type="date"
+                                            className={`${styles.inputBg} p-1.5 rounded`}
+                                            value={paymentEditForm.date}
+                                            onChange={e => setPaymentEditForm({ ...paymentEditForm, date: e.target.value })}
+                                          />
+                                          <div className="flex gap-1">
+                                            <select
+                                              className={`${styles.inputBg} p-1.5 rounded w-1/2`}
+                                              value={paymentEditForm.paymentMethod}
+                                              onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentMethod: e.target.value })}
+                                            >
+                                              <option value="Transfer Bank">Transfer Bank</option>
+                                              <option value="Cash / Tunai">Cash / Tunai</option>
+                                              <option value="EDC / Kartu">EDC / Kartu</option>
+                                            </select>
+                                            <input
+                                              type="text"
+                                              placeholder="Catatan"
+                                              className={`${styles.inputBg} p-1.5 rounded w-1/2`}
+                                              value={paymentEditForm.notes}
+                                              onChange={e => setPaymentEditForm({ ...paymentEditForm, notes: e.target.value })}
+                                            />
+                                          </div>
+                                          <input
+                                            type="number"
+                                            placeholder="Nominal"
+                                            className={`${styles.inputBg} p-1.5 rounded`}
+                                            value={paymentEditForm.amount}
+                                            onChange={e => setPaymentEditForm({ ...paymentEditForm, amount: e.target.value })}
+                                          />
+                                        </div>
+                                      </td>
+                                      <td className="p-2 text-center">
+                                        <button onClick={() => handleSaveGroupPaymentEdit(pay)} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded mr-1">
+                                          Simpan
+                                        </button>
+                                        <button onClick={() => setEditingGroupPaymentId(null)} className={`px-2 py-1 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-200 text-slate-700'} text-[10px] rounded`}>
+                                          Batal
+                                        </button>
+                                      </td>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <td className={`p-2 ${styles.textSub}`}>
+                                        {formatDateDDMMYYYY(pay.createdAt)}
+                                      </td>
+                                      <td className="p-2">
+                                        <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{pay.paymentMethod}</span>
+                                        <span className={styles.textSub}>{pay.notes}</span>
+                                      </td>
+                                      <td className="p-2 font-bold text-emerald-500">
+                                        Rp {Number(pay.amount).toLocaleString('id-ID')}
+                                      </td>
+                                      <td className="p-2 text-center">
+                                        {canManagePayments ? (
+                                          <>
+                                            <button
+                                              onClick={() => {
+                                                setEditingGroupPaymentId(pay.id);
+                                                setPaymentEditForm({ amount: pay.amount, paymentMethod: pay.paymentMethod, notes: pay.notes, date: (pay.createdAt || '').slice(0, 10) });
+                                              }}
+                                              className="text-emerald-500 hover:underline mr-2"
+                                            >
+                                              Edit
+                                            </button>
+                                            <button onClick={() => handleDeleteGroupPayment(pay)} className="text-rose-500 hover:underline">
+                                              Hapus
+                                            </button>
+                                          </>
+                                        ) : (
+                                          <span className={styles.textSub}>—</span>
+                                        )}
+                                      </td>
+                                    </>
+                                  )}
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className={`flex justify-end pt-4 mt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'} text-xs`}>
+              <button onClick={() => { setShowGroupHistoryModal(false); setEditingGroupPaymentId(null); }} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDIT BOOKING GRUP — cuma field yang emang shared se-grup (Paket,
+          Pemesan, Tipe Kamar, Alokasi Bus) + opsional Tambah Setoran. Identitas
+          peserta TETAP di Edit Booking per-peserta ("Aksi Lainnya"). */}
+      {showGroupEditModal && groupEditTarget && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowGroupEditModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <Edit className="w-5 h-5 text-emerald-500" /> Edit Booking Grup
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>
+              Kode: <span className="font-mono text-emerald-500">{groupEditTarget.code}</span> • {groupEditTarget.paxCount} Pax
+            </p>
+            <div className={`${styles.innerBg} p-3 rounded-lg border text-[11px] mb-4`}>
+              Perubahan di sini berlaku ke SEMUA peserta yang statusnya masih aktif di grup ini. Identitas peserta (nama/jamaah) nggak diubah dari sini — pakai Edit Booking per-peserta kalau cuma 1 orang yang perlu diganti datanya.
+            </div>
+
+            <form onSubmit={handleGroupEditSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div>
+                <label className="block mb-1 font-medium">Pilih Paket Travel</label>
+                <select
+                  required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={groupEditForm.packageId}
+                  onChange={e => setGroupEditForm({ ...groupEditForm, packageId: e.target.value })}
+                >
+                  <option value="">-- Pilih Program Keberangkatan --</option>
+                  {packagesList.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.code}) - Sisa Seat: {p.quotaRemaining ?? p.quotaTotal}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Pemesan (Yang Melakukan Pemesanan)</label>
+                <select
+                  required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={groupEditForm.ordererId}
+                  onChange={e => setGroupEditForm({ ...groupEditForm, ordererId: e.target.value })}
+                >
+                  <option value="">-- Pilih Data Master Jamaah --</option>
+                  <option value="__new__">➕ Tambah Pemesan Baru (Belum Terdaftar)</option>
+                  {jamaahList.map(j => (
+                    <option key={j.id} value={j.id}>
+                      {j.fullName} - {j.customerCode || 'CST'} - Paspor: {j.passportNumber || 'Belum Ada'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {groupEditForm.ordererId === '__new__' && (
+                <div className={`${styles.innerBg} p-3 rounded-xl border space-y-2.5`}>
+                  <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">Data Pemesan Baru</p>
+                  <input
+                    type="text" required
+                    placeholder="Nama Lengkap (wajib)"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={groupEditNewOrdererForm.fullName}
+                    onChange={e => setGroupEditNewOrdererForm({ ...groupEditNewOrdererForm, fullName: e.target.value })}
+                  />
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <input
+                      type="text"
+                      placeholder="No. HP / WhatsApp"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={groupEditNewOrdererForm.phone}
+                      onChange={e => setGroupEditNewOrdererForm({ ...groupEditNewOrdererForm, phone: e.target.value })}
+                    />
+                    <input
+                      type="text"
+                      placeholder="NIK"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={groupEditNewOrdererForm.nik}
+                      onChange={e => setGroupEditNewOrdererForm({ ...groupEditNewOrdererForm, nik: e.target.value })}
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="No. Paspor (opsional)"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={groupEditNewOrdererForm.passportNumber}
+                    onChange={e => setGroupEditNewOrdererForm({ ...groupEditNewOrdererForm, passportNumber: e.target.value })}
+                  />
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1 font-medium">Tipe Kamar</label>
+                  <select
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={groupEditForm.roomType}
+                    onChange={e => setGroupEditForm({ ...groupEditForm, roomType: e.target.value })}
+                  >
+                    <option value="Quad">Quad (4 Orang)</option>
+                    <option value="Triple">Triple (3 Orang)</option>
+                    <option value="Double">Double (2 Orang)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Alokasi Bus</label>
+                  <select
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={groupEditForm.busGroup}
+                    onChange={e => setGroupEditForm({ ...groupEditForm, busGroup: e.target.value })}
+                  >
+                    <option value="Bus 1">Bus 1</option>
+                    <option value="Bus 2">Bus 2</option>
+                    <option value="Bus 3">Bus 3</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className={`${styles.innerBg} p-4 rounded-xl border space-y-3`}>
+                <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <Wallet className="w-3.5 h-3.5" /> Tambah Setoran (Opsional)
+                </p>
+                <p className="text-[10px] opacity-70 -mt-2">Kalau diisi, nominal di bawah dibagi rata otomatis ke seluruh peserta aktif di grup ini.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block mb-1 font-medium">Nominal Setoran (Rp)</label>
+                    <input
+                      type="number" placeholder="5000000 (Kosongkan jika 0)"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={groupEditForm.addPaymentAmount}
+                      onChange={e => setGroupEditForm({ ...groupEditForm, addPaymentAmount: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 font-medium">Metode Bayar</label>
+                    <select
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={groupEditForm.addPaymentMethod}
+                      onChange={e => setGroupEditForm({ ...groupEditForm, addPaymentMethod: e.target.value })}
+                    >
+                      <option value="Transfer Bank">Transfer Bank</option>
+                      <option value="Cash / Tunai">Cash / Tunai</option>
+                      <option value="EDC / Kartu">EDC / Kartu</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Tanggal Setoran</label>
+                  <input
+                    type="date"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={groupEditForm.addPaymentDate}
+                    onChange={e => setGroupEditForm({ ...groupEditForm, addPaymentDate: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Catatan Pembayaran</label>
+                  <input
+                    type="text" placeholder="Catatan setoran..."
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={groupEditForm.addPaymentNotes}
+                    onChange={e => setGroupEditForm({ ...groupEditForm, addPaymentNotes: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className={`pt-3 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowGroupEditModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium">
+                  Simpan Perubahan Grup
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL RESCHEDULE GRUP */}
+      {showGroupRescheduleModal && groupRescheduleTarget && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowGroupRescheduleModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <RotateCcw className="w-5 h-5 text-blue-500" /> Reschedule Grup ke Paket Lain
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>
+              Kode: <span className="font-mono text-emerald-500">{groupRescheduleTarget.code}</span>
+            </p>
+
+            <form onSubmit={handleGroupRescheduleSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div className={`${styles.innerBg} p-3 rounded-lg border text-[11px]`}>
+                Setoran yang udah dibayar masing-masing peserta akan otomatis dipindah (carry-over) apa adanya ke booking barunya masing-masing — nggak dibagi rata ulang.
+              </div>
+              <div>
+                <label className="block mb-1 font-medium">Paket / Keberangkatan Tujuan</label>
+                <select
+                  required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={groupRescheduleForm.newPackageId}
+                  onChange={e => setGroupRescheduleForm({ ...groupRescheduleForm, newPackageId: e.target.value })}
+                >
+                  <option value="">-- Pilih Program Keberangkatan Baru --</option>
+                  {packagesList.filter(p => p.id !== groupRescheduleTarget.primary?.packageId).map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.code}) - Sisa Seat: {p.quotaRemaining ?? p.quotaTotal}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1 font-medium">Tipe Kamar</label>
+                  <select
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={groupRescheduleForm.roomType}
+                    onChange={e => setGroupRescheduleForm({ ...groupRescheduleForm, roomType: e.target.value })}
+                  >
+                    <option value="Quad">Quad (4 Orang)</option>
+                    <option value="Triple">Triple (3 Orang)</option>
+                    <option value="Double">Double (2 Orang)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Alokasi Bus</label>
+                  <select
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={groupRescheduleForm.busGroup}
+                    onChange={e => setGroupRescheduleForm({ ...groupRescheduleForm, busGroup: e.target.value })}
+                  >
+                    <option value="Bus 1">Bus 1</option>
+                    <option value="Bus 2">Bus 2</option>
+                    <option value="Bus 3">Bus 3</option>
+                  </select>
+                </div>
+              </div>
+              <div className={`pt-3 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowGroupRescheduleModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium">
+                  Proses Reschedule Grup
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL BATALKAN / REFUND GRUP */}
+      {showGroupCancelModal && groupCancelTarget && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowGroupCancelModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <Ban className="w-5 h-5 text-rose-500" /> Batalkan Grup & Refund
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>
+              Kode: <span className="font-mono text-emerald-500">{groupCancelTarget.code}</span>
+            </p>
+
+            <form onSubmit={handleGroupCancelSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div className={`${styles.innerBg} p-3 rounded-lg border text-[11px]`}>
+                Total sudah disetor (seluruh peserta aktif): <strong className={styles.textTitle}>Rp {groupCancelTarget.items.filter(b => (b.status || 'active') === 'active').reduce((acc, b) => acc + Number(b.totalPaid || 0), 0).toLocaleString('id-ID')}</strong>
+              </div>
+              <div>
+                <label className="block mb-1 font-medium">Nominal Refund Total (Rp)</label>
+                <input
+                  type="number" required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={groupCancelForm.refundAmount}
+                  onChange={e => setGroupCancelForm({ ...groupCancelForm, refundAmount: e.target.value })}
+                />
+                <p className="text-[10px] mt-1 opacity-70">Nominal total ini akan dibagi rata otomatis ke seluruh peserta aktif di grup ini. Boleh kurang dari total setoran kalau ada potongan/biaya pembatalan.</p>
+              </div>
+              <div>
+                <label className="block mb-1 font-medium">Metode Refund</label>
+                <select
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={groupCancelForm.refundMethod}
+                  onChange={e => setGroupCancelForm({ ...groupCancelForm, refundMethod: e.target.value })}
+                >
+                  <option value="Transfer Bank">Transfer Bank</option>
+                  <option value="Cash / Tunai">Cash / Tunai</option>
+                  <option value="Deposit / Saldo Akun">Deposit / Saldo Akun</option>
+                </select>
+              </div>
+              <div>
+                <label className="block mb-1 font-medium">Alasan Pembatalan</label>
+                <textarea
+                  required rows={3}
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="Contoh: Sakit, kendala visa, ganti jadwal keluarga, dll."
+                  value={groupCancelForm.reason}
+                  onChange={e => setGroupCancelForm({ ...groupCancelForm, reason: e.target.value })}
+                />
+              </div>
+              <div className={`pt-3 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowGroupCancelModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-medium">
+                  Proses Pembatalan & Refund Grup
                 </button>
               </div>
             </form>
