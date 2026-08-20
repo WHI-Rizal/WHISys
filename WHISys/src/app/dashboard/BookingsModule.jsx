@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where, increment } from 'firebase/firestore';
 import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star } from 'lucide-react';
 
 const formatDateDDMMYYYY = (dateString) => {
@@ -456,11 +456,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       await deleteDoc(doc(db, 'bookings', item.id));
 
       if (item.packageId) {
-        const pkgRef = doc(db, 'packages', item.packageId);
-        const pkgSnap = await getDoc(pkgRef);
-        if (pkgSnap.exists()) {
-          const currentQuota = pkgSnap.data().quotaRemaining ?? 0;
-          await updateDoc(pkgRef, { quotaRemaining: Number(currentQuota) + 1 });
+        // Pakai increment() (atomic di server) — bukan baca-lalu-tulis dari
+        // client — supaya nggak salah hitung kalau ada aksi lain yang
+        // barengan ubah kuota paket yang sama. Dibungkus try/catch sendiri:
+        // booking-nya udah kehapus duluan, jangan sampai gagal nambah balik
+        // kuota (mis. paketnya udah kehapus juga) bikin proses ini error.
+        try {
+          await updateDoc(doc(db, 'packages', item.packageId), { quotaRemaining: increment(1) });
+        } catch (quotaErr) {
+          console.error('Gagal mengembalikan kuota paket:', quotaErr);
         }
       }
 
@@ -496,14 +500,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     setShowActionModal(true);
   };
 
-  // Melepas kembali kuota seat ke paket terkait (dipakai saat batal/reschedule)
+  // Melepas kembali kuota seat ke paket terkait (dipakai saat batal/reschedule).
+  // Pakai increment() (atomic di server), bukan baca-lalu-tulis dari client,
+  // supaya nggak salah hitung kalau ada booking lain yang barengan ubah
+  // kuota paket yang sama.
   const releaseQuotaToPackage = async (packageId) => {
     if (!packageId) return;
-    const pkgRef = doc(db, 'packages', packageId);
-    const pkgSnap = await getDoc(pkgRef);
-    if (pkgSnap.exists()) {
-      const currentQuota = pkgSnap.data().quotaRemaining ?? 0;
-      await updateDoc(pkgRef, { quotaRemaining: Number(currentQuota) + 1 });
+    try {
+      await updateDoc(doc(db, 'packages', packageId), { quotaRemaining: increment(1) });
+    } catch (quotaErr) {
+      console.error('Gagal mengembalikan kuota paket:', quotaErr);
     }
   };
 
@@ -611,9 +617,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       });
       await releaseQuotaToPackage(oldBooking.packageId);
 
-      // 4. Kurangi kuota paket tujuan
+      // 4. Kurangi kuota paket tujuan (atomic, bukan baca-lalu-tulis)
       await updateDoc(doc(db, 'packages', newPkg.id), {
-        quotaRemaining: Number(newPkg.quotaRemaining || 1) - 1
+        quotaRemaining: increment(-1)
       });
 
       setShowActionModal(false);
@@ -1060,7 +1066,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             });
           }
 
-          await updateDoc(doc(db, 'packages', selectedPkg.id), { quotaRemaining: Number(selectedPkg.quotaRemaining || 1) - 1 });
+          await updateDoc(doc(db, 'packages', selectedPkg.id), { quotaRemaining: increment(-1) });
 
         } else {
           // ===== REGISTRASI GROUP / MULTI-PAX (jadi 1 manifest, kode grup sama) =====
@@ -1146,7 +1152,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             }
           }
 
-          await updateDoc(doc(db, 'packages', selectedPkg.id), { quotaRemaining: Number(selectedPkg.quotaRemaining || paxCount) - paxCount });
+          await updateDoc(doc(db, 'packages', selectedPkg.id), { quotaRemaining: increment(-paxCount) });
         }
       }
 
