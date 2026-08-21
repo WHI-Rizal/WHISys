@@ -346,11 +346,15 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     fetchData();
   }, []);
 
+  // Dipicu dari modul lain (mis. link "Kode Booking" di modul Keuangan) —
+  // langsung buka layar detail GRUP (tombol Opsi: Riwayat Pembayaran, Edit,
+  // Reschedule, Batalkan, Hapus, Cetak Invoice) berdasarkan kode booking,
+  // bukan langsung ke modal Riwayat Pembayaran per-peserta yang lama.
   useEffect(() => {
     if (targetBookingId && bookings.length > 0) {
       const found = bookings.find(b => b.id === targetBookingId);
       if (found) {
-        handleOpenHistory(found);
+        setActiveGroupCode(found.groupBookingCode || found.bookingCode);
       }
     }
   }, [targetBookingId, bookings]);
