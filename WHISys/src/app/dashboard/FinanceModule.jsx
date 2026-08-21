@@ -204,7 +204,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     vendorName: '',
     category: 'Tiket Pesawat',
     amount: '',
-    notes: 'DP Booking Seat'
+    notes: 'DP Booking Seat',
+    paymentDate: todayISODate()
   });
 
   const [operationalForm, setOperationalForm] = useState({
@@ -436,11 +437,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         category: vendorForm.category,
         amount: Number(vendorForm.amount),
         notes: vendorForm.notes,
-        createdAt: new Date().toISOString()
+        createdAt: resolvePaymentCreatedAt(vendorForm.paymentDate)
       });
 
       setShowVendorModal(false);
-      setVendorForm({ packageId: '', vendorName: '', category: 'Tiket Pesawat', amount: '', notes: 'DP Booking Seat' });
+      setVendorForm({ packageId: '', vendorName: '', category: 'Tiket Pesawat', amount: '', notes: 'DP Booking Seat', paymentDate: todayISODate() });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat pembayaran vendor: " + err.message);
@@ -1485,6 +1486,16 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                     onChange={e => setVendorForm({ ...vendorForm, amount: e.target.value })}
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Tanggal Pembayaran</label>
+                <DateFieldID
+                  required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={vendorForm.paymentDate}
+                  onChange={(val) => setVendorForm({ ...vendorForm, paymentDate: val })}
+                />
               </div>
 
               <div>
