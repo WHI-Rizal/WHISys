@@ -2144,7 +2144,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             totalPaid: paymentVal,
             paymentStatus: paymentVal >= price ? 'Full Payment' : 'DP Paid',
             documents: emptyDocChecklist,
-            createdAt: new Date().toISOString()
+            // Waktu Transaksi booking ikut field tanggal yang diisi staff pas
+            // registrasi/DP awal (formData.paymentDate) — bukan jam submit
+            // sistem, biar bisa tetap akurat kalau input booking dilakukan
+            // belakangan dari tanggal transaksi aslinya.
+            createdAt: resolvePaymentCreatedAt(formData.paymentDate)
           });
 
           if (paymentVal > 0) {
@@ -2204,7 +2208,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               totalPaid: paxShare,
               paymentStatus: paxShare >= price ? 'Full Payment' : 'DP Paid',
               documents: emptyDocChecklist,
-              createdAt: new Date().toISOString()
+              // Sama kayak alur 1 pax — Waktu Transaksi ikut field tanggal
+              // yang diisi staff, bukan jam submit sistem.
+              createdAt: resolvePaymentCreatedAt(formData.paymentDate)
             });
 
             if (paxShare > 0) {
