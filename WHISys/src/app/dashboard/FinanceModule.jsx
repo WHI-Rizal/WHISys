@@ -56,6 +56,94 @@ const formatDateDDMMYYYY = (dateString) => {
 
 const todayISODate = () => new Date().toISOString().slice(0, 10);
 
+// Gabungkan tanggal setoran yang dipilih staff dengan jam-menit-detik
+// SEKARANG, biar createdAt tetap kronologis kalau dibandingkan sama transaksi
+// lain yang dicatat hari yang sama — sama persis dgn resolvePaymentCreatedAt
+// yang dipakai di BookingsModule.jsx.
+const resolvePaymentCreatedAt = (dateStr) => {
+  if (!dateStr) return new Date().toISOString();
+  const now = new Date();
+  const timePart = now.toTimeString().slice(0, 8);
+  const combined = new Date(`${dateStr}T${timePart}`);
+  return isNaN(combined.getTime()) ? now.toISOString() : combined.toISOString();
+};
+
+// Bungkus 1 baris "transaksi setoran" hasil gabungan sejumlah dokumen
+// payments_income yang lahir dari 1x setoran yang sama tapi kesplit ke
+// beberapa peserta dalam 1 grup booking (lihat groupTransactionId).
+const buildIncomeRow = (docs, bookingsById, isFallbackMerge) => {
+  const totalAmount = docs.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
+  const first = docs[0];
+  const bookingIds = Array.from(new Set(docs.map(d => d.bookingId).filter(Boolean)));
+  const relatedBookings = bookingIds.map(id => bookingsById[id]).filter(Boolean);
+  const groupCode = relatedBookings[0]
+    ? (relatedBookings[0].groupBookingCode || relatedBookings[0].bookingCode)
+    : (first.bookingCode || '-');
+  const paxCount = relatedBookings.length > 0 ? relatedBookings.length : docs.length;
+  const isMerged = docs.length > 1;
+  let notes = (first.notes || '').replace(/\s*\(Grup[^)]*\)\s*$/, '').trim();
+  if (isMerged) {
+    notes = `${notes}${notes ? ' ' : ''}(Gabungan ${paxCount} peserta)`;
+    if (isFallbackMerge) notes += ' — digabung otomatis, estimasi';
+  }
+  return {
+    key: isMerged ? `merged_${docs.map(d => d.id).join('_')}` : first.id,
+    docs,
+    isMerged,
+    amount: totalAmount,
+    paymentMethod: first.paymentMethod,
+    notes,
+    createdAt: first.createdAt,
+    groupCode,
+    paxCount,
+    packageName: first.packageName,
+    jamaahName: first.jamaahName,
+    bookingId: first.bookingId
+  };
+};
+
+// Gabungkan seluruh transaksi payments_income jadi baris per TRANSAKSI ASLI
+// (bukan per pecahan pax) — dokumen yang berbagi groupTransactionId yang sama
+// digabung akurat (ditulis pas app benar-benar nge-split 1 setoran ke banyak
+// pax dalam 1 grup booking). Data lama tanpa groupTransactionId dicoba
+// digabung pakai heuristik (kode grup + metode + catatan + menit yang sama),
+// ditandai jelas "digabung otomatis, estimasi" kalau kepakai.
+const buildMergedIncomeRows = (paymentsFlat, bookingsList) => {
+  const bookingsById = {};
+  bookingsList.forEach(b => { bookingsById[b.id] = b; });
+  const resolveGroupCode = (tx) => {
+    const bk = bookingsById[tx.bookingId];
+    return bk ? (bk.groupBookingCode || bk.bookingCode) : (tx.bookingCode || '-');
+  };
+
+  const withGtx = paymentsFlat.filter(p => p.groupTransactionId);
+  const withoutGtx = paymentsFlat.filter(p => !p.groupTransactionId);
+
+  const rows = [];
+  const gtxMap = {};
+  withGtx.forEach(p => {
+    if (!gtxMap[p.groupTransactionId]) gtxMap[p.groupTransactionId] = [];
+    gtxMap[p.groupTransactionId].push(p);
+  });
+  Object.values(gtxMap).forEach(docs => rows.push(buildIncomeRow(docs, bookingsById, false)));
+
+  const fallbackMap = {};
+  withoutGtx.forEach(p => {
+    const key = `${resolveGroupCode(p)}||${p.paymentMethod || ''}||${(p.notes || '')}||${(p.createdAt || '').slice(0, 16)}`;
+    if (!fallbackMap[key]) fallbackMap[key] = [];
+    fallbackMap[key].push(p);
+  });
+  Object.values(fallbackMap).forEach(docs => {
+    if (docs.length >= 2) {
+      rows.push(buildIncomeRow(docs, bookingsById, true));
+    } else {
+      docs.forEach(p => rows.push(buildIncomeRow([p], bookingsById, false)));
+    }
+  });
+
+  return rows;
+};
+
 const MONTH_NAMES_ID = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
@@ -104,10 +192,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const [selectedPackageForDetail, setSelectedPackageForDetail] = useState(null);
 
   const [incomeForm, setIncomeForm] = useState({
-    bookingId: '',
+    groupCode: '',
     amount: '',
     paymentMethod: 'Transfer Bank',
-    notes: 'DP Keberangkatan'
+    notes: 'DP Keberangkatan',
+    date: new Date().toISOString().slice(0, 10)
   });
 
   const [vendorForm, setVendorForm] = useState({
@@ -189,19 +278,6 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     }
   };
 
-  const handleDeleteIncome = async (txId, bookingId) => {
-    if (!confirm("Apakah Anda yakin ingin menghapus catatan transaksi setoran ini?")) return;
-    try {
-      await deleteDoc(doc(db, 'payments_income', txId));
-      if (bookingId) {
-        await syncBookingTotalPaid(bookingId);
-      }
-      fetchData();
-    } catch (err) {
-      alert("Gagal menghapus transaksi: " + err.message);
-    }
-  };
-
   const handleDeleteVendorPayment = async (vpId) => {
     if (!confirm("Apakah Anda yakin ingin menghapus catatan pengeluaran vendor ini?")) return;
     try {
@@ -275,30 +351,72 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const handleIncomeSubmit = async (e) => {
     e.preventDefault();
     try {
-      const selectedBooking = bookingsList.find(b => b.id === incomeForm.bookingId);
-      if (!selectedBooking) return;
+      const groupItems = bookingsList
+        .filter(b => (b.groupBookingCode || b.bookingCode) === incomeForm.groupCode)
+        .sort((a, b) => {
+          if (a.groupPaxIndex != null && b.groupPaxIndex != null) return a.groupPaxIndex - b.groupPaxIndex;
+          return 0;
+        });
+      if (groupItems.length === 0) return;
 
       const amountVal = Number(incomeForm.amount);
+      const paxCount = groupItems.length;
 
-      await addDoc(collection(db, 'payments_income'), {
-        bookingId: selectedBooking.id,
-        bookingCode: selectedBooking.bookingCode,
-        jamaahName: selectedBooking.jamaahName,
-        packageId: selectedBooking.packageId,
-        packageName: selectedBooking.packageName,
-        amount: amountVal,
-        paymentMethod: incomeForm.paymentMethod,
-        notes: incomeForm.notes,
-        createdAt: new Date().toISOString()
-      });
+      // Setoran dibagi rata ke semua pax dalam kode booking ini (sisa
+      // pembagian jatuh ke pax pertama) — pola sama persis dengan setoran
+      // grup di modul Booking & Manifest. Kalau kode booking ini cuma 1 pax,
+      // ini otomatis jadi setoran biasa (nggak kesplit).
+      const baseShare = Math.floor(amountVal / paxCount);
+      const remainder = amountVal - (baseShare * paxCount);
 
-      await syncBookingTotalPaid(selectedBooking.id);
+      // Seluruh dokumen payments_income hasil split dari 1x submit ini
+      // ditandai groupTransactionId yang sama, biar bisa digabung balik jadi
+      // 1 baris transaksi pas ditampilkan (di sini maupun di modul Booking).
+      const groupTransactionId = `gtx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const isGroup = paxCount > 1;
+
+      for (let i = 0; i < groupItems.length; i++) {
+        const item = groupItems[i];
+        const paxShare = baseShare + (i === 0 ? remainder : 0);
+
+        if (paxShare > 0) {
+          await addDoc(collection(db, 'payments_income'), {
+            bookingId: item.id,
+            bookingCode: item.bookingCode,
+            jamaahName: item.jamaahName,
+            packageId: item.packageId,
+            packageName: item.packageName,
+            amount: paxShare,
+            paymentMethod: incomeForm.paymentMethod,
+            notes: isGroup ? `${incomeForm.notes} (Grup ${incomeForm.groupCode})` : incomeForm.notes,
+            createdAt: resolvePaymentCreatedAt(incomeForm.date),
+            ...(isGroup ? { groupTransactionId } : {})
+          });
+        }
+
+        await syncBookingTotalPaid(item.id);
+      }
 
       setShowIncomeModal(false);
-      setIncomeForm({ bookingId: '', amount: '', paymentMethod: 'Transfer Bank', notes: 'DP Keberangkatan' });
+      setIncomeForm({ groupCode: '', amount: '', paymentMethod: 'Transfer Bank', notes: 'DP Keberangkatan', date: new Date().toISOString().slice(0, 10) });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat pembayaran: " + err.message);
+    }
+  };
+
+  const handleDeleteIncomeRow = async (row) => {
+    const confirmMsg = row.isMerged
+      ? `Hapus transaksi setoran gabungan senilai Rp ${row.amount.toLocaleString('id-ID')} ini? Ini akan menghapus ${row.docs.length} catatan setoran split (per peserta) yang jadi bagiannya sekaligus.`
+      : "Apakah Anda yakin ingin menghapus catatan transaksi setoran ini?";
+    if (!confirm(confirmMsg)) return;
+    try {
+      await Promise.all(row.docs.map(d => deleteDoc(doc(db, 'payments_income', d.id))));
+      const affectedBookingIds = Array.from(new Set(row.docs.map(d => d.bookingId).filter(Boolean)));
+      await Promise.all(affectedBookingIds.map(id => syncBookingTotalPaid(id)));
+      fetchData();
+    } catch (err) {
+      alert("Gagal menghapus transaksi: " + err.message);
     }
   };
 
@@ -352,6 +470,28 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const totalVendorPaid = vendorPayments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const totalOperational = operationalExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const netCashflow = totalIncome - totalVendorPaid - totalOperational;
+
+  // Opsi "Pilih Kode Booking" di modal Terima Setoran Jamaah — dikelompokkan
+  // per kode booking rombongan (bukan per pax lagi), biar 1 kode booking cuma
+  // muncul 1x meskipun pesertanya banyak.
+  const groupedBookingOptions = (() => {
+    const map = {};
+    bookingsList.forEach(b => {
+      const code = b.groupBookingCode || b.bookingCode;
+      if (!map[code]) map[code] = [];
+      map[code].push(b);
+    });
+    return Object.entries(map).map(([code, items]) => ({
+      code,
+      items,
+      primary: items[0],
+      paxCount: items.length
+    }));
+  })();
+
+  // Baris "Riwayat Setoran Jamaah" — setoran yang kesplit ke beberapa pax
+  // dalam 1 kode booking rombongan digabung balik jadi 1 baris nominal utuh.
+  const incomeRows = buildMergedIncomeRows(transactions, bookingsList);
 
   // Paket terkait suatu setoran/pembayaran vendor, dipakai buat cek status pengakuan pendapatan.
   // Prioritas cari lewat packageId (akurat, nggak ambigu). packageName cuma
@@ -690,39 +830,39 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </tr>
               </thead>
               <tbody className={`divide-y ${styles.tableRowBorder}`}>
-                {transactions.length === 0 ? (
+                {incomeRows.length === 0 ? (
                   <tr>
                     <td colSpan="6" className={`p-8 text-center ${styles.textSub}`}>Belum ada transaksi setoran jamaah.</td>
                   </tr>
                 ) : (
-                  transactions.map((tx) => (
-                    <tr key={tx.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                  incomeRows.map((row) => (
+                    <tr key={row.key} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
                       <td className={`p-4 font-semibold ${styles.textTitle}`}>
-                        {tx.jamaahName}
+                        {row.paxCount > 1 ? `${row.paxCount} Peserta` : (row.jamaahName || '-')}
                         <button
                           type="button"
                           onClick={() => {
-                            if (onSelectBooking && tx.bookingId) {
-                              onSelectBooking(tx.bookingId);
+                            if (onSelectBooking && row.bookingId) {
+                              onSelectBooking(row.bookingId);
                             }
                           }}
                           className="block text-[10px] text-emerald-500 font-mono hover:underline text-left cursor-pointer"
                         >
-                          {tx.bookingCode} ↗
+                          {row.groupCode} ↗
                         </button>
                       </td>
-                      <td className={`p-4 ${styles.textTitle}`}>{tx.packageName}</td>
+                      <td className={`p-4 ${styles.textTitle}`}>{row.packageName}</td>
                       <td className="p-4">
-                        <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] mr-1`}>{tx.paymentMethod}</span>
-                        <span className={styles.textSub}>{tx.notes}</span>
+                        <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] mr-1`}>{row.paymentMethod}</span>
+                        <span className={styles.textSub}>{row.notes}</span>
                       </td>
-                      <td className={`p-4 ${styles.textSub}`}>{formatDateDDMMYYYY(tx.createdAt)}</td>
+                      <td className={`p-4 ${styles.textSub}`}>{formatDateDDMMYYYY(row.createdAt)}</td>
                       <td className="p-4 text-right font-bold text-emerald-500">
-                        + Rp {Number(tx.amount).toLocaleString('id-ID')}
+                        + Rp {Number(row.amount).toLocaleString('id-ID')}
                       </td>
                       <td className="p-4 text-center">
                         <button
-                          onClick={() => handleDeleteIncome(tx.id, tx.bookingId)}
+                          onClick={() => handleDeleteIncomeRow(row)}
                           className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
                           title="Hapus Transaksi Setoran"
                         >
@@ -1205,20 +1345,23 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
             <form onSubmit={handleIncomeSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
-                <label className="block mb-1 font-medium">Pilih Booking Jamaah</label>
+                <label className="block mb-1 font-medium">Pilih Kode Booking</label>
                 <select
                   required
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={incomeForm.bookingId}
-                  onChange={e => setIncomeForm({ ...incomeForm, bookingId: e.target.value })}
+                  value={incomeForm.groupCode}
+                  onChange={e => setIncomeForm({ ...incomeForm, groupCode: e.target.value })}
                 >
-                  <option value="">-- Pilih Kode Booking / Jamaah --</option>
-                  {bookingsList.map(b => (
-                    <option key={b.id} value={b.id}>
-                      {b.bookingCode} - {b.jamaahName} ({b.packageName})
+                  <option value="">-- Pilih Kode Booking --</option>
+                  {groupedBookingOptions.map(g => (
+                    <option key={g.code} value={g.code}>
+                      {g.code} - {g.paxCount > 1 ? `${g.paxCount} Peserta` : g.primary.jamaahName} ({g.primary.packageName})
                     </option>
                   ))}
                 </select>
+                <p className={`text-[10.5px] ${styles.textSub} mt-1`}>
+                  Untuk booking rombongan, nominal setoran otomatis dibagi rata ke semua peserta dalam kode booking ini.
+                </p>
               </div>
 
               <div>
@@ -1245,14 +1388,24 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                   </select>
                 </div>
                 <div>
-                  <label className="block mb-1 font-medium">Keterangan</label>
-                  <input
-                    type="text" placeholder="DP 1 / Pelunasan"
+                  <label className="block mb-1 font-medium">Tanggal Setoran</label>
+                  <DateFieldID
+                    required
                     className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    value={incomeForm.notes}
-                    onChange={e => setIncomeForm({ ...incomeForm, notes: e.target.value })}
+                    value={incomeForm.date}
+                    onChange={(val) => setIncomeForm({ ...incomeForm, date: val })}
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Keterangan</label>
+                <input
+                  type="text" placeholder="DP 1 / Pelunasan"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={incomeForm.notes}
+                  onChange={e => setIncomeForm({ ...incomeForm, notes: e.target.value })}
+                />
               </div>
 
               <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
