@@ -1793,18 +1793,19 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       </tr>
     `).join('');
 
-    // Gabungan semua setoran dari SELURUH pax dlm grup ini, diurutkan
-    // kronologis, & ditandai atas nama siapa — biar tetap jelas rinciannya
-    // walau nominalnya udah ditotal jadi 1 invoice.
-    const sortedPayments = [...allPayments].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    const paymentRowsHtml = sortedPayments.length > 0
-      ? sortedPayments.map((pay, idx) => `
+    // Gabungan semua setoran dari SELURUH pax dlm grup ini jadi baris
+    // TRANSAKSI (pakai logika gabung yang sama dengan modal Riwayat
+    // Pembayaran) — jadi 1x setoran DP yang otomatis kesplit ke N peserta
+    // tetap muncul sebagai 1 baris nominal gabungan, bukan N baris per pax.
+    const mergedTransactions = buildMergedGroupTransactions(allPayments);
+    const paymentRowsHtml = mergedTransactions.length > 0
+      ? mergedTransactions.map((tx, idx) => `
           <tr style="background-color: #f8fafc; font-size: 11px; color: #475569;">
             <td style="padding: 6px 12px; border-bottom: 1px solid #f1f5f9;">
-              • Setoran #${idx + 1} (${formatDateDDMMYYYY(pay.createdAt)}) - <span style="font-style: italic;">${pay.paymentMethod || 'Transfer'} (${pay.notes || 'Setoran'})</span>
+              • Setoran #${idx + 1} (${formatDateDDMMYYYY(tx.createdAt)}) - <span style="font-style: italic;">${tx.paymentMethod || 'Transfer'} (${tx.notes || 'Setoran'})</span>
             </td>
             <td style="text-align: right; padding: 6px 12px; font-weight: 600; color: #059669; border-bottom: 1px solid #f1f5f9; white-space: nowrap;">
-              + Rp ${Number(pay.amount || 0).toLocaleString('id-ID')}
+              + Rp ${Number(tx.amount || 0).toLocaleString('id-ID')}
             </td>
           </tr>
         `).join('')
