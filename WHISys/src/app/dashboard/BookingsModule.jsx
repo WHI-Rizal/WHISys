@@ -213,6 +213,8 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     // (lihat splitFlatAmount di atas).
     extraVisaFee: '',
     extraTippingFee: '',
+    extraOtherFee: '',
+    extraOtherNotes: '',
     extraDiscount: ''
   });
 
@@ -298,6 +300,8 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     // ke semua pax aktif (sama pola kayak splitFlatAmount di form registrasi).
     extraVisaFee: '',
     extraTippingFee: '',
+    extraOtherFee: '',
+    extraOtherNotes: '',
     extraDiscount: ''
   });
   const [groupEditNewOrdererForm, setGroupEditNewOrdererForm] = useState({
@@ -596,7 +600,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       roomType: 'Quad', busGroup: 'Bus 1', paxCount: 1,
       initialPayment: '', paymentMethod: 'Transfer Bank', paymentNotes: 'DP Pendaftaran',
       paymentDate: todayDateStr(),
-      extraVisaFee: '', extraTippingFee: '', extraDiscount: ''
+      extraVisaFee: '', extraTippingFee: '', extraOtherFee: '', extraOtherNotes: '', extraDiscount: ''
     });
     setNewOrdererForm({ fullName: '', phone: '', nik: '', passportNumber: '' });
     setShowModal(true);
@@ -627,6 +631,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // Prefill biaya tambahan/diskon booking ini kalau sebelumnya udah pernah diisi.
       extraVisaFee: item.extraVisaFee ? String(item.extraVisaFee) : '',
       extraTippingFee: item.extraTippingFee ? String(item.extraTippingFee) : '',
+      extraOtherFee: item.extraOtherFee ? String(item.extraOtherFee) : '',
+      extraOtherNotes: item.extraOtherNotes || '',
       extraDiscount: item.extraDiscount ? String(item.extraDiscount) : ''
     });
     setNewOrdererForm({ fullName: item.ordererName || '', phone: '', nik: '', passportNumber: '' });
@@ -1090,6 +1096,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       addPaymentDate: todayDateStr(),
       extraVisaFee: sumExtra('extraVisaFee') ? String(sumExtra('extraVisaFee')) : '',
       extraTippingFee: sumExtra('extraTippingFee') ? String(sumExtra('extraTippingFee')) : '',
+      extraOtherFee: sumExtra('extraOtherFee') ? String(sumExtra('extraOtherFee')) : '',
+      extraOtherNotes: group.primary?.extraOtherNotes || '',
       extraDiscount: sumExtra('extraDiscount') ? String(sumExtra('extraDiscount')) : ''
     });
     setGroupEditNewOrdererForm({ fullName: group.primary?.ordererName || '', phone: '', nik: '', passportNumber: '' });
@@ -1170,9 +1178,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       });
       const extraVisaFeeInput = Number(groupEditForm.extraVisaFee || 0);
       const extraTippingFeeInput = Number(groupEditForm.extraTippingFee || 0);
+      const extraOtherFeeInput = Number(groupEditForm.extraOtherFee || 0);
       const extraDiscountInput = Number(groupEditForm.extraDiscount || 0);
       const visaShares = splitFlatAmount(extraVisaFeeInput, sortedActiveForExtra.length);
       const tippingShares = splitFlatAmount(extraTippingFeeInput, sortedActiveForExtra.length);
+      const otherFeeShares = splitFlatAmount(extraOtherFeeInput, sortedActiveForExtra.length);
       const discountShares = splitFlatAmount(extraDiscountInput, sortedActiveForExtra.length);
 
       // Update field2 yang emang shared ke SEMUA booking aktif di grup ini —
@@ -1190,8 +1200,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         busGroup: groupEditForm.busGroup,
         extraVisaFee: visaShares[i] || 0,
         extraTippingFee: tippingShares[i] || 0,
+        extraOtherFee: otherFeeShares[i] || 0,
+        extraOtherNotes: groupEditForm.extraOtherNotes || '',
         extraDiscount: discountShares[i] || 0,
-        totalAmount: price + (visaShares[i] || 0) + (tippingShares[i] || 0) - (discountShares[i] || 0),
+        totalAmount: price + (visaShares[i] || 0) + (tippingShares[i] || 0) + (otherFeeShares[i] || 0) - (discountShares[i] || 0),
         updatedAt: new Date().toISOString()
       })));
 
@@ -1243,7 +1255,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // payments_income asli (totalAmount-nya bisa aja berubah kalau paket/kamar
       // ganti, atau kalau biaya tambahan/diskonnya baru diubah).
       await Promise.all(sortedActiveForExtra.map((item, i) =>
-        syncBookingTotalPaid(item.id, price + (visaShares[i] || 0) + (tippingShares[i] || 0) - (discountShares[i] || 0))
+        syncBookingTotalPaid(item.id, price + (visaShares[i] || 0) + (tippingShares[i] || 0) + (otherFeeShares[i] || 0) - (discountShares[i] || 0))
       ));
 
       setShowGroupEditModal(false);
@@ -1623,9 +1635,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     // rinciannya tetap akurat walau nggak ada field harga dasar terpisah.
     const extraVisaFee = Number(booking.extraVisaFee) || 0;
     const extraTippingFee = Number(booking.extraTippingFee) || 0;
+    const extraOtherFee = Number(booking.extraOtherFee) || 0;
+    const extraOtherNotes = booking.extraOtherNotes || 'Biaya Lain-lain';
     const extraDiscount = Number(booking.extraDiscount) || 0;
-    const hasExtras = extraVisaFee !== 0 || extraTippingFee !== 0 || extraDiscount !== 0;
-    const basePackagePrice = totalAmount - extraVisaFee - extraTippingFee + extraDiscount;
+    const hasExtras = extraVisaFee !== 0 || extraTippingFee !== 0 || extraOtherFee !== 0 || extraDiscount !== 0;
+    const basePackagePrice = totalAmount - extraVisaFee - extraTippingFee - extraOtherFee + extraDiscount;
     const { compName, compAddress, compPpiu, compPhone, compEmail, bankName, bankAccount } = getCompanyInvoiceVars();
 
     const totalPaid = payments.length > 0
@@ -1717,6 +1731,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           <tr>
             <td>Tipping:</td>
             <td style="text-align: right; white-space: nowrap;">Rp ${extraTippingFee.toLocaleString('id-ID')}</td>
+          </tr>` : ''}
+          ${extraOtherFee !== 0 ? `
+          <tr>
+            <td>${extraOtherNotes}:</td>
+            <td style="text-align: right; white-space: nowrap;">Rp ${extraOtherFee.toLocaleString('id-ID')}</td>
           </tr>` : ''}
           ${extraDiscount !== 0 ? `
           <tr>
@@ -1874,9 +1893,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     // tiap pax — hasilnya nominal flat aslinya yang diinput staff.
     const extraVisaFee = items.reduce((acc, b) => acc + (Number(b.extraVisaFee) || 0), 0);
     const extraTippingFee = items.reduce((acc, b) => acc + (Number(b.extraTippingFee) || 0), 0);
+    const extraOtherFee = items.reduce((acc, b) => acc + (Number(b.extraOtherFee) || 0), 0);
+    const extraOtherNotes = first.extraOtherNotes || 'Biaya Lain-lain';
     const extraDiscount = items.reduce((acc, b) => acc + (Number(b.extraDiscount) || 0), 0);
-    const hasExtras = extraVisaFee !== 0 || extraTippingFee !== 0 || extraDiscount !== 0;
-    const basePackagePrice = totalAmount - extraVisaFee - extraTippingFee + extraDiscount;
+    const hasExtras = extraVisaFee !== 0 || extraTippingFee !== 0 || extraOtherFee !== 0 || extraDiscount !== 0;
+    const basePackagePrice = totalAmount - extraVisaFee - extraTippingFee - extraOtherFee + extraDiscount;
     const { compName, compAddress, compPpiu, compPhone, compEmail, bankName, bankAccount } = getCompanyInvoiceVars();
 
     const pesertaRowsHtml = items.map((b, idx) => `
@@ -1988,6 +2009,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           <tr>
             <td>Tipping:</td>
             <td style="text-align: right; white-space: nowrap;">Rp ${extraTippingFee.toLocaleString('id-ID')}</td>
+          </tr>` : ''}
+          ${extraOtherFee !== 0 ? `
+          <tr>
+            <td>${extraOtherNotes}:</td>
+            <td style="text-align: right; white-space: nowrap;">Rp ${extraOtherFee.toLocaleString('id-ID')}</td>
           </tr>` : ''}
           ${extraDiscount !== 0 ? `
           <tr>
@@ -2183,6 +2209,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // dijumlah balik tetap sama dgn total harga keseluruhan pemesanan.
       const extraVisaFeeInput = Number(formData.extraVisaFee || 0);
       const extraTippingFeeInput = Number(formData.extraTippingFee || 0);
+      const extraOtherFeeInput = Number(formData.extraOtherFee || 0);
       const extraDiscountInput = Number(formData.extraDiscount || 0);
 
       let paymentVal = Number(formData.initialPayment || 0);
@@ -2201,7 +2228,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         // Edit selalu 1 booking/pax (paxCount dipaksa 1 di handleOpenEditModal),
         // jadi biaya tambahan/diskonnya langsung dipakai apa adanya (nggak
         // perlu dibagi rata splitFlatAmount — itu cuma buat registrasi rombongan baru).
-        const editedTotalAmount = price + extraVisaFeeInput + extraTippingFeeInput - extraDiscountInput;
+        const editedTotalAmount = price + extraVisaFeeInput + extraTippingFeeInput + extraOtherFeeInput - extraDiscountInput;
 
         await updateDoc(doc(db, 'bookings', editingBookingId), {
           packageId: selectedPkg.id,
@@ -2217,6 +2244,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           busGroup: formData.busGroup,
           extraVisaFee: extraVisaFeeInput,
           extraTippingFee: extraTippingFeeInput,
+          extraOtherFee: extraOtherFeeInput,
+          extraOtherNotes: formData.extraOtherNotes || '',
           extraDiscount: extraDiscountInput,
           totalAmount: editedTotalAmount,
           updatedAt: new Date().toISOString()
@@ -2257,7 +2286,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         if (paxCount === 1) {
           // ===== REGISTRASI 1 PAX (alur normal, tidak berubah) =====
           const bookingCode = `BK-${Date.now().toString().slice(-6)}`;
-          const singleTotalAmount = price + extraVisaFeeInput + extraTippingFeeInput - extraDiscountInput;
+          const singleTotalAmount = price + extraVisaFeeInput + extraTippingFeeInput + extraOtherFeeInput - extraDiscountInput;
 
           const newBookingRef = await addDoc(collection(db, 'bookings'), {
             bookingCode,
@@ -2274,6 +2303,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             busGroup: formData.busGroup,
             extraVisaFee: extraVisaFeeInput,
             extraTippingFee: extraTippingFeeInput,
+            extraOtherFee: extraOtherFeeInput,
+            extraOtherNotes: formData.extraOtherNotes || '',
             extraDiscount: extraDiscountInput,
             totalAmount: singleTotalAmount,
             totalPaid: paymentVal,
@@ -2321,6 +2352,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           // pola sama persis dgn pembagian setoran awal di atas.
           const visaShares = splitFlatAmount(extraVisaFeeInput, paxCount);
           const tippingShares = splitFlatAmount(extraTippingFeeInput, paxCount);
+          const otherFeeShares = splitFlatAmount(extraOtherFeeInput, paxCount);
           const discountShares = splitFlatAmount(extraDiscountInput, paxCount);
 
           for (let i = 0; i < paxList.length; i++) {
@@ -2329,8 +2361,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             const bookingCode = `${groupBookingCode}-${i + 1}`;
             const paxVisaFee = visaShares[i] || 0;
             const paxTippingFee = tippingShares[i] || 0;
+            const paxOtherFee = otherFeeShares[i] || 0;
             const paxDiscount = discountShares[i] || 0;
-            const paxTotalAmount = price + paxVisaFee + paxTippingFee - paxDiscount;
+            const paxTotalAmount = price + paxVisaFee + paxTippingFee + paxOtherFee - paxDiscount;
 
             const newBookingRef = await addDoc(collection(db, 'bookings'), {
               bookingCode,
@@ -2352,6 +2385,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               busGroup: formData.busGroup,
               extraVisaFee: paxVisaFee,
               extraTippingFee: paxTippingFee,
+              extraOtherFee: paxOtherFee,
+              extraOtherNotes: formData.extraOtherNotes || '',
               extraDiscount: paxDiscount,
               totalAmount: paxTotalAmount,
               totalPaid: paxShare,
@@ -3181,7 +3216,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 if (formData.roomType === 'Triple') unitPrice = Number(pkgPreview.priceTriple || unitPrice);
                 if (formData.roomType === 'Double') unitPrice = Number(pkgPreview.priceDouble || unitPrice);
                 const packageTotalPreview = unitPrice * (formData.paxCount || 1);
-                const extraNet = Number(formData.extraVisaFee || 0) + Number(formData.extraTippingFee || 0) - Number(formData.extraDiscount || 0);
+                const extraNet = Number(formData.extraVisaFee || 0) + Number(formData.extraTippingFee || 0) + Number(formData.extraOtherFee || 0) - Number(formData.extraDiscount || 0);
                 const grandTotalPreview = packageTotalPreview + extraNet;
                 return (
                   <div className="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl text-[11px] space-y-1">
@@ -3232,14 +3267,34 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                     />
                   </div>
                   <div>
-                    <label className="block mb-1 font-medium">Diskon (Rp)</label>
+                    <label className="block mb-1 font-medium">Lain-lain (Rp)</label>
                     <input
                       type="number" placeholder="0"
                       className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                      value={formData.extraDiscount}
-                      onChange={e => setFormData({ ...formData, extraDiscount: e.target.value })}
+                      value={formData.extraOtherFee}
+                      onChange={e => setFormData({ ...formData, extraOtherFee: e.target.value })}
                     />
                   </div>
+                </div>
+                {Number(formData.extraOtherFee || 0) !== 0 && (
+                  <div>
+                    <label className="block mb-1 font-medium">Keterangan Biaya Lain-lain</label>
+                    <input
+                      type="text" placeholder="Contoh: Asuransi Perjalanan, Handling Bagasi, dll"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={formData.extraOtherNotes}
+                      onChange={e => setFormData({ ...formData, extraOtherNotes: e.target.value })}
+                    />
+                  </div>
+                )}
+                <div>
+                  <label className="block mb-1 font-medium">Diskon (Rp)</label>
+                  <input
+                    type="number" placeholder="0"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={formData.extraDiscount}
+                    onChange={e => setFormData({ ...formData, extraDiscount: e.target.value })}
+                  />
                 </div>
               </div>
 
@@ -3957,14 +4012,34 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                     />
                   </div>
                   <div>
-                    <label className="block mb-1 font-medium">Diskon (Rp)</label>
+                    <label className="block mb-1 font-medium">Lain-lain (Rp)</label>
                     <input
                       type="number" placeholder="0"
                       className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                      value={groupEditForm.extraDiscount}
-                      onChange={e => setGroupEditForm({ ...groupEditForm, extraDiscount: e.target.value })}
+                      value={groupEditForm.extraOtherFee}
+                      onChange={e => setGroupEditForm({ ...groupEditForm, extraOtherFee: e.target.value })}
                     />
                   </div>
+                </div>
+                {Number(groupEditForm.extraOtherFee || 0) !== 0 && (
+                  <div>
+                    <label className="block mb-1 font-medium">Keterangan Biaya Lain-lain</label>
+                    <input
+                      type="text" placeholder="Contoh: Asuransi Perjalanan, Handling Bagasi, dll"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={groupEditForm.extraOtherNotes}
+                      onChange={e => setGroupEditForm({ ...groupEditForm, extraOtherNotes: e.target.value })}
+                    />
+                  </div>
+                )}
+                <div>
+                  <label className="block mb-1 font-medium">Diskon (Rp)</label>
+                  <input
+                    type="number" placeholder="0"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={groupEditForm.extraDiscount}
+                    onChange={e => setGroupEditForm({ ...groupEditForm, extraDiscount: e.target.value })}
+                  />
                 </div>
               </div>
 
