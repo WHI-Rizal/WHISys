@@ -281,7 +281,7 @@ export default function DashboardPage() {
               <Plane className="w-6 h-6" />
             </div>
             <div>
-              <h1 className={`font-bold text-lg ${currentTheme.accentText} leading-none`}>PT. Wisata Halal Internasional</h1>
+              <h1 className={`font-bold text-lg ${currentTheme.accentText} leading-none`}>Wisata Halal Internasional</h1>
               <span className={`text-xs ${currentTheme.subText}`}>WHISys ERP</span>
             </div>
           </div>
