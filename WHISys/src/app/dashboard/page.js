@@ -282,7 +282,7 @@ export default function DashboardPage() {
             </div>
             <div>
               <h1 className={`font-bold text-lg ${currentTheme.accentText} leading-none`}>WHISys</h1>
-              <span className={`text-xs ${currentTheme.subText}`}>Travel & Halal ERP</span>
+              <span className={`text-xs ${currentTheme.subText}`}>PT. Wisata Halal Internasional</span>
             </div>
           </div>
 
