@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, getDoc, deleteDoc, doc, updateDoc, query, where } from 'firebase/firestore';
+import { collection, addDoc, getDocs, getDoc, deleteDoc, doc, updateDoc, query, where, increment } from 'firebase/firestore';
 import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock, Download } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -34,6 +34,16 @@ const loadImageAsDataURL = (src) => new Promise((resolve, reject) => {
   img.onerror = reject;
   img.src = src;
 });
+
+// Daftar bank umum utk field "Nama Bank" begitu Metode Bayar dipilih
+// "Transfer Bank" — samain sama yang ada di BookingsModule.jsx.
+const BANK_LIST = ['BCA', 'Mandiri', 'BNI', 'BRI', 'BSI (Bank Syariah Indonesia)', 'CIMB Niaga', 'Danamon', 'Permata', 'BTN', 'Bank Lainnya'];
+
+// Resolusi nama bank final dari pasangan field bankName/customBankName.
+const resolveBankName = (bankName, customBankName) => {
+  if (bankName === 'Bank Lainnya') return (customBankName || '').trim() || 'Bank Lainnya';
+  return bankName || '';
+};
 
 const OPERATIONAL_CATEGORIES = [
   'Sewa Kantor',
@@ -92,6 +102,7 @@ const buildIncomeRow = (docs, bookingsById, isFallbackMerge) => {
     isMerged,
     amount: totalAmount,
     paymentMethod: first.paymentMethod,
+    bankName: first.bankName || '',
     notes,
     createdAt: first.createdAt,
     groupCode,
@@ -181,11 +192,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const [operationalExpenses, setOperationalExpenses] = useState([]);
   const [bookingsList, setBookingsList] = useState([]);
   const [packagesList, setPackagesList] = useState([]);
+  const [jamaahList, setJamaahList] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [showVendorModal, setShowVendorModal] = useState(false);
   const [showOperationalModal, setShowOperationalModal] = useState(false);
+  const [showDepositModal, setShowDepositModal] = useState(false);
   const [activeTab, setActiveTab] = useState('income');
 
   const [showProfitDetailModal, setShowProfitDetailModal] = useState(false);
@@ -195,8 +208,21 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     groupCode: '',
     amount: '',
     paymentMethod: 'Transfer Bank',
+    bankName: BANK_LIST[0],
+    customBankName: '',
     notes: 'DP Keberangkatan',
     date: new Date().toISOString().slice(0, 10)
+  });
+
+  // Modal "+ Tambah Deposit" — buat nyatet transferan yang udah masuk tapi
+  // belum jelas dipakai buat booking mana, langsung masuk saldo Pemesan.
+  const [depositForm, setDepositForm] = useState({
+    customerId: '',
+    amount: '',
+    bankName: BANK_LIST[0],
+    customBankName: '',
+    notes: 'Titip Deposit (belum ada booking)',
+    date: todayISODate()
   });
 
   const [vendorForm, setVendorForm] = useState({
@@ -231,6 +257,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       const pkgSnap = await getDocs(collection(db, 'packages'));
       setPackagesList(pkgSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      const jmhSnap = await getDocs(collection(db, 'jamaah'));
+      setJamaahList(jmhSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       const txSnap = await getDocs(collection(db, 'payments_income'));
       setTransactions(txSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -276,6 +305,55 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       }
     } catch (err) {
       console.error("Gagal sinkronisasi data booking:", err);
+    }
+  };
+
+  // Saldo Deposit nempel ke Pemesan (collection 'jamaah'). delta positif =
+  // nambah saldo (top up manual / konversi refund batal di modul Booking),
+  // delta negatif = pakai saldo buat bayar setoran. Tiap perubahan dicatat
+  // ke 'deposit_ledger' biar ada riwayatnya.
+  const adjustDepositBalance = async (customerId, customerName, delta, type, notes, bookingCode, createdAtOverride) => {
+    if (!customerId || !delta) return;
+    await updateDoc(doc(db, 'jamaah', customerId), { depositBalance: increment(delta) });
+    await addDoc(collection(db, 'deposit_ledger'), {
+      customerId,
+      customerName: customerName || '-',
+      type,
+      amount: delta,
+      notes: notes || '',
+      bookingCode: bookingCode || '',
+      createdAt: createdAtOverride || new Date().toISOString()
+    });
+  };
+
+  const handleDepositSubmit = async (e) => {
+    e.preventDefault();
+    const customer = jamaahList.find(j => j.id === depositForm.customerId);
+    if (!customer) {
+      alert("Pilih Pemesan/Customer dulu.");
+      return;
+    }
+    const amountVal = Number(depositForm.amount || 0);
+    if (amountVal <= 0) {
+      alert("Isi nominal deposit yang valid (lebih dari 0).");
+      return;
+    }
+    try {
+      const finalBankName = resolveBankName(depositForm.bankName, depositForm.customBankName);
+      await adjustDepositBalance(
+        customer.id,
+        customer.fullName,
+        amountVal,
+        'topup',
+        `${depositForm.notes}${finalBankName ? ` (${finalBankName})` : ''}`,
+        '',
+        resolvePaymentCreatedAt(depositForm.date)
+      );
+      setShowDepositModal(false);
+      setDepositForm({ customerId: '', amount: '', bankName: BANK_LIST[0], customBankName: '', notes: 'Titip Deposit (belum ada booking)', date: todayISODate() });
+      fetchData();
+    } catch (err) {
+      alert("Gagal mencatat deposit: " + err.message);
     }
   };
 
@@ -362,6 +440,18 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       const amountVal = Number(incomeForm.amount);
       const paxCount = groupItems.length;
+      const incomeOrdererId = groupItems[0]?.ordererId;
+      const incomeOrdererName = groupItems[0]?.ordererName;
+
+      if (incomeForm.paymentMethod === 'Saldo Deposit') {
+        const ordererData = jamaahList.find(j => j.id === incomeOrdererId);
+        const currentBalance = Number(ordererData?.depositBalance || 0);
+        if (amountVal > currentBalance) {
+          alert(`Saldo Deposit Pemesan tidak cukup. Saldo saat ini: Rp ${currentBalance.toLocaleString('id-ID')}, dibutuhkan: Rp ${amountVal.toLocaleString('id-ID')}.`);
+          return;
+        }
+      }
+      const incomeFinalBankName = resolveBankName(incomeForm.bankName, incomeForm.customBankName);
 
       // Setoran dibagi rata ke semua pax dalam kode booking ini (sisa
       // pembagian jatuh ke pax pertama) — pola sama persis dengan setoran
@@ -389,6 +479,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
             packageName: item.packageName,
             amount: paxShare,
             paymentMethod: incomeForm.paymentMethod,
+            ...(incomeForm.paymentMethod === 'Transfer Bank' ? { bankName: incomeFinalBankName } : {}),
             notes: isGroup ? `${incomeForm.notes} (Grup ${incomeForm.groupCode})` : incomeForm.notes,
             createdAt: resolvePaymentCreatedAt(incomeForm.date),
             ...(isGroup ? { groupTransactionId } : {})
@@ -398,8 +489,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         await syncBookingTotalPaid(item.id);
       }
 
+      if (incomeForm.paymentMethod === 'Saldo Deposit' && amountVal > 0) {
+        await adjustDepositBalance(incomeOrdererId, incomeOrdererName, -amountVal, 'usage', `Bayar setoran kode booking ${incomeForm.groupCode}`, incomeForm.groupCode, resolvePaymentCreatedAt(incomeForm.date));
+      }
+
       setShowIncomeModal(false);
-      setIncomeForm({ groupCode: '', amount: '', paymentMethod: 'Transfer Bank', notes: 'DP Keberangkatan', date: new Date().toISOString().slice(0, 10) });
+      setIncomeForm({ groupCode: '', amount: '', paymentMethod: 'Transfer Bank', bankName: BANK_LIST[0], customBankName: '', notes: 'DP Keberangkatan', date: new Date().toISOString().slice(0, 10) });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat pembayaran: " + err.message);
@@ -746,6 +841,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
             <ArrowDownLeft className="w-4 h-4" /> + Terima Setoran Jamaah
           </button>
           <button
+            onClick={() => setShowDepositModal(true)}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
+          >
+            <Wallet className="w-4 h-4" /> + Tambah Deposit
+          </button>
+          <button
             onClick={() => setShowVendorModal(true)}
             className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
           >
@@ -854,7 +955,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                       </td>
                       <td className={`p-4 ${styles.textTitle}`}>{row.packageName}</td>
                       <td className="p-4">
-                        <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] mr-1`}>{row.paymentMethod}</span>
+                        <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] mr-1`}>{row.paymentMethod}{row.bankName ? ` - ${row.bankName}` : ''}</span>
                         <span className={styles.textSub}>{row.notes}</span>
                       </td>
                       <td className={`p-4 ${styles.textSub}`}>{formatDateDDMMYYYY(row.createdAt)}</td>
@@ -1274,7 +1375,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                               <span className="block text-[10px] text-emerald-500 font-mono">{tx.bookingCode}</span>
                             </td>
                             <td className="p-2.5">
-                              <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{tx.paymentMethod}</span>
+                              <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{tx.paymentMethod}{tx.bankName ? ` - ${tx.bankName}` : ''}</span>
                               <span className={styles.textSub}>{tx.notes}</span>
                             </td>
                             <td className="p-2.5 text-right font-bold text-emerald-500">+ Rp {Number(tx.amount).toLocaleString('id-ID')}</td>
@@ -1386,6 +1487,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                     <option value="Transfer Bank">Transfer Bank</option>
                     <option value="Cash / Tunai">Cash / Tunai</option>
                     <option value="EDC / Kartu">EDC / Kartu</option>
+                    <option value="Saldo Deposit">Saldo Deposit</option>
                   </select>
                 </div>
                 <div>
@@ -1398,6 +1500,42 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                   />
                 </div>
               </div>
+
+              {incomeForm.paymentMethod === 'Transfer Bank' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block mb-1 font-medium">Nama Bank</label>
+                    <select
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={incomeForm.bankName}
+                      onChange={e => setIncomeForm({ ...incomeForm, bankName: e.target.value })}
+                    >
+                      {BANK_LIST.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  </div>
+                  {incomeForm.bankName === 'Bank Lainnya' && (
+                    <div>
+                      <label className="block mb-1 font-medium">Nama Bank Lainnya</label>
+                      <input
+                        type="text" placeholder="Ketik nama banknya"
+                        className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                        value={incomeForm.customBankName}
+                        onChange={e => setIncomeForm({ ...incomeForm, customBankName: e.target.value })}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              {incomeForm.paymentMethod === 'Saldo Deposit' && (() => {
+                const selectedGroup = groupedBookingOptions.find(g => g.code === incomeForm.groupCode);
+                const ordererData = jamaahList.find(j => j.id === selectedGroup?.primary?.ordererId);
+                const balance = Number(ordererData?.depositBalance || 0);
+                return (
+                  <p className={`text-[11px] p-2 rounded-lg ${balance > 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
+                    Saldo Deposit {ordererData ? ordererData.fullName : (selectedGroup?.primary?.ordererName || 'Pemesan')} saat ini: Rp {balance.toLocaleString('id-ID')}
+                  </p>
+                );
+              })()}
 
               <div>
                 <label className="block mb-1 font-medium">Keterangan</label>
@@ -1415,6 +1553,105 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </button>
                 <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
                   Simpan Pembayaran
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showDepositModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+            <button onClick={() => setShowDepositModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <Wallet className="w-5 h-5 text-blue-500" /> Tambah Saldo Deposit
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>
+              Buat customer yang sudah transfer DP tapi belum jelas mau dipakai buat booking mana — nominalnya masuk saldo Pemesan dulu, baru dipakai belakangan lewat Metode Bayar "Saldo Deposit".
+            </p>
+
+            <form onSubmit={handleDepositSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div>
+                <label className="block mb-1 font-medium">Pemesan / Customer</label>
+                <select
+                  required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={depositForm.customerId}
+                  onChange={e => setDepositForm({ ...depositForm, customerId: e.target.value })}
+                >
+                  <option value="">-- Pilih Data Master Jamaah --</option>
+                  {jamaahList.map(j => (
+                    <option key={j.id} value={j.id}>
+                      {j.fullName} - {j.customerCode || 'CST'} (Saldo saat ini: Rp {Number(j.depositBalance || 0).toLocaleString('id-ID')})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1 font-medium">Nominal Deposit (Rp)</label>
+                  <input
+                    type="number" required min="1" placeholder="5000000"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={depositForm.amount}
+                    onChange={e => setDepositForm({ ...depositForm, amount: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Tanggal Terima</label>
+                  <DateFieldID
+                    required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={depositForm.date}
+                    onChange={(val) => setDepositForm({ ...depositForm, date: val })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1 font-medium">Nama Bank</label>
+                  <select
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={depositForm.bankName}
+                    onChange={e => setDepositForm({ ...depositForm, bankName: e.target.value })}
+                  >
+                    {BANK_LIST.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
+                {depositForm.bankName === 'Bank Lainnya' && (
+                  <div>
+                    <label className="block mb-1 font-medium">Nama Bank Lainnya</label>
+                    <input
+                      type="text" placeholder="Ketik nama banknya"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={depositForm.customBankName}
+                      onChange={e => setDepositForm({ ...depositForm, customBankName: e.target.value })}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Keterangan</label>
+                <input
+                  type="text" placeholder="Titip Deposit (belum ada booking)"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={depositForm.notes}
+                  onChange={e => setDepositForm({ ...depositForm, notes: e.target.value })}
+                />
+              </div>
+
+              <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowDepositModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium">
+                  Simpan Deposit
                 </button>
               </div>
             </form>
