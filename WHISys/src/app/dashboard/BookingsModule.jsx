@@ -3397,6 +3397,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 <th className="p-4">Jumlah Pax</th>
                 <th className="p-4">Waktu Transaksi</th>
                 <th className="p-4">Status</th>
+                <th className="p-4 text-right">Kekurangan</th>
                 <th className="p-4">% Bayar</th>
                 <th className="p-4 text-center">Setor</th>
                 <th className="p-4 text-center">Opsi</th>
@@ -3404,9 +3405,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             </thead>
             <tbody className={`divide-y ${styles.tableRowBorder}`}>
               {loading ? (
-                <tr><td colSpan="10" className={`p-8 text-center ${styles.textSub}`}>Memuat data manifest...</td></tr>
+                <tr><td colSpan="11" className={`p-8 text-center ${styles.textSub}`}>Memuat data manifest...</td></tr>
               ) : groupedBookingSummary.length === 0 ? (
-                <tr><td colSpan="10" className={`p-8 text-center ${styles.textSub}`}>Belum ada data booking.</td></tr>
+                <tr><td colSpan="11" className={`p-8 text-center ${styles.textSub}`}>Belum ada data booking.</td></tr>
               ) : (
                 groupedBookingSummary.map((group) => (
                   <tr
@@ -3423,6 +3424,18 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                     <td className="p-4">
                       {renderStatusBadge(group.primary)}
                       {renderDueDates({ ...group.primary, createdAt: group.earliestCreatedAt })}
+                    </td>
+                    <td className="p-4 text-right whitespace-nowrap">
+                      {(() => {
+                        const kekurangan = Number(group.totalAmount || 0) - Number(group.totalPaid || 0);
+                        if (group.primary.status === 'cancelled' || group.primary.status === 'rescheduled') {
+                          return <span className={styles.textSub}>-</span>;
+                        }
+                        if (kekurangan <= 0) {
+                          return <span className="font-semibold text-emerald-500">Lunas</span>;
+                        }
+                        return <span className="font-bold text-amber-500">Rp {kekurangan.toLocaleString('id-ID')}</span>;
+                      })()}
                     </td>
                     <td className={`p-4 font-semibold ${styles.textTitle}`}>{formatPercentID(group.percentBayar)}</td>
                     <td className="p-4 text-center">
