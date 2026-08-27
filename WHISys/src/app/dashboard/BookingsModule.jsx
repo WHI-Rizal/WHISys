@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where, increment } from 'firebase/firestore';
-import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star } from 'lucide-react';
+import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus } from 'lucide-react';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -374,6 +374,17 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [editingGroupDiscountId, setEditingGroupDiscountId] = useState(null);
   const [groupEditNewOrdererForm, setGroupEditNewOrdererForm] = useState({
     fullName: '', phone: '', nik: '', passportNumber: ''
+  });
+
+  // "Tambah Peserta Baru" di dalam modal Edit Grup — buat peserta yang nyusul
+  // belakangan ke grup booking yang sudah ada (bahkan yang udah ada riwayat
+  // pembayaran). Sengaja dipisah dari form Edit Grup utama (bukan bagian dari
+  // handleGroupEditSubmit) biar nggak nyampur sama logika ganti paket/kamar
+  // yang berlaku ke SEMUA pax — nambah 1 peserta baru itu aksi independen.
+  const [addPaxForm, setAddPaxForm] = useState({
+    jamaahId: '',
+    newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '' },
+    roomType: 'Quad'
   });
 
   // State Modal Reschedule GRUP — reschedule SEMUA pax aktif dalam grup
@@ -1455,7 +1466,115 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     setGroupDiscountDraft({ name: '', amount: '', notes: '' });
     setEditingGroupDiscountId(null);
     setGroupEditNewOrdererForm({ fullName: group.primary?.ordererName || '', phone: '', nik: '', passportNumber: '' });
+    setAddPaxForm({
+      jamaahId: '',
+      newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '' },
+      roomType: group.primary?.roomType || 'Quad'
+    });
     setShowGroupEditModal(true);
+  };
+
+  // ---- 2b. Tambah Peserta Baru ke grup yang sudah ada (nyusul belakangan) ----
+  const handleAddPaxToGroup = async () => {
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh mengedit booking.");
+      return;
+    }
+    if (!groupEditTarget) return;
+    if (!addPaxForm.jamaahId) {
+      alert("Pilih Data Master Jamaah untuk peserta baru ini, atau tambah jamaah baru.");
+      return;
+    }
+    if (addPaxForm.jamaahId === '__new__' && !addPaxForm.newJamaah.fullName.trim()) {
+      alert("Isi nama lengkap peserta baru terlebih dahulu.");
+      return;
+    }
+
+    try {
+      const pkg = packagesList.find(p => p.id === groupEditTarget.primary?.packageId);
+      if (!pkg) {
+        alert("Paket travel grup ini tidak ditemukan.");
+        return;
+      }
+      if (Number(pkg.quotaRemaining || 0) < 1) {
+        alert(`Kuota paket ini sudah habis. Sisa seat: ${pkg.quotaRemaining || 0}.`);
+        return;
+      }
+
+      let newJamaahData;
+      if (addPaxForm.jamaahId === '__new__') {
+        const newCode = generateNextCustomerCode(jamaahList);
+        const newJamaahRef = await addDoc(collection(db, 'jamaah'), {
+          customerCode: newCode,
+          fullName: addPaxForm.newJamaah.fullName.trim(),
+          nik: addPaxForm.newJamaah.nik || '',
+          gender: 'L',
+          phone: addPaxForm.newJamaah.phone || '',
+          passportNumber: addPaxForm.newJamaah.passportNumber || '',
+          passportExpiry: '',
+          address: '',
+          createdAt: new Date().toISOString()
+        });
+        newJamaahData = { id: newJamaahRef.id, fullName: addPaxForm.newJamaah.fullName.trim(), passportNumber: addPaxForm.newJamaah.passportNumber || '-' };
+      } else {
+        const existing = jamaahList.find(j => j.id === addPaxForm.jamaahId);
+        if (!existing) { alert("Data jamaah tidak ditemukan."); return; }
+        newJamaahData = { id: existing.id, fullName: existing.fullName, passportNumber: existing.passportNumber || '-' };
+      }
+
+      let price = Number(pkg.priceQuad || pkg.priceMain || 0);
+      if (addPaxForm.roomType === 'Triple') price = Number(pkg.priceTriple || price);
+      if (addPaxForm.roomType === 'Double') price = Number(pkg.priceDouble || price);
+
+      const existingIndexes = groupEditTarget.items.map(b => Number(b.groupPaxIndex) || 0);
+      const newIndex = (existingIndexes.length > 0 ? Math.max(...existingIndexes) : groupEditTarget.items.length) + 1;
+      const newTotalPax = groupEditTarget.items.length + 1;
+      const bookingCode = `${groupEditTarget.code}-${newIndex}`;
+
+      const emptyDocChecklist = {
+        passport: false, ktp_foto: false, family_cert: false, sponsor_letter: false,
+        bank_statement: false, vaccine_cert: false, visa: false, ticket: false
+      };
+
+      await addDoc(collection(db, 'bookings'), {
+        bookingCode,
+        groupBookingCode: groupEditTarget.code,
+        groupPaxIndex: newIndex,
+        groupTotalPax: newTotalPax,
+        packageId: pkg.id,
+        packageName: pkg.name,
+        packageCode: pkg.code,
+        departureDate: pkg.departureDate,
+        jamaahId: newJamaahData.id,
+        jamaahName: newJamaahData.fullName,
+        passportNumber: newJamaahData.passportNumber || '-',
+        ordererId: groupEditTarget.primary?.ordererId || null,
+        ordererName: groupEditTarget.primary?.ordererName || '',
+        roomType: addPaxForm.roomType,
+        busGroup: groupEditTarget.primary?.busGroup || 'Bus 1',
+        extraCharges: [],
+        extraDiscounts: [],
+        totalAmount: price,
+        totalPaid: 0,
+        paymentStatus: 'Belum Bayar',
+        documents: emptyDocChecklist,
+        createdAt: new Date().toISOString()
+      });
+
+      // Sinkronkan groupTotalPax ke semua booking lain di grup ini juga,
+      // biar badge "Grup X/Y" di tiap baris peserta tetap akurat.
+      await Promise.all(groupEditTarget.items.map(item =>
+        updateDoc(doc(db, 'bookings', item.id), { groupTotalPax: newTotalPax })
+      ));
+
+      await updateDoc(doc(db, 'packages', pkg.id), { quotaRemaining: increment(-1) });
+
+      alert(`Peserta baru "${newJamaahData.fullName}" berhasil ditambahkan ke grup ${groupEditTarget.code}. Setoran untuk peserta ini bisa dicatat lewat "Catat Setoran Grup" atau riwayat pembayaran per-peserta.`);
+      setShowGroupEditModal(false);
+      fetchData();
+    } catch (err) {
+      alert("Gagal menambahkan peserta baru: " + err.message);
+    }
   };
 
   const handleGroupEditSubmit = async (e) => {
@@ -3131,7 +3250,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium transition-colors"
                 title="Edit Data Bersama Seluruh Peserta di Grup Ini"
               >
-                <Edit className="w-3.5 h-3.5" /> Edit Grup
+                <Edit className="w-3.5 h-3.5" /> Edit
               </button>
             )}
 
@@ -3153,7 +3272,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[11px] font-medium transition-colors"
                 title="Batalkan & Refund Seluruh Peserta Aktif di Grup Ini"
               >
-                <Ban className="w-3.5 h-3.5" /> Batalkan Grup
+                <Ban className="w-3.5 h-3.5" /> Batalkan
               </button>
             )}
 
@@ -3164,7 +3283,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 className={`flex items-center gap-1.5 px-3 py-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg text-[11px] font-medium transition-colors`}
                 title="Hapus Seluruh Booking di Grup Ini"
               >
-                <Trash2 className="w-3.5 h-3.5" /> Hapus Grup
+                <Trash2 className="w-3.5 h-3.5" /> Hapus
               </button>
             )}
 
@@ -4582,6 +4701,90 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             </p>
             <div className={`${styles.innerBg} p-3 rounded-lg border text-[11px] mb-4`}>
               Perubahan di sini berlaku ke SEMUA peserta yang statusnya masih aktif di grup ini. Identitas peserta (nama/jamaah) nggak diubah dari sini — pakai Edit Booking per-peserta kalau cuma 1 orang yang perlu diganti datanya.
+            </div>
+
+            {/* TAMBAH PESERTA BARU — buat peserta yang nyusul belakangan, biar
+                nggak perlu bikin kode booking baru terpisah. Tetap bisa dipakai
+                meski grup ini udah ada riwayat setoran, karena ini aksi
+                independen (nambah 1 pax baru), bukan bagian dari form edit di
+                bawah yang cuma ngubah data shared pax yang sudah ada. */}
+            <div className={`${styles.innerBg} p-3 rounded-xl border space-y-2.5 mb-4`}>
+              <p className={`text-[11px] font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1.5`}>
+                <UserPlus className="w-3.5 h-3.5" /> Tambah Peserta Baru (Nyusul)
+              </p>
+              <select
+                className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                value={addPaxForm.jamaahId}
+                onChange={e => setAddPaxForm({ ...addPaxForm, jamaahId: e.target.value })}
+              >
+                <option value="">-- Pilih Data Master Jamaah --</option>
+                <option value="__new__">➕ Tambah Jamaah Baru (Belum Terdaftar)</option>
+                {jamaahList.map(j => (
+                  <option key={j.id} value={j.id}>
+                    {j.fullName} - {j.customerCode || 'CST'} - Paspor: {j.passportNumber || 'Belum Ada'}
+                  </option>
+                ))}
+              </select>
+
+              {addPaxForm.jamaahId === '__new__' && (
+                <div className="space-y-2.5">
+                  <input
+                    type="text"
+                    placeholder="Nama Lengkap (wajib)"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={addPaxForm.newJamaah.fullName}
+                    onChange={e => setAddPaxForm({ ...addPaxForm, newJamaah: { ...addPaxForm.newJamaah, fullName: e.target.value } })}
+                  />
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <input
+                      type="text"
+                      placeholder="No. HP / WhatsApp"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={addPaxForm.newJamaah.phone}
+                      onChange={e => setAddPaxForm({ ...addPaxForm, newJamaah: { ...addPaxForm.newJamaah, phone: e.target.value } })}
+                    />
+                    <input
+                      type="text"
+                      placeholder="NIK"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={addPaxForm.newJamaah.nik}
+                      onChange={e => setAddPaxForm({ ...addPaxForm, newJamaah: { ...addPaxForm.newJamaah, nik: e.target.value } })}
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="No. Paspor (opsional)"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={addPaxForm.newJamaah.passportNumber}
+                    onChange={e => setAddPaxForm({ ...addPaxForm, newJamaah: { ...addPaxForm.newJamaah, passportNumber: e.target.value } })}
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block mb-1 font-medium">Tipe Kamar Peserta Ini</label>
+                <select
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={addPaxForm.roomType}
+                  onChange={e => setAddPaxForm({ ...addPaxForm, roomType: e.target.value })}
+                >
+                  <option value="Quad">Quad (4 Orang)</option>
+                  <option value="Triple">Triple (3 Orang)</option>
+                  <option value="Double">Double (2 Orang)</option>
+                </select>
+              </div>
+
+              <p className="text-[10px] opacity-70">
+                Paket, tanggal keberangkatan & Pemesan otomatis ikut grup ini. Setelah ditambahkan, setoran peserta ini bisa dicatat lewat "Catat Setoran Grup" atau riwayat pembayaran per-peserta.
+              </p>
+
+              <button
+                type="button"
+                onClick={handleAddPaxToGroup}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium transition-colors"
+              >
+                <UserPlus className="w-3.5 h-3.5" /> Tambah Peserta Ini ke Grup
+              </button>
             </div>
 
             <form onSubmit={handleGroupEditSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
