@@ -54,6 +54,16 @@ const OPERATIONAL_CATEGORIES = [
   'Lain-lain'
 ];
 
+const VENDOR_CATEGORIES = [
+  'Tiket Pesawat',
+  'Hotel Makkah',
+  'Hotel Madinah',
+  'Visa & Siskopatuh',
+  'LA & Bus Transport',
+  'Perlengkapan Koper',
+  'Lain-lain'
+];
+
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
   const date = new Date(dateString);
@@ -195,7 +205,21 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const [packagesList, setPackagesList] = useState([]);
   const [jamaahList, setJamaahList] = useState([]);
   const [financialAccounts, setFinancialAccounts] = useState([]);
+  const [vendorsList, setVendorsList] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Data Master Vendor — nama & kategori vendor dikelola terpusat di sini,
+  // plus saldo deposit vendor (nampung DP block seat yang batal tapi
+  // nggak hangus, bisa dipakai lagi buat booking baru ke vendor yang sama).
+  const [showVendorMasterModal, setShowVendorMasterModal] = useState(false);
+  const [editingVendorMasterId, setEditingVendorMasterId] = useState(null);
+  const [vendorMasterForm, setVendorMasterForm] = useState({ name: '', category: VENDOR_CATEGORIES[0] });
+
+  // Modal "Konversi ke Saldo Deposit" — dibuka dari 1 baris riwayat Bayar
+  // Vendor yang DP-nya batal dipakai (trip cancel) tapi nggak hangus.
+  const [showConvertDepositModal, setShowConvertDepositModal] = useState(false);
+  const [convertingPayment, setConvertingPayment] = useState(null);
+  const [convertForm, setConvertForm] = useState({ vendorId: '', amount: '', notes: '' });
 
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [showVendorModal, setShowVendorModal] = useState(false);
@@ -239,8 +263,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
   const [vendorForm, setVendorForm] = useState({
     packageId: '',
+    vendorId: '',
     vendorName: '',
-    category: 'Tiket Pesawat',
+    category: VENDOR_CATEGORIES[0],
+    payMethod: 'Kas/Bank',
     amount: '',
     accountId: '',
     notes: 'DP Booking Seat',
@@ -288,6 +314,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       const accSnap = await getDocs(collection(db, 'financial_accounts'));
       setFinancialAccounts(accSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      const vendorMasterSnap = await getDocs(collection(db, 'vendors'));
+      setVendorsList(vendorMasterSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       const txSnap = await getDocs(collection(db, 'payments_income'));
       setTransactions(txSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -350,6 +379,27 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       amount: delta,
       notes: notes || '',
       bookingCode: bookingCode || '',
+      createdAt: createdAtOverride || new Date().toISOString()
+    });
+  };
+
+  // Saldo Deposit VENDOR (collection 'vendors', field depositBalance) —
+  // nampung DP block seat/dll yang batal (trip cancel) tapi nggak hangus,
+  // jadi kredit yang bisa dipakai lagi buat booking baru ke vendor yang
+  // sama. Beda arah sama Saldo Deposit customer (customer nitip duit ke
+  // kita, ini kita "nitip" DP ke vendor). delta positif = nambah saldo
+  // (konversi dari DP yang batal / top up manual), delta negatif = dipakai
+  // buat bayar vendor tanpa keluar uang baru dari Kas/Bank.
+  const adjustVendorDepositBalance = async (vendorId, vendorName, delta, type, notes, reference, createdAtOverride) => {
+    if (!vendorId || !delta) return;
+    await updateDoc(doc(db, 'vendors', vendorId), { depositBalance: increment(delta) });
+    await addDoc(collection(db, 'vendor_deposit_ledger'), {
+      vendorId,
+      vendorName: vendorName || '-',
+      type,
+      amount: delta,
+      notes: notes || '',
+      reference: reference || '',
       createdAt: createdAtOverride || new Date().toISOString()
     });
   };
@@ -475,6 +525,117 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     }
   };
 
+  // ============ Data Master Vendor (nama & kategori vendor + saldo deposit) ============
+
+  const handleVendorMasterSubmit = async (e) => {
+    e.preventDefault();
+    if (!vendorMasterForm.name.trim()) {
+      alert("Isi nama vendornya dulu.");
+      return;
+    }
+    try {
+      if (editingVendorMasterId) {
+        await updateDoc(doc(db, 'vendors', editingVendorMasterId), {
+          name: vendorMasterForm.name.trim(),
+          category: vendorMasterForm.category
+        });
+      } else {
+        await addDoc(collection(db, 'vendors'), {
+          name: vendorMasterForm.name.trim(),
+          category: vendorMasterForm.category,
+          depositBalance: 0,
+          createdAt: new Date().toISOString()
+        });
+      }
+      setShowVendorMasterModal(false);
+      setEditingVendorMasterId(null);
+      setVendorMasterForm({ name: '', category: VENDOR_CATEGORIES[0] });
+      fetchData();
+    } catch (err) {
+      alert("Gagal menyimpan data vendor: " + err.message);
+    }
+  };
+
+  const handleEditVendorMaster = (v) => {
+    setEditingVendorMasterId(v.id);
+    setVendorMasterForm({ name: v.name || '', category: v.category || VENDOR_CATEGORIES[0] });
+    setShowVendorMasterModal(true);
+  };
+
+  const handleDeleteVendorMaster = async (v) => {
+    // Sama kayak akun Kas/Bank — vendor yang masih ada saldo depositnya
+    // jangan bisa kehapus gitu aja, biar jejak kreditnya nggak ilang.
+    if (Number(v.depositBalance || 0) !== 0) {
+      alert(`Vendor "${v.name}" masih punya saldo deposit Rp ${Number(v.depositBalance).toLocaleString('id-ID')}. Pakai dulu atau koreksi saldonya sebelum vendor ini dihapus.`);
+      return;
+    }
+    if (!confirm(`Hapus vendor "${v.name}"? Riwayat pembayaran yang udah keiket ke vendor ini nggak ikut kehapus, cuma referensinya jadi nggak ketemu lagi.`)) return;
+    try {
+      await deleteDoc(doc(db, 'vendors', v.id));
+      fetchData();
+    } catch (err) {
+      alert("Gagal menghapus vendor: " + err.message);
+    }
+  };
+
+  // ============ Konversi DP Vendor batal (nggak hangus) -> Saldo Deposit Vendor ============
+
+  const handleOpenConvertModal = (vp) => {
+    if (vp.convertedToDeposit) {
+      alert("Transaksi ini udah pernah dikonversi ke Saldo Deposit sebelumnya.");
+      return;
+    }
+    const matchedVendor = vendorsList.find(v => v.name === vp.vendorName);
+    setConvertingPayment(vp);
+    setConvertForm({
+      vendorId: matchedVendor?.id || '',
+      amount: vp.amount,
+      notes: `Konversi DP batal - ${vp.category} (${vp.packageName || '-'})`
+    });
+    setShowConvertDepositModal(true);
+  };
+
+  const handleConvertSubmit = async (e) => {
+    e.preventDefault();
+    if (!convertForm.vendorId) {
+      alert("Pilih vendor tujuan saldo depositnya dulu.");
+      return;
+    }
+    const amountVal = Number(convertForm.amount || 0);
+    if (amountVal <= 0) {
+      alert("Isi nominal yang valid (lebih dari 0).");
+      return;
+    }
+    try {
+      const vendor = vendorsList.find(v => v.id === convertForm.vendorId);
+      // CATATAN: konversi ini SENGAJA nggak nyentuh saldo akun Kas/Bank —
+      // uang DP-nya emang udah beneran keluar dari kas pas dibayar dulu.
+      // Konversi cuma nyatet bahwa vendor sekarang "berutang" jasa senilai
+      // segini ke kita, yang bisa dipakai lagi buat booking berikutnya.
+      await adjustVendorDepositBalance(
+        convertForm.vendorId,
+        vendor?.name || '-',
+        amountVal,
+        'refund_conversion',
+        convertForm.notes,
+        convertingPayment?.packageName || convertingPayment?.category || '',
+        new Date().toISOString()
+      );
+      await updateDoc(doc(db, 'payments_vendor', convertingPayment.id), {
+        convertedToDeposit: true,
+        convertedAmount: amountVal,
+        convertedToVendorId: convertForm.vendorId,
+        convertedAt: new Date().toISOString()
+      });
+      setShowConvertDepositModal(false);
+      setConvertingPayment(null);
+      setConvertForm({ vendorId: '', amount: '', notes: '' });
+      fetchData();
+    } catch (err) {
+      alert("Gagal mengonversi ke Saldo Deposit: " + err.message);
+    }
+  };
+
   // Riwayat Mutasi 1 akun Kas/Bank — mirip rekening koran, dipakai buat
   // rekonsiliasi manual sama mutasi bank/kas aslinya. Saldo berjalan
   // dihitung dari SELURUH riwayat (urut tanggal naik) mulai dari saldo
@@ -591,12 +752,22 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   };
 
   const handleDeleteVendorPayment = async (vp) => {
-    if (!confirm("Apakah Anda yakin ingin menghapus catatan pengeluaran vendor ini?")) return;
+    if (vp.convertedToDeposit) {
+      if (!confirm(`PERHATIAN: transaksi ini udah pernah dikonversi jadi Saldo Deposit Vendor (Rp ${Number(vp.convertedAmount || 0).toLocaleString('id-ID')}). Menghapus catatan aslinya TIDAK otomatis narik balik saldo deposit yang udah kebentuk itu. Kalau emang mau dikoreksi, sesuaikan juga saldo deposit vendornya secara manual. Tetap lanjut hapus?`)) return;
+    } else {
+      if (!confirm("Apakah Anda yakin ingin menghapus catatan pengeluaran vendor ini?")) return;
+    }
     try {
       await deleteDoc(doc(db, 'payments_vendor', vp.id));
-      // Uangnya balik lagi ke saldo akun Kas/Bank yang tadinya kepotong, dan
-      // baris mutasinya ikut hilang dari riwayat (bukan nambah baris "koreksi").
-      if (vp.accountId) await removeAccountMutationBySource(vp.accountId, vp.id, Number(vp.amount) || 0);
+      if (vp.payMethod === 'Saldo Deposit Vendor' && vp.vendorId) {
+        // Dibayar pakai Saldo Deposit Vendor (bukan potong Kas/Bank) — pas
+        // dihapus, saldo depositnya dibalikin lagi ke vendor terkait.
+        await adjustVendorDepositBalance(vp.vendorId, vp.vendorName, Number(vp.amount) || 0, 'usage_reversal', `Koreksi hapus - ${vp.category || '-'}`, vp.packageName || '');
+      } else if (vp.accountId) {
+        // Uangnya balik lagi ke saldo akun Kas/Bank yang tadinya kepotong, dan
+        // baris mutasinya ikut hilang dari riwayat (bukan nambah baris "koreksi").
+        await removeAccountMutationBySource(vp.accountId, vp.id, Number(vp.amount) || 0);
+      }
       fetchData();
     } catch (err) {
       alert("Gagal menghapus pembayaran vendor: " + err.message);
@@ -781,34 +952,61 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         alert("Pilih paket keberangkatan terkait dulu. Kalau ini biaya kantor yang bukan buat trip tertentu, catat lewat tombol \"Biaya Operasional Kantor\", bukan di sini.");
         return;
       }
-      if (!vendorForm.accountId) {
+      const selectedVendor = vendorsList.find(v => v.id === vendorForm.vendorId);
+      if (!selectedVendor) {
+        alert("Pilih vendornya dulu dari Data Master Vendor. Kalau belum ada, tambahkan dulu lewat tab \"Data Vendor\".");
+        return;
+      }
+      const vendorAmountVal = Number(vendorForm.amount);
+      const isDepositPay = vendorForm.payMethod === 'Saldo Deposit Vendor';
+
+      if (isDepositPay) {
+        const currentDeposit = Number(selectedVendor.depositBalance || 0);
+        if (vendorAmountVal > currentDeposit) {
+          alert(`Saldo Deposit vendor "${selectedVendor.name}" tidak cukup. Saldo saat ini: Rp ${currentDeposit.toLocaleString('id-ID')}, dibutuhkan: Rp ${vendorAmountVal.toLocaleString('id-ID')}.`);
+          return;
+        }
+      } else if (!vendorForm.accountId) {
         alert("Pilih akun Kas/Bank yang dipakai bayar vendor ini dulu.");
         return;
       }
       const vendorAccount = financialAccounts.find(a => a.id === vendorForm.accountId);
-      const vendorAmountVal = Number(vendorForm.amount);
 
       const vendorRef = await addDoc(collection(db, 'payments_vendor'), {
         packageId: selectedPkg.id,
         packageName: selectedPkg.name,
-        vendorName: vendorForm.vendorName,
+        vendorId: selectedVendor.id,
+        vendorName: selectedVendor.name,
         category: vendorForm.category,
         amount: vendorAmountVal,
-        accountId: vendorForm.accountId,
-        accountName: vendorAccount?.name || '',
+        payMethod: vendorForm.payMethod,
+        ...(isDepositPay ? {} : { accountId: vendorForm.accountId, accountName: vendorAccount?.name || '' }),
         notes: vendorForm.notes,
         createdAt: resolvePaymentCreatedAt(vendorForm.paymentDate)
       });
-      await adjustAccountBalance(vendorForm.accountId, -vendorAmountVal, {
-        description: `Bayar Vendor - ${vendorForm.vendorName || '-'} (${vendorForm.category})`,
-        reference: vendorForm.vendorName || '',
-        source: 'vendor_payment',
-        date: resolvePaymentCreatedAt(vendorForm.paymentDate),
-        sourceDocId: vendorRef.id
-      });
+
+      if (isDepositPay) {
+        await adjustVendorDepositBalance(
+          selectedVendor.id,
+          selectedVendor.name,
+          -vendorAmountVal,
+          'usage',
+          `Bayar ${vendorForm.category} - ${selectedPkg.name}`,
+          selectedPkg.name,
+          resolvePaymentCreatedAt(vendorForm.paymentDate)
+        );
+      } else {
+        await adjustAccountBalance(vendorForm.accountId, -vendorAmountVal, {
+          description: `Bayar Vendor - ${selectedVendor.name} (${vendorForm.category})`,
+          reference: selectedVendor.name,
+          source: 'vendor_payment',
+          date: resolvePaymentCreatedAt(vendorForm.paymentDate),
+          sourceDocId: vendorRef.id
+        });
+      }
 
       setShowVendorModal(false);
-      setVendorForm({ packageId: '', vendorName: '', category: 'Tiket Pesawat', amount: '', accountId: '', notes: 'DP Booking Seat', paymentDate: todayISODate() });
+      setVendorForm({ packageId: '', vendorId: '', vendorName: '', category: VENDOR_CATEGORIES[0], payMethod: 'Kas/Bank', amount: '', accountId: '', notes: 'DP Booking Seat', paymentDate: todayISODate() });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat pembayaran vendor: " + err.message);
@@ -1211,6 +1409,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         >
           <Wallet className="w-3.5 h-3.5" /> Kas & Bank ({financialAccounts.length})
         </button>
+        <button
+          onClick={() => setActiveTab('vendors_master')}
+          className={`px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+            activeTab === 'vendors_master' ? `${styles.tabActive} text-rose-500 border` : `${styles.textSub} hover:${styles.textTitle}`
+          }`}
+        >
+          <Building2 className="w-3.5 h-3.5" /> Data Vendor ({vendorsList.length})
+        </button>
       </div>
 
       {activeTab === 'income' && (
@@ -1315,18 +1521,35 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                       <td className={`p-4 ${styles.textSub}`}>
                         {vp.notes}
                         <span className="block text-[10px] text-slate-400">{formatDateDDMMYYYY(vp.createdAt)}</span>
+                        {vp.payMethod === 'Saldo Deposit Vendor' && (
+                          <span className="inline-block mt-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-2 py-0.5 rounded-full text-[10px] font-medium">Pakai Saldo Deposit</span>
+                        )}
+                        {vp.convertedToDeposit && (
+                          <span className="inline-block mt-1 ml-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 px-2 py-0.5 rounded-full text-[10px] font-medium">✓ Dikonversi ke Deposit</span>
+                        )}
                       </td>
                       <td className="p-4 text-right font-bold text-rose-500">
                         - Rp {Number(vp.amount).toLocaleString('id-ID')}
                       </td>
                       <td className="p-4 text-center">
-                        <button
-                          onClick={() => handleDeleteVendorPayment(vp)}
-                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                          title="Hapus Pembayaran Vendor"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-center gap-2">
+                          {!vp.convertedToDeposit && vp.payMethod !== 'Saldo Deposit Vendor' && (
+                            <button
+                              onClick={() => handleOpenConvertModal(vp)}
+                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                              title="Konversi ke Saldo Deposit (DP batal, nggak hangus)"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleDeleteVendorPayment(vp)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                            title="Hapus Pembayaran Vendor"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -1660,6 +1883,196 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'vendors_master' && (
+        <div className="space-y-4">
+          <div className={`${styles.cardBg} border rounded-xl p-4 flex justify-between items-center`}>
+            <div>
+              <p className={`text-xs font-medium ${styles.textSub}`}>Total Saldo Deposit Seluruh Vendor</p>
+              <p className={`text-xl font-bold ${styles.textTitle}`}>
+                Rp {vendorsList.reduce((acc, v) => acc + (Number(v.depositBalance) || 0), 0).toLocaleString('id-ID')}
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setEditingVendorMasterId(null);
+                setVendorMasterForm({ name: '', category: VENDOR_CATEGORIES[0] });
+                setShowVendorMasterModal(true);
+              }}
+              className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
+            >
+              <Building2 className="w-4 h-4" /> + Tambah Vendor
+            </button>
+          </div>
+
+          <p className={`text-[10.5px] ${styles.textSub}`}>
+            Saldo Deposit Vendor nampung DP (misal block seat) yang batal (trip cancel) tapi nggak hangus — bisa dipakai lagi buat booking berikutnya ke vendor yang sama, lewat pilihan "Metode Bayar: Saldo Deposit Vendor" di form Bayar Vendor.
+          </p>
+
+          <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                  <tr>
+                    <th className="p-4">Nama Vendor</th>
+                    <th className="p-4">Kategori</th>
+                    <th className="p-4 text-right">Saldo Deposit</th>
+                    <th className="p-4 text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                  {vendorsList.length === 0 ? (
+                    <tr>
+                      <td colSpan="4" className={`p-8 text-center ${styles.textSub}`}>Belum ada vendor. Tambahkan dulu biar bisa dipilih pas catat "Bayar Vendor".</td>
+                    </tr>
+                  ) : (
+                    vendorsList.map(v => (
+                      <tr key={v.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                        <td className={`p-4 font-semibold ${styles.textTitle}`}>{v.name}</td>
+                        <td className="p-4">
+                          <span className="bg-rose-500/10 text-rose-500 border border-rose-500/20 px-2.5 py-1 rounded-full font-medium">
+                            {v.category}
+                          </span>
+                        </td>
+                        <td className={`p-4 text-right font-bold ${Number(v.depositBalance || 0) > 0 ? 'text-emerald-500' : styles.textTitle}`}>
+                          Rp {Number(v.depositBalance || 0).toLocaleString('id-ID')}
+                        </td>
+                        <td className="p-4 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => handleEditVendorMaster(v)}
+                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                              title="Edit Vendor"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteVendorMaster(v)}
+                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                              title="Hapus Vendor"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showVendorMasterModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+            <button onClick={() => setShowVendorMasterModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-4 flex items-center gap-2`}>
+              <Building2 className="w-5 h-5 text-rose-500" /> {editingVendorMasterId ? 'Edit Vendor' : 'Tambah Vendor'}
+            </h3>
+            <form onSubmit={handleVendorMasterSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div>
+                <label className="block mb-1 font-medium">Nama Vendor / Perusahaan</label>
+                <input
+                  type="text" required placeholder="Contoh: Saudi Airlines / Hotel Pullman Makkah"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={vendorMasterForm.name}
+                  onChange={e => setVendorMasterForm({ ...vendorMasterForm, name: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block mb-1 font-medium">Kategori</label>
+                <select
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={vendorMasterForm.category}
+                  onChange={e => setVendorMasterForm({ ...vendorMasterForm, category: e.target.value })}
+                >
+                  {VENDOR_CATEGORIES.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+              {editingVendorMasterId && (
+                <p className="text-[10px] opacity-70">Saldo Deposit vendor ini cuma berubah otomatis lewat transaksi (konversi DP batal / pemakaian), nggak bisa diubah manual dari sini.</p>
+              )}
+              <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowVendorMasterModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" className="px-4 py-2 bg-rose-600 text-white rounded-lg font-medium">
+                  Simpan Vendor
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showConvertDepositModal && convertingPayment && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+            <button onClick={() => setShowConvertDepositModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-2 flex items-center gap-2`}>
+              <RotateCcw className="w-5 h-5 text-emerald-500" /> Konversi ke Saldo Deposit Vendor
+            </h3>
+            <p className={`text-[10.5px] ${styles.textSub} mb-4`}>
+              Transaksi asli (Rp {Number(convertingPayment.amount || 0).toLocaleString('id-ID')} ke {convertingPayment.vendorName}) TETAP tercatat apa adanya — konversi ini cuma nambahin kredit ke vendor terkait, nggak menyentuh saldo Kas/Bank (uangnya emang udah keluar duluan).
+            </p>
+            <form onSubmit={handleConvertSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div>
+                <label className="block mb-1 font-medium">Vendor Tujuan Saldo Deposit</label>
+                <select
+                  required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={convertForm.vendorId}
+                  onChange={e => setConvertForm({ ...convertForm, vendorId: e.target.value })}
+                >
+                  <option value="">-- Pilih Vendor --</option>
+                  {vendorsList.map(v => (
+                    <option key={v.id} value={v.id}>{v.name} (Saldo sekarang: Rp {Number(v.depositBalance || 0).toLocaleString('id-ID')})</option>
+                  ))}
+                </select>
+                {vendorsList.length === 0 && (
+                  <p className="text-[10px] mt-1 text-amber-500">Belum ada vendor di Data Master. Tambahkan dulu lewat tab "Data Vendor".</p>
+                )}
+              </div>
+              <div>
+                <label className="block mb-1 font-medium">Nominal yang Dikonversi (Rp)</label>
+                <input
+                  type="number" required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={convertForm.amount}
+                  onChange={e => setConvertForm({ ...convertForm, amount: e.target.value })}
+                />
+                <p className="text-[10px] mt-1 opacity-70">Default-nya sama kayak nominal DP aslinya, tapi bisa disesuaikan kalau cuma sebagian yang nggak hangus.</p>
+              </div>
+              <div>
+                <label className="block mb-1 font-medium">Catatan</label>
+                <input
+                  type="text"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={convertForm.notes}
+                  onChange={e => setConvertForm({ ...convertForm, notes: e.target.value })}
+                />
+              </div>
+              <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowConvertDepositModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
+                  Konversi ke Deposit
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -2241,13 +2654,24 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
               </div>
 
               <div>
-                <label className="block mb-1 font-medium">Nama Vendor / Perusahaan</label>
-                <input
-                  type="text" required placeholder="Contoh: Saudi Airlines / Hotel Pullman Makkah"
+                <label className="block mb-1 font-medium">Vendor / Perusahaan</label>
+                <select
+                  required
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={vendorForm.vendorName}
-                  onChange={e => setVendorForm({ ...vendorForm, vendorName: e.target.value })}
-                />
+                  value={vendorForm.vendorId}
+                  onChange={e => {
+                    const v = vendorsList.find(x => x.id === e.target.value);
+                    setVendorForm({ ...vendorForm, vendorId: e.target.value, category: v?.category || vendorForm.category });
+                  }}
+                >
+                  <option value="">-- Pilih Vendor --</option>
+                  {vendorsList.map(v => (
+                    <option key={v.id} value={v.id}>{v.name}{Number(v.depositBalance || 0) > 0 ? ` (Saldo Deposit: Rp ${Number(v.depositBalance).toLocaleString('id-ID')})` : ''}</option>
+                  ))}
+                </select>
+                {vendorsList.length === 0 && (
+                  <p className="text-[10px] mt-1 text-amber-500">Belum ada vendor. Tambahkan dulu lewat tab "Data Vendor".</p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -2258,12 +2682,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                     value={vendorForm.category}
                     onChange={e => setVendorForm({ ...vendorForm, category: e.target.value })}
                   >
-                    <option value="Tiket Pesawat">Tiket Pesawat</option>
-                    <option value="Hotel Makkah">Hotel Makkah</option>
-                    <option value="Hotel Madinah">Hotel Madinah</option>
-                    <option value="Visa & Siskopatuh">Visa & Siskopatuh</option>
-                    <option value="LA & Bus Transport">LA & Bus Transport</option>
-                    <option value="Perlengkapan Koper">Perlengkapan Koper</option>
+                    {VENDOR_CATEGORIES.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -2277,6 +2698,18 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </div>
               </div>
 
+              <div>
+                <label className="block mb-1 font-medium">Metode Bayar</label>
+                <select
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={vendorForm.payMethod}
+                  onChange={e => setVendorForm({ ...vendorForm, payMethod: e.target.value })}
+                >
+                  <option value="Kas/Bank">Kas/Bank (uang keluar beneran)</option>
+                  <option value="Saldo Deposit Vendor">Saldo Deposit Vendor (pakai kredit yang udah ada)</option>
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block mb-1 font-medium">Tanggal Pembayaran</label>
@@ -2287,20 +2720,29 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                     onChange={(val) => setVendorForm({ ...vendorForm, paymentDate: val })}
                   />
                 </div>
-                <div>
-                  <label className="block mb-1 font-medium">Keluar dari Akun Kas/Bank</label>
-                  <select
-                    required
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    value={vendorForm.accountId}
-                    onChange={e => setVendorForm({ ...vendorForm, accountId: e.target.value })}
-                  >
-                    <option value="">-- Pilih Akun --</option>
-                    {financialAccounts.map(a => (
-                      <option key={a.id} value={a.id}>{a.name} (Saldo: Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
-                    ))}
-                  </select>
-                </div>
+                {vendorForm.payMethod === 'Saldo Deposit Vendor' ? (
+                  <div>
+                    <label className="block mb-1 font-medium">Saldo Deposit Vendor</label>
+                    <div className={`w-full ${styles.inputBg} rounded-lg p-2.5 font-semibold text-emerald-500`}>
+                      Rp {Number(vendorsList.find(v => v.id === vendorForm.vendorId)?.depositBalance || 0).toLocaleString('id-ID')}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block mb-1 font-medium">Keluar dari Akun Kas/Bank</label>
+                    <select
+                      required
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={vendorForm.accountId}
+                      onChange={e => setVendorForm({ ...vendorForm, accountId: e.target.value })}
+                    >
+                      <option value="">-- Pilih Akun --</option>
+                      {financialAccounts.map(a => (
+                        <option key={a.id} value={a.id}>{a.name} (Saldo: Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div>
