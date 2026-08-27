@@ -120,6 +120,7 @@ const buildIncomeRow = (docs, bookingsById, isFallbackMerge) => {
     paxCount,
     packageName: first.packageName,
     jamaahName: first.jamaahName,
+    ordererName: (relatedBookings[0] && relatedBookings[0].ordererName) || first.ordererName || '',
     bookingId: first.bookingId
   };
 };
@@ -1499,6 +1500,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                     <tr key={row.key} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
                       <td className={`p-4 font-semibold ${styles.textTitle}`}>
                         {row.paxCount > 1 ? `${row.paxCount} Peserta` : (row.jamaahName || '-')}
+                        {row.ordererName && (
+                          <span className={`block text-[10.5px] font-normal ${styles.textSub}`}>
+                            {row.ordererName}
+                          </span>
+                        )}
                         <button
                           type="button"
                           onClick={() => {
@@ -2545,7 +2551,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                   <option value="">-- Pilih Kode Booking --</option>
                   {groupedBookingOptions.map(g => (
                     <option key={g.code} value={g.code}>
-                      {g.code} - {g.paxCount > 1 ? `${g.paxCount} Peserta` : g.primary.jamaahName} ({g.primary.packageName})
+                      {g.code} - {g.paxCount > 1 ? `${g.paxCount} Peserta` : g.primary.jamaahName}{g.primary.ordererName ? ` a.n. ${g.primary.ordererName}` : ''} ({g.primary.packageName})
                     </option>
                   ))}
                 </select>
