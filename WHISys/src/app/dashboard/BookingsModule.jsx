@@ -297,6 +297,11 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   // State Filter Tampilan (Aktif / Semua / Dibatalkan / Reschedule)
   const [viewFilter, setViewFilter] = useState('active');
 
+  // Filter berdasarkan Jatuh Tempo (DP 2 / Pelunasan) — dipakai buat nyari
+  // booking yang perlu ditagih. 'all' = nggak difilter.
+  const [dueDateFilter, setDueDateFilter] = useState('all');
+  const DUE_SOON_DAYS = 7;
+
   // State baris mana yang lagi diperluas aksinya (kolom Aksi diminimalkan by default)
   const [expandedActionsId, setExpandedActionsId] = useState(null);
 
@@ -2881,7 +2886,22 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       (b.bookingCode && b.bookingCode.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (b.groupBookingCode && b.groupBookingCode.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (b.ordererName && b.ordererName.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+    )
+    .filter(b => {
+      if (dueDateFilter === 'all') return true;
+      // Booking yang udah lunas/batal/reschedule nggak punya due date yang
+      // relevan lagi (sama kayak renderDueDates di tabel).
+      if (b.status === 'cancelled' || b.status === 'rescheduled' || b.paymentStatus === 'Full Payment') return false;
+      const dueDP2 = getDueDateDP2(b);
+      const duePelunasan = getDueDatePelunasan(b);
+      const soonThreshold = shiftDateByDays(new Date().toISOString().slice(0, 10), DUE_SOON_DAYS);
+      if (dueDateFilter === 'overdue_dp2') return dueDP2 && isOverdue(dueDP2);
+      if (dueDateFilter === 'overdue_pelunasan') return duePelunasan && isOverdue(duePelunasan);
+      if (dueDateFilter === 'overdue_any') return (dueDP2 && isOverdue(dueDP2)) || (duePelunasan && isOverdue(duePelunasan));
+      if (dueDateFilter === 'upcoming_dp2') return dueDP2 && !isOverdue(dueDP2) && dueDP2 <= soonThreshold;
+      if (dueDateFilter === 'upcoming_pelunasan') return duePelunasan && !isOverdue(duePelunasan) && duePelunasan <= soonThreshold;
+      return true;
+    });
 
   // ============ RINGKASAN GRUP UNTUK TAMPILAN DEFAULT BOOKING & MANIFEST ============
   // Kelompokkan booking berdasarkan groupBookingCode; booking single-pax (tanpa
@@ -3056,6 +3076,21 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               {f.label}
             </button>
           ))}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Clock className={`w-3.5 h-3.5 ${styles.textSub}`} />
+          <select
+            value={dueDateFilter}
+            onChange={e => setDueDateFilter(e.target.value)}
+            className={`${styles.inputBg} px-2.5 py-1.5 rounded-lg text-[11px] font-semibold focus:outline-none`}
+          >
+            <option value="all">Semua Jatuh Tempo</option>
+            <option value="overdue_any">Lewat Jatuh Tempo (DP 2 / Pelunasan)</option>
+            <option value="overdue_dp2">DP 2 — Lewat Jatuh Tempo</option>
+            <option value="upcoming_dp2">DP 2 — Jatuh Tempo {DUE_SOON_DAYS} Hari Lagi</option>
+            <option value="overdue_pelunasan">Pelunasan — Lewat Jatuh Tempo</option>
+            <option value="upcoming_pelunasan">Pelunasan — Jatuh Tempo {DUE_SOON_DAYS} Hari Lagi</option>
+          </select>
         </div>
       </div>
 
