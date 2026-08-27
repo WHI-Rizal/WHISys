@@ -3426,6 +3426,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                       {renderDueDates({ ...group.primary, createdAt: group.earliestCreatedAt })}
                     </td>
                     <td className="p-4 text-right whitespace-nowrap">
+                      <div className={`text-[10px] ${styles.textSub}`}>
+                        Tagihan: Rp {Number(group.totalAmount || 0).toLocaleString('id-ID')}
+                      </div>
                       {(() => {
                         const kekurangan = Number(group.totalAmount || 0) - Number(group.totalPaid || 0);
                         if (group.primary.status === 'cancelled' || group.primary.status === 'rescheduled') {
