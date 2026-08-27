@@ -205,6 +205,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const [editingAccountId, setEditingAccountId] = useState(null);
   const [activeTab, setActiveTab] = useState('income');
 
+  // Modal "Riwayat Mutasi" per akun Kas/Bank — mirip rekening koran, buat
+  // rekonsiliasi manual sama mutasi bank asli.
+  const [showMutationsModal, setShowMutationsModal] = useState(false);
+  const [mutationAccount, setMutationAccount] = useState(null);
+  const [mutationRows, setMutationRows] = useState([]);
+  const [mutationLoading, setMutationLoading] = useState(false);
+  const [mutationDateFrom, setMutationDateFrom] = useState('');
+  const [mutationDateTo, setMutationDateTo] = useState('');
+
   const [showProfitDetailModal, setShowProfitDetailModal] = useState(false);
   const [selectedPackageForDetail, setSelectedPackageForDetail] = useState(null);
 
@@ -350,9 +359,22 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   // negatif = uang keluar dari akun ini (bayar vendor, biaya operasional).
   // Metode Bayar "Saldo Deposit" SENGAJA nggak lewat sini — itu cuma
   // mindahin saldo titipan customer, bukan uang baru yang masuk/keluar kas.
-  const adjustAccountBalance = async (accountId, delta) => {
+  // Tiap perubahan saldo juga dicatat ke 'account_mutations' biar ada
+  // riwayat mutasi per akun buat rekonsiliasi manual sama rekening koran.
+  const adjustAccountBalance = async (accountId, delta, meta = {}) => {
     if (!accountId || !delta) return;
     await updateDoc(doc(db, 'financial_accounts', accountId), { balance: increment(delta) });
+    const acc = financialAccounts.find(a => a.id === accountId);
+    await addDoc(collection(db, 'account_mutations'), {
+      accountId,
+      accountName: acc?.name || meta.accountName || '-',
+      type: delta > 0 ? 'in' : 'out',
+      amount: Math.abs(delta),
+      description: meta.description || '-',
+      reference: meta.reference || '',
+      source: meta.source || '-',
+      createdAt: meta.date || new Date().toISOString()
+    });
   };
 
   const handleAccountSubmit = async (e) => {
@@ -413,6 +435,80 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     }
   };
 
+  // Riwayat Mutasi 1 akun Kas/Bank — mirip rekening koran, dipakai buat
+  // rekonsiliasi manual sama mutasi bank/kas aslinya. Saldo berjalan
+  // dihitung dari SELURUH riwayat (urut tanggal naik) mulai dari saldo
+  // awal akun, biar tetap akurat walau nanti ditampilkan dengan filter
+  // rentang tanggal tertentu.
+  const handleOpenMutations = async (acc) => {
+    setMutationAccount(acc);
+    setMutationDateFrom('');
+    setMutationDateTo('');
+    setShowMutationsModal(true);
+    setMutationLoading(true);
+    try {
+      const q = query(collection(db, 'account_mutations'), where('accountId', '==', acc.id));
+      const snap = await getDocs(q);
+      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      let running = Number(acc.openingBalance || 0);
+      const withBalance = rows.map(r => {
+        running += (r.type === 'in' ? Number(r.amount) || 0 : -(Number(r.amount) || 0));
+        return { ...r, balanceAfter: running };
+      });
+      setMutationRows(withBalance);
+    } catch (err) {
+      alert("Gagal mengambil riwayat mutasi: " + err.message);
+      setMutationRows([]);
+    } finally {
+      setMutationLoading(false);
+    }
+  };
+
+  const getFilteredMutationRows = () => {
+    return mutationRows.filter(r => {
+      const rowDate = (r.createdAt || '').slice(0, 10);
+      if (mutationDateFrom && rowDate < mutationDateFrom) return false;
+      if (mutationDateTo && rowDate > mutationDateTo) return false;
+      return true;
+    });
+  };
+
+  // Export tabel mutasi yang lagi ditampilkan (udah kefilter tanggal) ke
+  // CSV — bisa langsung dibuka di Excel buat dicocokin sama rekening koran.
+  const handleExportMutations = () => {
+    const rows = getFilteredMutationRows();
+    if (rows.length === 0) {
+      alert("Nggak ada data mutasi buat diexport pada rentang tanggal ini.");
+      return;
+    }
+    const escapeCsv = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+    const header = ['Tanggal', 'Keterangan', 'Referensi', 'Masuk', 'Keluar', 'Saldo'];
+    const lines = [header.join(',')];
+    rows.forEach(r => {
+      lines.push([
+        escapeCsv(formatDateDDMMYYYY(r.createdAt)),
+        escapeCsv(r.description),
+        escapeCsv(r.reference),
+        r.type === 'in' ? Number(r.amount) || 0 : 0,
+        r.type === 'out' ? Number(r.amount) || 0 : 0,
+        Number(r.balanceAfter) || 0
+      ].join(','));
+    });
+    // BOM biar Excel baca karakter khusus (Rp, dll) dengan benar.
+    const csvContent = '﻿' + lines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const safeAccName = (mutationAccount?.name || 'akun').replace(/[^a-z0-9]+/gi, '_');
+    link.href = url;
+    link.download = `Mutasi_${safeAccName}_${todayISODate()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const handleDepositSubmit = async (e) => {
     e.preventDefault();
     const customer = jamaahList.find(j => j.id === depositForm.customerId);
@@ -440,7 +536,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         '',
         resolvePaymentCreatedAt(depositForm.date)
       );
-      await adjustAccountBalance(depositForm.accountId, amountVal);
+      await adjustAccountBalance(depositForm.accountId, amountVal, {
+        description: `Titip Deposit - ${customer.fullName || '-'}${depositForm.notes ? ` (${depositForm.notes})` : ''}`,
+        reference: customer.customerCode || customer.fullName || '',
+        source: 'deposit_topup',
+        date: resolvePaymentCreatedAt(depositForm.date)
+      });
       setShowDepositModal(false);
       setDepositForm({ customerId: '', amount: '', accountId: '', notes: 'Titip Deposit (belum ada booking)', date: todayISODate() });
       fetchData();
@@ -454,7 +555,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     try {
       await deleteDoc(doc(db, 'payments_vendor', vp.id));
       // Uangnya balik lagi ke saldo akun Kas/Bank yang tadinya kepotong.
-      if (vp.accountId) await adjustAccountBalance(vp.accountId, Number(vp.amount) || 0);
+      if (vp.accountId) await adjustAccountBalance(vp.accountId, Number(vp.amount) || 0, {
+        description: `Koreksi hapus bayar vendor - ${vp.vendorName || '-'}`,
+        reference: vp.vendorName || '',
+        source: 'vendor_delete_reversal'
+      });
       fetchData();
     } catch (err) {
       alert("Gagal menghapus pembayaran vendor: " + err.message);
@@ -465,7 +570,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     if (!confirm("Apakah Anda yakin ingin menghapus catatan biaya operasional ini?")) return;
     try {
       await deleteDoc(doc(db, 'expenses_operational', op.id));
-      if (op.accountId) await adjustAccountBalance(op.accountId, Number(op.amount) || 0);
+      if (op.accountId) await adjustAccountBalance(op.accountId, Number(op.amount) || 0, {
+        description: `Koreksi hapus biaya operasional - ${op.category || op.description || '-'}`,
+        reference: op.category || '',
+        source: 'operational_delete_reversal'
+      });
       fetchData();
     } catch (err) {
       alert("Gagal menghapus biaya operasional: " + err.message);
@@ -590,7 +699,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       if (incomeForm.paymentMethod === 'Saldo Deposit' && amountVal > 0) {
         await adjustDepositBalance(incomeOrdererId, incomeOrdererName, -amountVal, 'usage', `Bayar setoran kode booking ${incomeForm.groupCode}`, incomeForm.groupCode, resolvePaymentCreatedAt(incomeForm.date));
       } else if (amountVal > 0) {
-        await adjustAccountBalance(incomeForm.accountId, amountVal);
+        await adjustAccountBalance(incomeForm.accountId, amountVal, {
+          description: `Setoran - Kode ${incomeForm.groupCode}`,
+          reference: incomeForm.groupCode,
+          source: 'income_payment',
+          date: resolvePaymentCreatedAt(incomeForm.date)
+        });
       }
 
       setShowIncomeModal(false);
@@ -612,7 +726,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       // (doc yang dibayar pakai Saldo Deposit nggak punya accountId, jadi
       // otomatis dilewati — saldo deposit-nya juga sengaja nggak dibalikin
       // di sini, itu koreksi manual terpisah lewat modul Booking).
-      await Promise.all(row.docs.map(d => d.accountId ? adjustAccountBalance(d.accountId, Number(d.amount) || 0) : Promise.resolve()));
+      await Promise.all(row.docs.map(d => d.accountId ? adjustAccountBalance(d.accountId, Number(d.amount) || 0, {
+        description: `Koreksi hapus setoran - Booking ${d.bookingCode || '-'}`,
+        reference: d.bookingCode || '',
+        source: 'income_delete_reversal'
+      }) : Promise.resolve()));
       const affectedBookingIds = Array.from(new Set(row.docs.map(d => d.bookingId).filter(Boolean)));
       await Promise.all(affectedBookingIds.map(id => syncBookingTotalPaid(id)));
       fetchData();
@@ -647,7 +765,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         notes: vendorForm.notes,
         createdAt: resolvePaymentCreatedAt(vendorForm.paymentDate)
       });
-      await adjustAccountBalance(vendorForm.accountId, -vendorAmountVal);
+      await adjustAccountBalance(vendorForm.accountId, -vendorAmountVal, {
+        description: `Bayar Vendor - ${vendorForm.vendorName || '-'} (${vendorForm.category})`,
+        reference: vendorForm.vendorName || '',
+        source: 'vendor_payment',
+        date: resolvePaymentCreatedAt(vendorForm.paymentDate)
+      });
 
       setShowVendorModal(false);
       setVendorForm({ packageId: '', vendorName: '', category: 'Tiket Pesawat', amount: '', accountId: '', notes: 'DP Booking Seat', paymentDate: todayISODate() });
@@ -676,7 +799,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         expenseDate: operationalForm.expenseDate || todayISODate(),
         createdAt: new Date().toISOString()
       });
-      await adjustAccountBalance(operationalForm.accountId, -opAmountVal);
+      await adjustAccountBalance(operationalForm.accountId, -opAmountVal, {
+        description: `Biaya Operasional - ${operationalForm.category}`,
+        reference: operationalForm.category || '',
+        source: 'operational_expense',
+        date: operationalForm.expenseDate ? resolvePaymentCreatedAt(operationalForm.expenseDate) : undefined
+      });
 
       setShowOperationalModal(false);
       setOperationalForm({ category: OPERATIONAL_CATEGORIES[0], amount: '', accountId: '', notes: '', expenseDate: todayISODate() });
@@ -1468,6 +1596,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                         <td className="p-4 text-center">
                           <div className="flex items-center justify-center gap-2">
                             <button
+                              onClick={() => handleOpenMutations(acc)}
+                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                              title="Lihat Riwayat Mutasi"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button
                               onClick={() => handleEditAccount(acc)}
                               className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
                               title="Edit Akun"
@@ -1586,6 +1721,96 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showMutationsModal && mutationAccount && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col relative`}>
+            <div className={`p-6 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} flex justify-between items-start gap-4`}>
+              <div>
+                <h3 className={`text-lg font-bold ${styles.textTitle}`}>Riwayat Mutasi — {mutationAccount.name}</h3>
+                <p className={`text-xs ${styles.textSub} mt-1`}>
+                  Saldo Awal: Rp {Number(mutationAccount.openingBalance || 0).toLocaleString('id-ID')} · Saldo Sekarang: Rp {Number(mutationAccount.balance || 0).toLocaleString('id-ID')}
+                </p>
+              </div>
+              <button onClick={() => setShowMutationsModal(false)} className={`p-1.5 ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'} rounded-lg`}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 pb-3 flex flex-wrap items-end gap-3">
+              <div>
+                <label className={`block text-[10px] font-medium mb-1 ${styles.textSub}`}>Dari Tanggal</label>
+                <input
+                  type="date"
+                  value={mutationDateFrom}
+                  onChange={e => setMutationDateFrom(e.target.value)}
+                  className={`text-xs px-3 py-2 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+              <div>
+                <label className={`block text-[10px] font-medium mb-1 ${styles.textSub}`}>Sampai Tanggal</label>
+                <input
+                  type="date"
+                  value={mutationDateTo}
+                  onChange={e => setMutationDateTo(e.target.value)}
+                  className={`text-xs px-3 py-2 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+              {(mutationDateFrom || mutationDateTo) && (
+                <button
+                  onClick={() => { setMutationDateFrom(''); setMutationDateTo(''); }}
+                  className={`text-xs px-3 py-2 rounded-lg ${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                >
+                  Reset Filter
+                </button>
+              )}
+              <button
+                onClick={handleExportMutations}
+                className="ml-auto flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
+              >
+                <Download className="w-4 h-4" /> Export CSV
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 pb-6">
+              <div className={`${isDark ? 'border-slate-800' : 'border-slate-200'} border rounded-xl overflow-hidden`}>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} sticky top-0`}>
+                      <tr>
+                        <th className="p-3">Tanggal</th>
+                        <th className="p-3">Keterangan</th>
+                        <th className="p-3">Referensi</th>
+                        <th className="p-3 text-right">Masuk</th>
+                        <th className="p-3 text-right">Keluar</th>
+                        <th className="p-3 text-right">Saldo</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                      {mutationLoading ? (
+                        <tr><td colSpan="6" className={`p-8 text-center ${styles.textSub}`}>Memuat riwayat mutasi...</td></tr>
+                      ) : getFilteredMutationRows().length === 0 ? (
+                        <tr><td colSpan="6" className={`p-8 text-center ${styles.textSub}`}>Belum ada mutasi pada rentang tanggal ini.</td></tr>
+                      ) : (
+                        getFilteredMutationRows().map(r => (
+                          <tr key={r.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                            <td className={`p-3 whitespace-nowrap ${styles.textSub}`}>{formatDateDDMMYYYY(r.createdAt)}</td>
+                            <td className={`p-3 ${styles.textTitle}`}>{r.description || '-'}</td>
+                            <td className={`p-3 ${styles.textSub}`}>{r.reference || '-'}</td>
+                            <td className="p-3 text-right font-medium text-emerald-500">{r.type === 'in' ? `Rp ${Number(r.amount).toLocaleString('id-ID')}` : '-'}</td>
+                            <td className="p-3 text-right font-medium text-rose-500">{r.type === 'out' ? `Rp ${Number(r.amount).toLocaleString('id-ID')}` : '-'}</td>
+                            <td className={`p-3 text-right font-bold ${styles.textTitle}`}>Rp {Number(r.balanceAfter).toLocaleString('id-ID')}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
