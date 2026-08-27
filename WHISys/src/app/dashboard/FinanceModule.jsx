@@ -373,8 +373,32 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       description: meta.description || '-',
       reference: meta.reference || '',
       source: meta.source || '-',
+      // sourceDocId = ID dokumen transaksi asal (payments_income/payments_vendor/
+      // expenses_operational) — dipakai buat nemuin & ngapus/nyesuain baris ini
+      // lagi kalau transaksinya diedit/dihapus, biar riwayat mutasi nggak
+      // numpuk baris "koreksi" tiap ada perubahan.
+      sourceDocId: meta.sourceDocId || '',
       createdAt: meta.date || new Date().toISOString()
     });
+  };
+
+  // Hapus baris account_mutations yang berasal dari SATU dokumen transaksi
+  // (dicari lewat sourceDocId) — dipake pas transaksi asalnya dihapus, biar
+  // riwayat mutasi ikutan hilang (bukan nambah baris "koreksi hapus").
+  // Saldo akun tetap disesuaikan langsung (nggak nulis baris baru).
+  const removeAccountMutationBySource = async (accountId, sourceDocId, delta) => {
+    if (!accountId) return;
+    if (delta) {
+      await updateDoc(doc(db, 'financial_accounts', accountId), { balance: increment(delta) });
+    }
+    if (!sourceDocId) return;
+    try {
+      const q = query(collection(db, 'account_mutations'), where('accountId', '==', accountId), where('sourceDocId', '==', sourceDocId));
+      const snap = await getDocs(q);
+      await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+    } catch (err) {
+      console.error('Gagal menghapus riwayat mutasi terkait:', err);
+    }
   };
 
   const handleAccountSubmit = async (e) => {
@@ -554,12 +578,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     if (!confirm("Apakah Anda yakin ingin menghapus catatan pengeluaran vendor ini?")) return;
     try {
       await deleteDoc(doc(db, 'payments_vendor', vp.id));
-      // Uangnya balik lagi ke saldo akun Kas/Bank yang tadinya kepotong.
-      if (vp.accountId) await adjustAccountBalance(vp.accountId, Number(vp.amount) || 0, {
-        description: `Koreksi hapus bayar vendor - ${vp.vendorName || '-'}`,
-        reference: vp.vendorName || '',
-        source: 'vendor_delete_reversal'
-      });
+      // Uangnya balik lagi ke saldo akun Kas/Bank yang tadinya kepotong, dan
+      // baris mutasinya ikut hilang dari riwayat (bukan nambah baris "koreksi").
+      if (vp.accountId) await removeAccountMutationBySource(vp.accountId, vp.id, Number(vp.amount) || 0);
       fetchData();
     } catch (err) {
       alert("Gagal menghapus pembayaran vendor: " + err.message);
@@ -570,11 +591,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     if (!confirm("Apakah Anda yakin ingin menghapus catatan biaya operasional ini?")) return;
     try {
       await deleteDoc(doc(db, 'expenses_operational', op.id));
-      if (op.accountId) await adjustAccountBalance(op.accountId, Number(op.amount) || 0, {
-        description: `Koreksi hapus biaya operasional - ${op.category || op.description || '-'}`,
-        reference: op.category || '',
-        source: 'operational_delete_reversal'
-      });
+      if (op.accountId) await removeAccountMutationBySource(op.accountId, op.id, Number(op.amount) || 0);
       fetchData();
     } catch (err) {
       alert("Gagal menghapus biaya operasional: " + err.message);
@@ -678,7 +695,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         const paxShare = baseShare + (i === 0 ? remainder : 0);
 
         if (paxShare > 0) {
-          await addDoc(collection(db, 'payments_income'), {
+          const payRef = await addDoc(collection(db, 'payments_income'), {
             bookingId: item.id,
             bookingCode: item.bookingCode,
             jamaahName: item.jamaahName,
@@ -691,6 +708,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
             createdAt: resolvePaymentCreatedAt(incomeForm.date),
             ...(isGroup ? { groupTransactionId } : {})
           });
+          if (incomeForm.paymentMethod !== 'Saldo Deposit') {
+            await adjustAccountBalance(incomeForm.accountId, paxShare, {
+              description: `Setoran - ${item.jamaahName || item.bookingCode} (Kode ${incomeForm.groupCode})`,
+              reference: item.bookingCode,
+              source: 'income_payment',
+              date: resolvePaymentCreatedAt(incomeForm.date),
+              sourceDocId: payRef.id
+            });
+          }
         }
 
         await syncBookingTotalPaid(item.id);
@@ -698,13 +724,6 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       if (incomeForm.paymentMethod === 'Saldo Deposit' && amountVal > 0) {
         await adjustDepositBalance(incomeOrdererId, incomeOrdererName, -amountVal, 'usage', `Bayar setoran kode booking ${incomeForm.groupCode}`, incomeForm.groupCode, resolvePaymentCreatedAt(incomeForm.date));
-      } else if (amountVal > 0) {
-        await adjustAccountBalance(incomeForm.accountId, amountVal, {
-          description: `Setoran - Kode ${incomeForm.groupCode}`,
-          reference: incomeForm.groupCode,
-          source: 'income_payment',
-          date: resolvePaymentCreatedAt(incomeForm.date)
-        });
       }
 
       setShowIncomeModal(false);
@@ -724,16 +743,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       await Promise.all(row.docs.map(d => deleteDoc(doc(db, 'payments_income', d.id))));
       // Tiap doc yang kehapus BUKAN uang beneran masuk lagi (catatannya
       // kehapus), jadi saldo akun Kas/Bank asalnya harus DIKURANGI sebesar
-      // porsinya masing-masing (bukan ditambah) — kalau nggak, malah
-      // kedobel jadi seolah-olah uangnya masuk 2x. (doc yang dibayar pakai
-      // Saldo Deposit nggak punya accountId, jadi otomatis dilewati —
+      // porsinya masing-masing, dan baris mutasinya sendiri ikut hilang dari
+      // riwayat (bukan nambah baris "koreksi hapus"). (doc yang dibayar
+      // pakai Saldo Deposit nggak punya accountId, jadi otomatis dilewati —
       // saldo deposit-nya juga sengaja nggak dibalikin di sini, itu koreksi
       // manual terpisah lewat modul Booking).
-      await Promise.all(row.docs.map(d => d.accountId ? adjustAccountBalance(d.accountId, -(Number(d.amount) || 0), {
-        description: `Koreksi hapus setoran - Booking ${d.bookingCode || '-'}`,
-        reference: d.bookingCode || '',
-        source: 'income_delete_reversal'
-      }) : Promise.resolve()));
+      await Promise.all(row.docs.map(d => d.accountId ? removeAccountMutationBySource(d.accountId, d.id, -(Number(d.amount) || 0)) : Promise.resolve()));
       const affectedBookingIds = Array.from(new Set(row.docs.map(d => d.bookingId).filter(Boolean)));
       await Promise.all(affectedBookingIds.map(id => syncBookingTotalPaid(id)));
       fetchData();
@@ -757,7 +772,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       const vendorAccount = financialAccounts.find(a => a.id === vendorForm.accountId);
       const vendorAmountVal = Number(vendorForm.amount);
 
-      await addDoc(collection(db, 'payments_vendor'), {
+      const vendorRef = await addDoc(collection(db, 'payments_vendor'), {
         packageId: selectedPkg.id,
         packageName: selectedPkg.name,
         vendorName: vendorForm.vendorName,
@@ -772,7 +787,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         description: `Bayar Vendor - ${vendorForm.vendorName || '-'} (${vendorForm.category})`,
         reference: vendorForm.vendorName || '',
         source: 'vendor_payment',
-        date: resolvePaymentCreatedAt(vendorForm.paymentDate)
+        date: resolvePaymentCreatedAt(vendorForm.paymentDate),
+        sourceDocId: vendorRef.id
       });
 
       setShowVendorModal(false);
@@ -793,7 +809,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       const opAccount = financialAccounts.find(a => a.id === operationalForm.accountId);
       const opAmountVal = Number(operationalForm.amount);
 
-      await addDoc(collection(db, 'expenses_operational'), {
+      const opRef = await addDoc(collection(db, 'expenses_operational'), {
         category: operationalForm.category,
         amount: opAmountVal,
         accountId: operationalForm.accountId,
@@ -806,7 +822,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         description: `Biaya Operasional - ${operationalForm.category}`,
         reference: operationalForm.category || '',
         source: 'operational_expense',
-        date: operationalForm.expenseDate ? resolvePaymentCreatedAt(operationalForm.expenseDate) : undefined
+        date: operationalForm.expenseDate ? resolvePaymentCreatedAt(operationalForm.expenseDate) : undefined,
+        sourceDocId: opRef.id
       });
 
       setShowOperationalModal(false);
