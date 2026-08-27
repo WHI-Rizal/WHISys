@@ -18,7 +18,9 @@ import {
   Calendar,
   AlertCircle,
   ShieldCheck,
-  MessageSquareHeart
+  MessageSquareHeart,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { auth, db } from '../../lib/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -61,13 +63,29 @@ export default function DashboardPage() {
   // State untuk navigasi antar modul
   const [selectedBookingForModal, setSelectedBookingForModal] = useState(null);
 
-  // Load saved theme dari LocalStorage saat pertama kali dimuat
+  // Sidebar bisa di-collapse jadi rail ikon doang, biar area konten utama
+  // (tabel-tabel yang lebar kayak Booking & Manifest) dapet ruang lebih luas.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Load saved theme & preferensi sidebar dari LocalStorage saat pertama kali dimuat
   useEffect(() => {
     const savedTheme = localStorage.getItem('whisys_theme');
     if (savedTheme === 'light' || savedTheme === 'dark') {
       setTheme(savedTheme);
     }
+    const savedSidebar = localStorage.getItem('whisys_sidebar_collapsed');
+    if (savedSidebar === '1') {
+      setSidebarCollapsed(true);
+    }
   }, []);
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('whisys_sidebar_collapsed', next ? '1' : '0');
+      return next;
+    });
+  };
 
   const toggleTheme = () => {
     const newTheme = theme === 'dark' ? 'light' : 'dark';
@@ -273,21 +291,35 @@ export default function DashboardPage() {
   return (
     <div className={`flex h-screen ${currentTheme.bg} font-sans transition-colors duration-300`}>
 
-      {/* 1. SIDEBAR NAVIGASI ERP */}
-      <aside className={`w-64 ${currentTheme.sidebar} border-r flex flex-col justify-between p-4 shrink-0 transition-colors duration-300`}>
+      {/* 1. SIDEBAR NAVIGASI ERP — bisa di-collapse jadi rail ikon doang lewat
+          tombol panah di pojok kanan atas sidebar, biar konten utama (tabel
+          lebar kayak Booking & Manifest) dapet ruang lebih luas. */}
+      <aside className={`relative ${sidebarCollapsed ? 'w-[68px]' : 'w-64'} ${currentTheme.sidebar} border-r flex flex-col justify-between p-4 shrink-0 transition-all duration-300`}>
+        <button
+          onClick={toggleSidebar}
+          className={`absolute -right-3 top-8 z-10 w-6 h-6 rounded-full border ${currentTheme.border} ${currentTheme.sidebar} flex items-center justify-center ${currentTheme.subText} hover:${currentTheme.accentText} transition-colors shadow-sm`}
+          title={sidebarCollapsed ? 'Buka Sidebar' : 'Tutup Sidebar'}
+        >
+          {sidebarCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
+        </button>
+
         <div>
-          <div className={`flex items-center gap-3 px-3 py-4 mb-6 border-b ${currentTheme.border}`}>
-            <div className={`p-2 ${currentTheme.accentBg} rounded-lg text-white`}>
+          <div className={`flex items-center gap-3 px-3 py-4 mb-6 border-b ${currentTheme.border} ${sidebarCollapsed ? 'justify-center px-0' : ''}`}>
+            <div className={`p-2 ${currentTheme.accentBg} rounded-lg text-white shrink-0`}>
               <Plane className="w-6 h-6" />
             </div>
-            <div>
-              <h1 className={`font-bold text-lg ${currentTheme.accentText} leading-none`}>Wisata Halal Internasional</h1>
-              <span className={`text-xs ${currentTheme.subText}`}>ERP SYSTEM</span>
-            </div>
+            {!sidebarCollapsed && (
+              <div>
+                <h1 className={`font-bold text-lg ${currentTheme.accentText} leading-none`}>Wisata Halal Internasional</h1>
+                <span className={`text-xs ${currentTheme.subText}`}>ERP SYSTEM</span>
+              </div>
+            )}
           </div>
 
           <nav className="space-y-1">
-            <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Core ERP System</p>
+            {!sidebarCollapsed && (
+              <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Core ERP System</p>
+            )}
 
             <SidebarItem
               icon={LayoutDashboard}
@@ -295,6 +327,7 @@ export default function DashboardPage() {
               active={activeMenu === 'dashboard'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
+              collapsed={sidebarCollapsed}
               onClick={() => { changeMenu('dashboard'); fetchDashboardData(); }}
             />
 
@@ -304,6 +337,7 @@ export default function DashboardPage() {
               active={activeMenu === 'packages'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
+              collapsed={sidebarCollapsed}
               onClick={() => changeMenu('packages')}
             />
 
@@ -313,6 +347,7 @@ export default function DashboardPage() {
               active={activeMenu === 'jamaah'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
+              collapsed={sidebarCollapsed}
               onClick={() => changeMenu('jamaah')}
             />
 
@@ -322,10 +357,13 @@ export default function DashboardPage() {
               active={activeMenu === 'bookings'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
+              collapsed={sidebarCollapsed}
               onClick={() => changeMenu('bookings')}
             />
 
-            <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Operasional Travel</p>
+            {!sidebarCollapsed && (
+              <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Operasional Travel</p>
+            )}
 
             {canAccessFinance && (
               <SidebarItem
@@ -334,6 +372,7 @@ export default function DashboardPage() {
                 active={activeMenu === 'finance'}
                 activeClass={currentTheme.activeMenu}
                 subTextClass={currentTheme.subText}
+                collapsed={sidebarCollapsed}
                 onClick={() => changeMenu('finance')}
               />
             )}
@@ -344,6 +383,7 @@ export default function DashboardPage() {
               active={activeMenu === 'feedback'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
+              collapsed={sidebarCollapsed}
               onClick={() => changeMenu('feedback')}
             />
 
@@ -353,6 +393,7 @@ export default function DashboardPage() {
               active={activeMenu === 'equipment'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
+              collapsed={sidebarCollapsed}
               onClick={() => changeMenu('equipment')}
             />
 
@@ -362,10 +403,13 @@ export default function DashboardPage() {
               active={activeMenu === 'agents'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
+              collapsed={sidebarCollapsed}
               onClick={() => changeMenu('agents')}
             />
 
-            <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Smart Assistant & Config</p>
+            {!sidebarCollapsed && (
+              <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Smart Assistant & Config</p>
+            )}
 
             <SidebarItem
               icon={Sparkles}
@@ -373,6 +417,7 @@ export default function DashboardPage() {
               active={activeMenu === 'ai-analyzer'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
+              collapsed={sidebarCollapsed}
               onClick={() => changeMenu('ai-analyzer')}
             />
 
@@ -382,22 +427,25 @@ export default function DashboardPage() {
               active={activeMenu === 'settings'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
+              collapsed={sidebarCollapsed}
               onClick={() => changeMenu('settings')}
             />
           </nav>
         </div>
 
-        <div className={`border-t ${currentTheme.border} pt-4 flex items-center justify-between px-2`}>
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className={`w-8 h-8 rounded-full ${currentTheme.accentText} bg-emerald-500/10 flex items-center justify-center font-bold text-xs uppercase shrink-0`}>
+        <div className={`border-t ${currentTheme.border} pt-4 flex ${sidebarCollapsed ? 'flex-col items-center gap-2' : 'items-center justify-between px-2'}`}>
+          <div className={`flex items-center gap-3 overflow-hidden ${sidebarCollapsed ? 'justify-center' : ''}`}>
+            <div className={`w-8 h-8 rounded-full ${currentTheme.accentText} bg-emerald-500/10 flex items-center justify-center font-bold text-xs uppercase shrink-0`} title={userProfile?.fullName || userProfile?.email}>
               {userProfile?.role?.[0] || 'A'}
             </div>
-            <div className="truncate">
-              <p className={`text-sm font-medium ${currentTheme.headingText} truncate`}>{userProfile?.fullName || userProfile?.email}</p>
-              <span className={`inline-flex items-center gap-1 text-[10px] ${currentTheme.accentText} font-semibold uppercase bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20`}>
-                <ShieldCheck className="w-3 h-3" /> {userProfile?.role || 'Admin'}
-              </span>
-            </div>
+            {!sidebarCollapsed && (
+              <div className="truncate">
+                <p className={`text-sm font-medium ${currentTheme.headingText} truncate`}>{userProfile?.fullName || userProfile?.email}</p>
+                <span className={`inline-flex items-center gap-1 text-[10px] ${currentTheme.accentText} font-semibold uppercase bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20`}>
+                  <ShieldCheck className="w-3 h-3" /> {userProfile?.role || 'Admin'}
+                </span>
+              </div>
+            )}
           </div>
           <button
             onClick={handleLogout}
@@ -639,18 +687,19 @@ export default function DashboardPage() {
   );
 }
 
-function SidebarItem({ icon: Icon, label, active, activeClass, subTextClass, onClick }) {
+function SidebarItem({ icon: Icon, label, active, activeClass, subTextClass, collapsed, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+      title={collapsed ? label : undefined}
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${collapsed ? 'justify-center px-0' : ''} ${
         active
           ? `${activeClass} shadow-md`
           : `${subTextClass} hover:bg-emerald-500/10 hover:text-emerald-500`
       }`}
     >
-      <Icon className="w-4 h-4" />
-      {label}
+      <Icon className="w-4 h-4 shrink-0" />
+      {!collapsed && label}
     </button>
   );
 }
