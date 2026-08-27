@@ -52,7 +52,7 @@ const buildTransactionRow = (docs, isFallbackMerge) => {
     isMerged,
     amount: totalAmount,
     paymentMethod: first.paymentMethod,
-    bankName: first.bankName || '',
+    accountName: first.accountName || '',
     notes,
     createdAt: first.createdAt
   };
@@ -120,13 +120,6 @@ const splitFlatAmount = (amount, count) => {
 // split-nya sendiri (array of {id, name, amount, notes}), dicocokkan lewat
 // `id` yang sama biar nominalnya kejumlah balik ke nilai flat aslinya waktu
 // mau ditampilkan/diedit ulang (mis. buka modal Edit Grup).
-// Resolusi nama bank final dari pasangan field <bankName>/<customBankName> —
-// kalau staff pilih "Bank Lainnya" di dropdown, pakai nama yang diketik manual.
-const resolveBankName = (bankName, customBankName) => {
-  if (bankName === 'Bank Lainnya') return (customBankName || '').trim() || 'Bank Lainnya';
-  return bankName || '';
-};
-
 const mergeExtraLists = (items, key) => {
   const map = {};
   const order = [];
@@ -141,11 +134,6 @@ const mergeExtraLists = (items, key) => {
   });
   return order.map(id => map[id]);
 };
-
-// Daftar bank umum utk field "Nama Bank" yang muncul begitu Metode Bayar
-// dipilih "Transfer Bank" — kalau nggak ketemu di list, staff bisa pilih
-// "Bank Lainnya" lalu ketik manual namanya.
-const BANK_LIST = ['BCA', 'Mandiri', 'BNI', 'BRI', 'BSI (Bank Syariah Indonesia)', 'CIMB Niaga', 'Danamon', 'Permata', 'BTN', 'Bank Lainnya'];
 
 // Kapasitas orang per tipe kamar (dipakai untuk Rooming List)
 const ROOM_CAPACITY = { Quad: 4, Triple: 3, Double: 2 };
@@ -196,6 +184,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [bookings, setBookings] = useState([]);
   const [packagesList, setPackagesList] = useState([]);
   const [jamaahList, setJamaahList] = useState([]);
+  const [financialAccounts, setFinancialAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   
   // State Profil Perusahaan dari Settings
@@ -236,11 +225,10 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     paxCount: 1,
     initialPayment: '',
     paymentMethod: 'Transfer Bank',
-    // Nama bank tujuan/asal transfer — cuma kepake kalau paymentMethod
-    // "Transfer Bank". Kalau bankName "Bank Lainnya", nama aslinya diketik
-    // manual di customBankName.
-    bankName: BANK_LIST[0],
-    customBankName: '',
+    // Akun Kas/Bank yang nerima setoran ini — cuma kepake kalau paymentMethod
+    // BUKAN "Saldo Deposit" (itu bukan uang baru masuk kas, cuma mindahin
+    // saldo titipan customer).
+    accountId: '',
     paymentNotes: 'Setoran Pembayaran',
     // Tanggal setoran (bisa diubah staff kalau nyatet setoran yg telat
     // diinput) — default hari ini. Nilai awalnya di-inline (bukan panggil
@@ -277,8 +265,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [paymentEditForm, setPaymentEditForm] = useState({
     amount: '',
     paymentMethod: 'Transfer Bank',
-    bankName: BANK_LIST[0],
-    customBankName: '',
+    accountId: '',
     notes: '',
     date: ''
   });
@@ -312,8 +299,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [groupPaymentForm, setGroupPaymentForm] = useState({
     amount: '',
     paymentMethod: 'Transfer Bank',
-    bankName: BANK_LIST[0],
-    customBankName: '',
+    accountId: '',
     notes: 'Setoran Tambahan',
     // Sama kayak formData.paymentDate — nilai awalnya di-inline (bukan
     // panggil todayDateStr()) soalnya helper itu dideklarasikan belakangan.
@@ -344,8 +330,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     // pax aktif di grup ini (pola sama persis kayak modal Setoran Grup).
     addPaymentAmount: '',
     addPaymentMethod: 'Transfer Bank',
-    addBankName: BANK_LIST[0],
-    addCustomBankName: '',
+    addAccountId: '',
     addPaymentNotes: 'Setoran Tambahan',
     addPaymentDate: new Date().toISOString().slice(0, 10),
     // Biaya Tambahan & Potongan Harga — daftar bebas, flat per kode booking
@@ -414,6 +399,9 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
 
       const jmhSnap = await getDocs(collection(db, 'jamaah'));
       setJamaahList(jmhSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      const accSnap = await getDocs(collection(db, 'financial_accounts'));
+      setFinancialAccounts(accSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       const bkSnap = await getDocs(collection(db, 'bookings'));
       setBookings(bkSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -610,7 +598,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     }
     if (!confirm("Apakah Anda yakin ingin menghapus catatan pembayaran ini?")) return;
     try {
+      const oldPay = paymentHistory.find(p => p.id === payId);
       await deleteDoc(doc(db, 'payments_income', payId));
+      // Balikin lagi saldo akun Kas/Bank asalnya (kalau bukan dibayar pakai
+      // Saldo Deposit — itu nggak nyentuh akun sama sekali).
+      if (oldPay?.accountId) await adjustAccountBalance(oldPay.accountId, -(Number(oldPay.amount) || 0));
       await syncBookingTotalPaid(selectedBookingForHistory.id, selectedBookingForHistory.totalAmount);
       await fetchPaymentHistory(selectedBookingForHistory.id);
       fetchData();
@@ -624,16 +616,29 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       alert("Cuma Finance & Super Admin yang boleh mengedit riwayat pembayaran.");
       return;
     }
+    const oldPay = paymentHistory.find(p => p.id === payId);
+    if (oldPay && (oldPay.paymentMethod === 'Saldo Deposit') !== (paymentEditForm.paymentMethod === 'Saldo Deposit')) {
+      alert("Ganti Metode Bayar ke/dari \"Saldo Deposit\" nggak bisa lewat edit ini (biar saldo deposit & akun Kas/Bank tetap akurat). Hapus catatan ini, terus catat ulang lewat \"+Bayar\".");
+      return;
+    }
     try {
       await updateDoc(doc(db, 'payments_income', payId), {
         amount: Number(paymentEditForm.amount),
         paymentMethod: paymentEditForm.paymentMethod,
         notes: paymentEditForm.notes,
+        ...(paymentEditForm.paymentMethod !== 'Saldo Deposit' ? { accountId: paymentEditForm.accountId, accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '' } : {}),
         // Kalau field tanggalnya dikosongin, biarin createdAt lama (jangan
         // dipaksa ke waktu sekarang) — cuma di-update kalau staff emang
         // sengaja ganti tanggalnya.
         ...(paymentEditForm.date ? { createdAt: resolvePaymentCreatedAt(paymentEditForm.date) } : {})
       });
+
+      // Selisih nominal lama vs baru disesuaikan ke akun yang sama (edit ini
+      // nggak dukung pindah akun sekaligus ganti nominal, biar simpel).
+      if (oldPay?.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
+        const delta = Number(paymentEditForm.amount) - (Number(oldPay.amount) || 0);
+        await adjustAccountBalance(oldPay.accountId, delta);
+      }
 
       setEditingPaymentId(null);
       await syncBookingTotalPaid(selectedBookingForHistory.id, selectedBookingForHistory.totalAmount);
@@ -652,7 +657,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     setFormData({
       packageId: '', ordererId: '', pesertaList: [emptyPesertaEntry()],
       roomType: 'Quad', busGroup: 'Bus 1', paxCount: 1,
-      initialPayment: '', paymentMethod: 'Transfer Bank', bankName: BANK_LIST[0], customBankName: '', paymentNotes: 'DP Pendaftaran',
+      initialPayment: '', paymentMethod: 'Transfer Bank', accountId: '', paymentNotes: 'DP Pendaftaran',
       paymentDate: todayDateStr(),
       extraCharges: [], extraDiscounts: []
     });
@@ -684,8 +689,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       paxCount: 1,
       initialPayment: '',
       paymentMethod: 'Transfer Bank',
-      bankName: BANK_LIST[0],
-      customBankName: '',
+      accountId: '',
       paymentNotes: 'Setoran Tambahan',
       paymentDate: todayDateStr(),
       // Prefill Biaya Tambahan & Potongan Harga booking ini kalau sebelumnya
@@ -956,6 +960,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     });
   };
 
+  // Saldo tiap akun Kas/Bank (collection 'financial_accounts') — delta
+  // positif = uang beneran masuk (setoran jamaah), delta negatif = keluar.
+  // Metode Bayar "Saldo Deposit" SENGAJA nggak lewat sini — itu cuma
+  // mindahin saldo titipan customer, bukan uang baru yang masuk ke kas.
+  const adjustAccountBalance = async (accountId, delta) => {
+    if (!accountId || !delta) return;
+    await updateDoc(doc(db, 'financial_accounts', accountId), { balance: increment(delta) });
+  };
+
   const handleCancelSubmit = async (e) => {
     e.preventDefault();
     if (!selectedBookingForAction) return;
@@ -1097,7 +1110,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       return;
     }
     setGroupPaymentTarget(group);
-    setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', bankName: BANK_LIST[0], customBankName: '', notes: 'Setoran Tambahan', date: todayDateStr() });
+    setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', accountId: '', notes: 'Setoran Tambahan', date: todayDateStr() });
     setShowGroupPaymentModal(true);
   };
 
@@ -1124,6 +1137,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         alert(`Saldo Deposit Pemesan tidak cukup. Saldo saat ini: Rp ${currentBalance.toLocaleString('id-ID')}, dibutuhkan: Rp ${amount.toLocaleString('id-ID')}.`);
         return;
       }
+    } else if (!groupPaymentForm.accountId) {
+      alert("Pilih akun Kas/Bank yang nerima setoran ini dulu.");
+      return;
     }
 
     try {
@@ -1135,7 +1151,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         return 0;
       });
       const paxCount = groupItems.length;
-      const groupPayFinalBankName = resolveBankName(groupPaymentForm.bankName, groupPaymentForm.customBankName);
+      const groupPaymentAccount = financialAccounts.find(a => a.id === groupPaymentForm.accountId);
 
       // Bagi rata nominal setoran ke semua pax (sisa pembagian masuk ke pax pertama)
       // — pola yang sama persis dengan pembagian DP awal pas registrasi grup baru.
@@ -1162,7 +1178,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             packageName: item.packageName,
             amount: paxShare,
             paymentMethod: groupPaymentForm.paymentMethod,
-            ...(groupPaymentForm.paymentMethod === 'Transfer Bank' ? { bankName: groupPayFinalBankName } : {}),
+            ...(groupPaymentForm.paymentMethod !== 'Saldo Deposit' ? { accountId: groupPaymentForm.accountId, accountName: groupPaymentAccount?.name || '' } : {}),
             notes: `${groupPaymentForm.notes} (Grup ${groupPaymentTarget.code})`,
             createdAt: resolvePaymentCreatedAt(groupPaymentForm.date),
             groupTransactionId
@@ -1177,10 +1193,12 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       if (groupPaymentForm.paymentMethod === 'Saldo Deposit') {
         await adjustDepositBalance(groupOrdererId, groupOrdererName, -amount, 'usage', `Bayar setoran grup ${groupPaymentTarget.code}`, groupPaymentTarget.code);
+      } else {
+        await adjustAccountBalance(groupPaymentForm.accountId, amount);
       }
 
       setShowGroupPaymentModal(false);
-      setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', bankName: BANK_LIST[0], customBankName: '', notes: 'Setoran Tambahan', date: todayDateStr() });
+      setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', accountId: '', notes: 'Setoran Tambahan', date: todayDateStr() });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat setoran grup: " + err.message);
@@ -1234,6 +1252,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     if (!confirm("Apakah Anda yakin ingin menghapus catatan pembayaran ini?")) return;
     try {
       await deleteDoc(doc(db, 'payments_income', pay.id));
+      if (pay.accountId) await adjustAccountBalance(pay.accountId, -(Number(pay.amount) || 0));
       const bookingItem = groupHistoryItems.find(b => b.id === pay.bookingId);
       if (bookingItem) await syncBookingTotalPaid(bookingItem.id, bookingItem.totalAmount);
       await fetchGroupHistoryPayments(groupHistoryItems);
@@ -1248,13 +1267,23 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       alert("Cuma Finance & Super Admin yang boleh mengedit riwayat pembayaran.");
       return;
     }
+    if ((pay.paymentMethod === 'Saldo Deposit') !== (paymentEditForm.paymentMethod === 'Saldo Deposit')) {
+      alert("Ganti Metode Bayar ke/dari \"Saldo Deposit\" nggak bisa lewat edit ini (biar saldo deposit & akun Kas/Bank tetap akurat). Hapus catatan ini, terus catat ulang lewat \"+Bayar\".");
+      return;
+    }
     try {
       await updateDoc(doc(db, 'payments_income', pay.id), {
         amount: Number(paymentEditForm.amount),
         paymentMethod: paymentEditForm.paymentMethod,
         notes: paymentEditForm.notes,
+        ...(paymentEditForm.paymentMethod !== 'Saldo Deposit' ? { accountId: paymentEditForm.accountId, accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '' } : {}),
         ...(paymentEditForm.date ? { createdAt: resolvePaymentCreatedAt(paymentEditForm.date) } : {})
       });
+
+      if (pay.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
+        const delta = Number(paymentEditForm.amount) - (Number(pay.amount) || 0);
+        await adjustAccountBalance(pay.accountId, delta);
+      }
 
       setEditingGroupPaymentId(null);
       const bookingItem = groupHistoryItems.find(b => b.id === pay.bookingId);
@@ -1280,6 +1309,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     if (!confirm(`Apakah Anda yakin ingin menghapus transaksi setoran ini? ${docs.length} catatan pembagian ke peserta akan ikut terhapus.`)) return;
     try {
       await Promise.all(docs.map(d => deleteDoc(doc(db, 'payments_income', d.id))));
+      // Tiap doc balikin porsinya sendiri ke saldo akun Kas/Bank asalnya (doc
+      // yang dibayar pakai Saldo Deposit dilewati — nggak punya accountId).
+      await Promise.all(docs.map(d => d.accountId ? adjustAccountBalance(d.accountId, -(Number(d.amount) || 0)) : Promise.resolve()));
 
       // Sinkronkan totalPaid/paymentStatus tiap booking unik yang kena dampak
       const uniqueBookingIds = [...new Set(docs.map(d => d.bookingId))];
@@ -1316,8 +1348,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       busGroup: group.primary?.busGroup || 'Bus 1',
       addPaymentAmount: '',
       addPaymentMethod: 'Transfer Bank',
-      addBankName: BANK_LIST[0],
-      addCustomBankName: '',
+      addAccountId: '',
       addPaymentNotes: 'Setoran Tambahan',
       addPaymentDate: todayDateStr(),
       extraCharges: mergeExtraLists(group.items || [], 'extraCharges'),
@@ -1459,8 +1490,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             alert(`Saldo Deposit Pemesan tidak cukup. Saldo saat ini: Rp ${currentBalance.toLocaleString('id-ID')}, dibutuhkan: Rp ${addAmount.toLocaleString('id-ID')}.`);
             return;
           }
+        } else if (!groupEditForm.addAccountId) {
+          alert("Pilih akun Kas/Bank yang nerima setoran ini dulu.");
+          return;
         }
-        const groupEditFinalBankName = resolveBankName(groupEditForm.addBankName, groupEditForm.addCustomBankName);
+        const groupEditAccount = financialAccounts.find(a => a.id === groupEditForm.addAccountId);
         const sortedActive = [...activeItems].sort((a, b) => {
           if (a.groupPaxIndex != null && b.groupPaxIndex != null) return a.groupPaxIndex - b.groupPaxIndex;
           return 0;
@@ -1484,7 +1518,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               packageName: newPkg.name,
               amount: share,
               paymentMethod: groupEditForm.addPaymentMethod,
-              ...(groupEditForm.addPaymentMethod === 'Transfer Bank' ? { bankName: groupEditFinalBankName } : {}),
+              ...(groupEditForm.addPaymentMethod !== 'Saldo Deposit' ? { accountId: groupEditForm.addAccountId, accountName: groupEditAccount?.name || '' } : {}),
               notes: `${groupEditForm.addPaymentNotes} (Grup ${groupEditTarget.code})`,
               createdAt: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
               groupTransactionId
@@ -1494,6 +1528,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
         if (groupEditForm.addPaymentMethod === 'Saldo Deposit') {
           await adjustDepositBalance(ordererId, ordererName, -addAmount, 'usage', `Bayar setoran grup ${groupEditTarget.code}`, groupEditTarget.code);
+        } else {
+          await adjustAccountBalance(groupEditForm.addAccountId, addAmount);
         }
       }
 
@@ -1921,7 +1957,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       ? payments.map((pay, idx) => `
           <tr style="background-color: #f8fafc; font-size: 11px; color: #475569;">
             <td style="padding: 6px 12px; border-bottom: 1px solid #f1f5f9;">
-              • Setoran #${idx + 1} (${formatDateDDMMYYYY(pay.createdAt)}) - <span style="font-style: italic;">${pay.paymentMethod || 'Transfer'}${pay.bankName ? ' - ' + pay.bankName : ''} (${pay.notes || 'Setoran'})</span>
+              • Setoran #${idx + 1} (${formatDateDDMMYYYY(pay.createdAt)}) - <span style="font-style: italic;">${pay.paymentMethod || 'Transfer'}${pay.accountName ? ' - ' + pay.accountName : ''} (${pay.notes || 'Setoran'})</span>
             </td>
             <td style="text-align: right; padding: 6px 12px; font-weight: 600; color: #059669; border-bottom: 1px solid #f1f5f9; white-space: nowrap;">
               + Rp ${Number(pay.amount || 0).toLocaleString('id-ID')}
@@ -2179,7 +2215,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       ? mergedTransactions.map((tx, idx) => `
           <tr style="background-color: #f8fafc; font-size: 11px; color: #475569;">
             <td style="padding: 6px 12px; border-bottom: 1px solid #f1f5f9;">
-              • Setoran #${idx + 1} (${formatDateDDMMYYYY(tx.createdAt)}) - <span style="font-style: italic;">${tx.paymentMethod || 'Transfer'}${tx.bankName ? ' - ' + tx.bankName : ''} (${tx.notes || 'Setoran'})</span>
+              • Setoran #${idx + 1} (${formatDateDDMMYYYY(tx.createdAt)}) - <span style="font-style: italic;">${tx.paymentMethod || 'Transfer'}${tx.accountName ? ' - ' + tx.accountName : ''} (${tx.notes || 'Setoran'})</span>
             </td>
             <td style="text-align: right; padding: 6px 12px; font-weight: 600; color: #059669; border-bottom: 1px solid #f1f5f9; white-space: nowrap;">
               + Rp ${Number(tx.amount || 0).toLocaleString('id-ID')}
@@ -2465,7 +2501,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // Kalau bayarnya pakai Saldo Deposit, pastikan saldo Pemesan cukup
       // dulu sebelum lanjut — validasi di sini, potongan aktualnya baru
       // dieksekusi (adjustDepositBalance) setelah booking/pembayaran berhasil dicatat.
-      const payFinalBankName = resolveBankName(formData.bankName, formData.customBankName);
+      // Selain Saldo Deposit, wajib pilih akun Kas/Bank yang nerima uangnya.
       const orderer_ForDeposit = jamaahList.find(j => j.id === formData.ordererId);
       if (paymentVal > 0 && formData.paymentMethod === 'Saldo Deposit') {
         const currentBalance = Number(orderer_ForDeposit?.depositBalance || 0);
@@ -2473,7 +2509,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           alert(`Saldo Deposit Pemesan tidak cukup. Saldo saat ini: Rp ${currentBalance.toLocaleString('id-ID')}, dibutuhkan: Rp ${paymentVal.toLocaleString('id-ID')}.`);
           return;
         }
+      } else if (paymentVal > 0 && !formData.accountId) {
+        alert("Pilih akun Kas/Bank yang nerima setoran ini dulu.");
+        return;
       }
+      const payAccount = financialAccounts.find(a => a.id === formData.accountId);
 
       if (editingBookingId) {
         if (!canManageBookings) {
@@ -2513,12 +2553,14 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             packageName: selectedPkg.name,
             amount: paymentVal,
             paymentMethod: formData.paymentMethod,
-            ...(formData.paymentMethod === 'Transfer Bank' ? { bankName: payFinalBankName } : {}),
+            ...(formData.paymentMethod !== 'Saldo Deposit' ? { accountId: formData.accountId, accountName: payAccount?.name || '' } : {}),
             notes: formData.paymentNotes,
             createdAt: resolvePaymentCreatedAt(formData.paymentDate)
           });
           if (formData.paymentMethod === 'Saldo Deposit') {
             await adjustDepositBalance(ordererId, ordererName, -paymentVal, 'usage', `Bayar setoran booking ${currentBooking.bookingCode}`, currentBooking.bookingCode);
+          } else {
+            await adjustAccountBalance(formData.accountId, paymentVal);
           }
         }
 
@@ -2580,12 +2622,14 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               packageName: selectedPkg.name,
               amount: paymentVal,
               paymentMethod: formData.paymentMethod,
-              ...(formData.paymentMethod === 'Transfer Bank' ? { bankName: payFinalBankName } : {}),
+              ...(formData.paymentMethod !== 'Saldo Deposit' ? { accountId: formData.accountId, accountName: payAccount?.name || '' } : {}),
               notes: formData.paymentNotes,
               createdAt: resolvePaymentCreatedAt(formData.paymentDate)
             });
             if (formData.paymentMethod === 'Saldo Deposit') {
               await adjustDepositBalance(ordererId, ordererName, -paymentVal, 'usage', `Bayar DP booking ${bookingCode}`, bookingCode);
+            } else {
+              await adjustAccountBalance(formData.accountId, paymentVal);
             }
           }
 
@@ -2659,7 +2703,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 packageName: selectedPkg.name,
                 amount: paxShare,
                 paymentMethod: formData.paymentMethod,
-                ...(formData.paymentMethod === 'Transfer Bank' ? { bankName: payFinalBankName } : {}),
+                ...(formData.paymentMethod !== 'Saldo Deposit' ? { accountId: formData.accountId, accountName: payAccount?.name || '' } : {}),
                 notes: `${formData.paymentNotes} (Grup ${groupBookingCode}, ${paxCount} pax)`,
                 createdAt: resolvePaymentCreatedAt(formData.paymentDate),
                 groupTransactionId
@@ -2669,6 +2713,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
           if (formData.paymentMethod === 'Saldo Deposit' && paymentVal > 0) {
             await adjustDepositBalance(ordererId, ordererName, -paymentVal, 'usage', `Bayar DP booking grup ${groupBookingCode}`, groupBookingCode);
+          } else if (paymentVal > 0) {
+            await adjustAccountBalance(formData.accountId, paymentVal);
           }
 
           await updateDoc(doc(db, 'packages', selectedPkg.id), { quotaRemaining: increment(-paxCount) });
@@ -3685,28 +3731,21 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                         </select>
                       </div>
                     </div>
-                    {formData.paymentMethod === 'Transfer Bank' && (
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block mb-1 font-medium">Nama Bank</label>
-                          <select
-                            className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                            value={formData.bankName}
-                            onChange={e => setFormData({ ...formData, bankName: e.target.value })}
-                          >
-                            {BANK_LIST.map(b => <option key={b} value={b}>{b}</option>)}
-                          </select>
-                        </div>
-                        {formData.bankName === 'Bank Lainnya' && (
-                          <div>
-                            <label className="block mb-1 font-medium">Nama Bank Lainnya</label>
-                            <input
-                              type="text" placeholder="Ketik nama banknya"
-                              className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                              value={formData.customBankName}
-                              onChange={e => setFormData({ ...formData, customBankName: e.target.value })}
-                            />
-                          </div>
+                    {formData.paymentMethod !== 'Saldo Deposit' && (
+                      <div>
+                        <label className="block mb-1 font-medium">Masuk ke Akun Kas/Bank</label>
+                        <select
+                          className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                          value={formData.accountId}
+                          onChange={e => setFormData({ ...formData, accountId: e.target.value })}
+                        >
+                          <option value="">-- Pilih Akun --</option>
+                          {financialAccounts.map(a => (
+                            <option key={a.id} value={a.id}>{a.name} (Saldo: Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
+                          ))}
+                        </select>
+                        {financialAccounts.length === 0 && (
+                          <p className="text-[10px] mt-1 text-amber-500">Belum ada akun Kas/Bank. Tambahkan dulu lewat tab "Kas & Bank" di menu Keuangan.</p>
                         )}
                       </div>
                     )}
@@ -3829,6 +3868,18 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                                   onChange={e => setPaymentEditForm({ ...paymentEditForm, amount: e.target.value })}
                                 />
                               </div>
+                              {paymentEditForm.paymentMethod !== 'Saldo Deposit' && (
+                                <select
+                                  className={`${styles.inputBg} p-1.5 rounded w-full mt-2`}
+                                  value={paymentEditForm.accountId}
+                                  onChange={e => setPaymentEditForm({ ...paymentEditForm, accountId: e.target.value })}
+                                >
+                                  <option value="">-- Akun Kas/Bank --</option>
+                                  {financialAccounts.map(a => (
+                                    <option key={a.id} value={a.id}>{a.name}</option>
+                                  ))}
+                                </select>
+                              )}
                             </td>
                             <td className="p-2 text-center">
                               <button onClick={() => handleSavePaymentEdit(pay.id)} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded mr-1">
@@ -3845,7 +3896,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                               {formatDateDDMMYYYY(pay.createdAt)}
                             </td>
                             <td className="p-3">
-                              <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{pay.paymentMethod}{pay.bankName ? ` - ${pay.bankName}` : ''}</span>
+                              <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{pay.paymentMethod}{pay.accountName ? ` - ${pay.accountName}` : ''}</span>
                               <span className={styles.textSub}>{pay.notes}</span>
                             </td>
                             <td className="p-3 font-bold text-emerald-500">
@@ -3857,7 +3908,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                                   <button
                                     onClick={() => {
                                       setEditingPaymentId(pay.id);
-                                      setPaymentEditForm({ amount: pay.amount, paymentMethod: pay.paymentMethod, notes: pay.notes, date: (pay.createdAt || '').slice(0, 10) });
+                                      setPaymentEditForm({ amount: pay.amount, paymentMethod: pay.paymentMethod, accountId: pay.accountId || '', notes: pay.notes, date: (pay.createdAt || '').slice(0, 10) });
                                     }}
                                     className="text-emerald-500 hover:underline mr-2"
                                   >
@@ -4080,29 +4131,19 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                   </select>
                 </div>
               </div>
-              {groupPaymentForm.paymentMethod === 'Transfer Bank' && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block mb-1 font-medium">Nama Bank</label>
-                    <select
-                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                      value={groupPaymentForm.bankName}
-                      onChange={e => setGroupPaymentForm({ ...groupPaymentForm, bankName: e.target.value })}
-                    >
-                      {BANK_LIST.map(b => <option key={b} value={b}>{b}</option>)}
-                    </select>
-                  </div>
-                  {groupPaymentForm.bankName === 'Bank Lainnya' && (
-                    <div>
-                      <label className="block mb-1 font-medium">Nama Bank Lainnya</label>
-                      <input
-                        type="text" placeholder="Ketik nama banknya"
-                        className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                        value={groupPaymentForm.customBankName}
-                        onChange={e => setGroupPaymentForm({ ...groupPaymentForm, customBankName: e.target.value })}
-                      />
-                    </div>
-                  )}
+              {groupPaymentForm.paymentMethod !== 'Saldo Deposit' && (
+                <div>
+                  <label className="block mb-1 font-medium">Masuk ke Akun Kas/Bank</label>
+                  <select
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={groupPaymentForm.accountId}
+                    onChange={e => setGroupPaymentForm({ ...groupPaymentForm, accountId: e.target.value })}
+                  >
+                    <option value="">-- Pilih Akun --</option>
+                    {financialAccounts.map(a => (
+                      <option key={a.id} value={a.id}>{a.name} (Saldo: Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
+                    ))}
+                  </select>
                 </div>
               )}
               {groupPaymentForm.paymentMethod === 'Saldo Deposit' && (() => {
@@ -4222,6 +4263,18 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                                     onChange={e => setPaymentEditForm({ ...paymentEditForm, amount: e.target.value })}
                                   />
                                 </div>
+                                {paymentEditForm.paymentMethod !== 'Saldo Deposit' && (
+                                  <select
+                                    className={`${styles.inputBg} p-1.5 rounded w-full mt-2`}
+                                    value={paymentEditForm.accountId}
+                                    onChange={e => setPaymentEditForm({ ...paymentEditForm, accountId: e.target.value })}
+                                  >
+                                    <option value="">-- Akun Kas/Bank --</option>
+                                    {financialAccounts.map(a => (
+                                      <option key={a.id} value={a.id}>{a.name}</option>
+                                    ))}
+                                  </select>
+                                )}
                               </td>
                               <td className="p-2 text-center">
                                 <button onClick={() => handleSaveGroupPaymentEdit(singlePay)} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded mr-1">
@@ -4238,7 +4291,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                                 {formatDateDDMMYYYY(tx.createdAt)}
                               </td>
                               <td className="p-3">
-                                <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{tx.paymentMethod}{tx.bankName ? ` - ${tx.bankName}` : ''}</span>
+                                <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{tx.paymentMethod}{tx.accountName ? ` - ${tx.accountName}` : ''}</span>
                                 <span className={styles.textSub}>{tx.notes}</span>
                               </td>
                               <td className="p-3 font-bold text-emerald-500">
@@ -4257,7 +4310,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                                       <button
                                         onClick={() => {
                                           setEditingGroupPaymentId(singlePay.id);
-                                          setPaymentEditForm({ amount: singlePay.amount, paymentMethod: singlePay.paymentMethod, notes: singlePay.notes, date: (singlePay.createdAt || '').slice(0, 10) });
+                                          setPaymentEditForm({ amount: singlePay.amount, paymentMethod: singlePay.paymentMethod, accountId: singlePay.accountId || '', notes: singlePay.notes, date: (singlePay.createdAt || '').slice(0, 10) });
                                         }}
                                         className="text-emerald-500 hover:underline mr-2"
                                       >
@@ -4590,29 +4643,19 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                     </select>
                   </div>
                 </div>
-                {groupEditForm.addPaymentMethod === 'Transfer Bank' && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block mb-1 font-medium">Nama Bank</label>
-                      <select
-                        className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                        value={groupEditForm.addBankName}
-                        onChange={e => setGroupEditForm({ ...groupEditForm, addBankName: e.target.value })}
-                      >
-                        {BANK_LIST.map(b => <option key={b} value={b}>{b}</option>)}
-                      </select>
-                    </div>
-                    {groupEditForm.addBankName === 'Bank Lainnya' && (
-                      <div>
-                        <label className="block mb-1 font-medium">Nama Bank Lainnya</label>
-                        <input
-                          type="text" placeholder="Ketik nama banknya"
-                          className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                          value={groupEditForm.addCustomBankName}
-                          onChange={e => setGroupEditForm({ ...groupEditForm, addCustomBankName: e.target.value })}
-                        />
-                      </div>
-                    )}
+                {groupEditForm.addPaymentMethod !== 'Saldo Deposit' && (
+                  <div>
+                    <label className="block mb-1 font-medium">Masuk ke Akun Kas/Bank</label>
+                    <select
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={groupEditForm.addAccountId}
+                      onChange={e => setGroupEditForm({ ...groupEditForm, addAccountId: e.target.value })}
+                    >
+                      <option value="">-- Pilih Akun --</option>
+                      {financialAccounts.map(a => (
+                        <option key={a.id} value={a.id}>{a.name} (Saldo: Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
+                      ))}
+                    </select>
                   </div>
                 )}
                 {groupEditForm.addPaymentMethod === 'Saldo Deposit' && (() => {
