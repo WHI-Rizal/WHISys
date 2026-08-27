@@ -221,6 +221,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const [convertingPayment, setConvertingPayment] = useState(null);
   const [convertForm, setConvertForm] = useState({ vendorId: '', amount: '', notes: '' });
 
+  // Modal "Tambah/Koreksi Saldo Deposit Vendor" manual — dipakai buat input
+  // saldo yang udah ada dari sebelumnya (migrasi data lama), atau koreksi
+  // manual lain di luar alur konversi DP batal.
+  const [showVendorDepositAdjustModal, setShowVendorDepositAdjustModal] = useState(false);
+  const [adjustingVendor, setAdjustingVendor] = useState(null);
+  const [vendorAdjustForm, setVendorAdjustForm] = useState({ amount: '', notes: 'Saldo awal (migrasi data lama)' });
+
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [showVendorModal, setShowVendorModal] = useState(false);
   const [showOperationalModal, setShowOperationalModal] = useState(false);
@@ -633,6 +640,46 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       fetchData();
     } catch (err) {
       alert("Gagal mengonversi ke Saldo Deposit: " + err.message);
+    }
+  };
+
+  const handleOpenVendorDepositAdjust = (v) => {
+    setAdjustingVendor(v);
+    setVendorAdjustForm({ amount: '', notes: 'Saldo awal (migrasi data lama)' });
+    setShowVendorDepositAdjustModal(true);
+  };
+
+  // Tambah/koreksi saldo deposit vendor secara manual — dipakai buat input
+  // saldo yang udah ada dari sebelum sistem ini dipakai, atau koreksi lain
+  // di luar alur konversi DP batal. Nominal boleh negatif buat ngoreksi
+  // turun (misal salah input kelebihan sebelumnya).
+  const handleVendorDepositAdjustSubmit = async (e) => {
+    e.preventDefault();
+    const deltaVal = Number(vendorAdjustForm.amount || 0);
+    if (deltaVal === 0) {
+      alert("Isi nominal yang valid (bukan 0). Isi negatif kalau mau mengoreksi turun.");
+      return;
+    }
+    if (deltaVal < 0 && Math.abs(deltaVal) > Number(adjustingVendor.depositBalance || 0)) {
+      alert(`Saldo deposit vendor "${adjustingVendor.name}" cuma Rp ${Number(adjustingVendor.depositBalance || 0).toLocaleString('id-ID')}, nggak bisa dikoreksi turun lebih dari itu.`);
+      return;
+    }
+    try {
+      await adjustVendorDepositBalance(
+        adjustingVendor.id,
+        adjustingVendor.name,
+        deltaVal,
+        'manual_adjustment',
+        vendorAdjustForm.notes,
+        '',
+        new Date().toISOString()
+      );
+      setShowVendorDepositAdjustModal(false);
+      setAdjustingVendor(null);
+      setVendorAdjustForm({ amount: '', notes: 'Saldo awal (migrasi data lama)' });
+      fetchData();
+    } catch (err) {
+      alert("Gagal menyesuaikan saldo deposit vendor: " + err.message);
     }
   };
 
@@ -1943,6 +1990,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                         <td className="p-4 text-center">
                           <div className="flex items-center justify-center gap-2">
                             <button
+                              onClick={() => handleOpenVendorDepositAdjust(v)}
+                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                              title="Tambah/Koreksi Saldo Deposit"
+                            >
+                              <Wallet className="w-4 h-4" />
+                            </button>
+                            <button
                               onClick={() => handleEditVendorMaster(v)}
                               className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
                               title="Edit Vendor"
@@ -2008,6 +2062,51 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </button>
                 <button type="submit" className="px-4 py-2 bg-rose-600 text-white rounded-lg font-medium">
                   Simpan Vendor
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showVendorDepositAdjustModal && adjustingVendor && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+            <button onClick={() => setShowVendorDepositAdjustModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-2 flex items-center gap-2`}>
+              <Wallet className="w-5 h-5 text-emerald-500" /> Tambah/Koreksi Saldo Deposit
+            </h3>
+            <p className={`text-[10.5px] ${styles.textSub} mb-4`}>
+              Vendor: <strong className={styles.textTitle}>{adjustingVendor.name}</strong> · Saldo sekarang: Rp {Number(adjustingVendor.depositBalance || 0).toLocaleString('id-ID')}
+              <br />Pakai ini buat input saldo yang udah ada dari sebelum sistem ini dipakai, atau koreksi manual lain. Isi nominal negatif kalau mau mengoreksi turun.
+            </p>
+            <form onSubmit={handleVendorDepositAdjustSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div>
+                <label className="block mb-1 font-medium">Nominal (Rp) — isi negatif buat koreksi turun</label>
+                <input
+                  type="number" required placeholder="10000000"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={vendorAdjustForm.amount}
+                  onChange={e => setVendorAdjustForm({ ...vendorAdjustForm, amount: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block mb-1 font-medium">Catatan</label>
+                <input
+                  type="text"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={vendorAdjustForm.notes}
+                  onChange={e => setVendorAdjustForm({ ...vendorAdjustForm, notes: e.target.value })}
+                />
+              </div>
+              <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowVendorDepositAdjustModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
+                  Simpan
                 </button>
               </div>
             </form>
