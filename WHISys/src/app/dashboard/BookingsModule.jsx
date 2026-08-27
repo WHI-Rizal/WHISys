@@ -35,6 +35,30 @@ const formatPercentID = (value) => {
   return `${num.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
 };
 
+// Geser sebuah tanggal (ISO string / Date) sejumlah hari (boleh negatif),
+// hasilnya string ISO 'YYYY-MM-DD' — dipakai buat hitung due date invoice.
+const shiftDateByDays = (dateInput, days) => {
+  if (!dateInput) return null;
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
+// Due Date Pelunasan = H-40 sebelum tanggal keberangkatan.
+const getDueDatePelunasan = (booking) => shiftDateByDays(booking?.departureDate, -40);
+
+// Due Date DP 2 = H+30 setelah DP pertama. DP pertama dianggap sama
+// dengan tanggal booking ini pertama kali dicatat (createdAt booking selalu
+// diisi dari tanggal setoran DP awal, lihat komentar di alur handleSubmit).
+const getDueDateDP2 = (booking) => shiftDateByDays(booking?.createdAt, 30);
+
+// true kalau tanggal due date (ISO 'YYYY-MM-DD') sudah lewat hari ini.
+const isOverdue = (dueDateStr) => {
+  if (!dueDateStr) return false;
+  return dueDateStr < new Date().toISOString().slice(0, 10);
+};
+
 // Bungkus 1 baris "transaksi" hasil gabungan sejumlah dokumen payments_income
 // (bisa 1 dokumen doang / beberapa dokumen hasil split ke banyak pax).
 const buildTransactionRow = (docs, isFallbackMerge) => {
@@ -1997,6 +2021,22 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     bankAccount: companyInfo?.bankAccount || '788-9900-112 a.n. PT. Wisata Halal Internasional'
   });
 
+  // Baris "Jatuh Tempo" di invoice — cuma dimunculkan selama booking belum
+  // lunas. Tanggal yang udah lewat ditandai merah biar kelihatan.
+  const buildDueDatesHtml = (booking) => {
+    if (booking.paymentStatus === 'Full Payment') return '';
+    const dueDP2 = getDueDateDP2(booking);
+    const duePelunasan = getDueDatePelunasan(booking);
+    const rows = [];
+    if (dueDP2) {
+      rows.push(`<p>Jatuh Tempo DP 2: <strong style="${isOverdue(dueDP2) ? 'color:#e11d48;' : ''}">${formatDateDDMMYYYY(dueDP2)}${isOverdue(dueDP2) ? ' (lewat)' : ''}</strong></p>`);
+    }
+    if (duePelunasan) {
+      rows.push(`<p>Jatuh Tempo Pelunasan: <strong style="${isOverdue(duePelunasan) ? 'color:#e11d48;' : ''}">${formatDateDDMMYYYY(duePelunasan)}${isOverdue(duePelunasan) ? ' (lewat)' : ''}</strong></p>`);
+    }
+    return rows.join('');
+  };
+
   const buildInvoiceBoxHtml = (booking, payments) => {
     const isLunas = booking.paymentStatus === 'Full Payment';
     const totalAmount = Number(booking.totalAmount) || 0;
@@ -2074,6 +2114,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             <p>Kode Booking: <strong style="color: #059669; font-family: monospace;">${booking.groupBookingCode || booking.bookingCode}</strong></p>
             <p>Tanggal Terbit: <strong>${new Date().toLocaleDateString('id-ID')}</strong></p>
             <p>Status Setoran: <strong>${booking.paymentStatus || 'DP Paid'}</strong></p>
+            ${buildDueDatesHtml(booking)}
           </div>
         </div>
 
@@ -2330,6 +2371,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             <p>Kode Booking (Rombongan): <strong style="color: #059669; font-family: monospace;">${groupCode}</strong></p>
             <p>Tanggal Terbit: <strong>${new Date().toLocaleDateString('id-ID')}</strong></p>
             <p>Status Setoran: <strong>${isLunas ? 'Lunas' : 'DP Paid / Cicilan'}</strong></p>
+            ${buildDueDatesHtml({
+              departureDate: first.departureDate,
+              createdAt: items.reduce((earliest, b) => (!earliest || new Date(b.createdAt) < new Date(earliest)) ? b.createdAt : earliest, null),
+              paymentStatus: isLunas ? 'Full Payment' : 'DP Paid'
+            })}
           </div>
         </div>
 
@@ -2923,6 +2969,31 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     );
   };
 
+  // Due date pembayaran — dipakai di tabel dashboard & invoice. Cuma
+  // relevan selama status masih aktif & belum lunas (booking yang udah
+  // lunas/batal/reschedule nggak perlu diingetin lagi).
+  // - Due Date DP 2: H+30 dari DP pertama (createdAt booking).
+  // - Due Date Pelunasan: H-40 sebelum tanggal keberangkatan.
+  const renderDueDates = (item) => {
+    if (item.status === 'cancelled' || item.status === 'rescheduled' || item.paymentStatus === 'Full Payment') return null;
+    const dueDP2 = getDueDateDP2(item);
+    const duePelunasan = getDueDatePelunasan(item);
+    return (
+      <div className="mt-1 space-y-0.5">
+        {dueDP2 && (
+          <div className={`text-[10px] ${isOverdue(dueDP2) ? 'text-rose-500 font-semibold' : 'text-slate-400'}`}>
+            Jatuh Tempo DP 2: {formatDateDDMMYYYY(dueDP2)}{isOverdue(dueDP2) ? ' — lewat!' : ''}
+          </div>
+        )}
+        {duePelunasan && (
+          <div className={`text-[10px] ${isOverdue(duePelunasan) ? 'text-rose-500 font-semibold' : 'text-slate-400'}`}>
+            Jatuh Tempo Pelunasan: {formatDateDDMMYYYY(duePelunasan)}{isOverdue(duePelunasan) ? ' — lewat!' : ''}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className={`flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${styles.cardBg} p-6 rounded-xl border`}>
@@ -3158,6 +3229,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                         {item.status === 'rescheduled' && (
                           <div className="text-[10px] text-blue-400 mt-1">Ke: {item.rescheduledToBookingCode || '-'}</div>
                         )}
+                        {renderDueDates(item)}
                       </td>
                       <td className="p-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
@@ -3313,7 +3385,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                     <td className={`p-4 ${styles.textSub}`}>{formatDateDDMMYYYY(group.primary.departureDate)}</td>
                     <td className={`p-4 ${styles.textTitle}`}>{group.paxCount} Pax</td>
                     <td className={`p-4 ${styles.textSub}`}>{formatDateTimeID(group.earliestCreatedAt)}</td>
-                    <td className="p-4">{renderStatusBadge(group.primary)}</td>
+                    <td className="p-4">
+                      {renderStatusBadge(group.primary)}
+                      {renderDueDates({ ...group.primary, createdAt: group.earliestCreatedAt })}
+                    </td>
                     <td className={`p-4 font-semibold ${styles.textTitle}`}>{formatPercentID(group.percentBayar)}</td>
                     <td className="p-4 text-center">
                       {canManageBookings ? (
