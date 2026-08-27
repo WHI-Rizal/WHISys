@@ -602,11 +602,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       await deleteDoc(doc(db, 'payments_income', payId));
       // Balikin lagi saldo akun Kas/Bank asalnya (kalau bukan dibayar pakai
       // Saldo Deposit — itu nggak nyentuh akun sama sekali).
-      if (oldPay?.accountId) await adjustAccountBalance(oldPay.accountId, -(Number(oldPay.amount) || 0), {
-        description: `Koreksi hapus setoran - Booking ${selectedBookingForHistory?.bookingCode || '-'}`,
-        reference: selectedBookingForHistory?.bookingCode || '',
-        source: 'payment_delete_reversal'
-      });
+      if (oldPay?.accountId) await removeAccountMutationBySource(oldPay.accountId, payId, -(Number(oldPay.amount) || 0));
       await syncBookingTotalPaid(selectedBookingForHistory.id, selectedBookingForHistory.totalAmount);
       await fetchPaymentHistory(selectedBookingForHistory.id);
       fetchData();
@@ -641,11 +637,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // nggak dukung pindah akun sekaligus ganti nominal, biar simpel).
       if (oldPay?.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
         const delta = Number(paymentEditForm.amount) - (Number(oldPay.amount) || 0);
-        await adjustAccountBalance(oldPay.accountId, delta, {
-          description: `Koreksi edit setoran - Booking ${selectedBookingForHistory?.bookingCode || '-'}`,
-          reference: selectedBookingForHistory?.bookingCode || '',
-          source: 'payment_edit_adjustment'
-        });
+        await updateAccountMutationAmount(oldPay.accountId, payId, Number(paymentEditForm.amount), delta);
       }
 
       setEditingPaymentId(null);
@@ -986,8 +978,51 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       description: meta.description || '-',
       reference: meta.reference || '',
       source: meta.source || '-',
+      // sourceDocId = ID dokumen transaksi asal (payments_income/dst) —
+      // dipakai buat nemuin & ngapus/nyesuain baris ini lagi kalau
+      // transaksinya diedit/dihapus, biar riwayat mutasi nggak numpuk
+      // baris "koreksi" tiap ada perubahan.
+      sourceDocId: meta.sourceDocId || '',
       createdAt: meta.date || new Date().toISOString()
     });
+  };
+
+  // Hapus baris account_mutations yang berasal dari SATU dokumen transaksi
+  // (dicari lewat sourceDocId) — dipake pas transaksi asalnya dihapus, biar
+  // riwayat mutasi ikutan hilang (bukan nambah baris "koreksi hapus").
+  // Saldo akun tetap disesuaikan langsung (nggak nulis baris baru).
+  const removeAccountMutationBySource = async (accountId, sourceDocId, delta) => {
+    if (!accountId) return;
+    if (delta) {
+      await updateDoc(doc(db, 'financial_accounts', accountId), { balance: increment(delta) });
+    }
+    if (!sourceDocId) return;
+    try {
+      const q = query(collection(db, 'account_mutations'), where('accountId', '==', accountId), where('sourceDocId', '==', sourceDocId));
+      const snap = await getDocs(q);
+      await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+    } catch (err) {
+      console.error('Gagal menghapus riwayat mutasi terkait:', err);
+    }
+  };
+
+  // Update NOMINAL baris account_mutations yang berasal dari satu dokumen
+  // transaksi (dicari lewat sourceDocId) — dipake pas transaksi asalnya
+  // diedit nominalnya, biar riwayat mutasi tetap 1 baris per transaksi
+  // (bukan nambah baris "koreksi edit"). Saldo akun disesuaikan pakai delta.
+  const updateAccountMutationAmount = async (accountId, sourceDocId, newAmount, delta) => {
+    if (!accountId) return;
+    if (delta) {
+      await updateDoc(doc(db, 'financial_accounts', accountId), { balance: increment(delta) });
+    }
+    if (!sourceDocId) return;
+    try {
+      const q = query(collection(db, 'account_mutations'), where('accountId', '==', accountId), where('sourceDocId', '==', sourceDocId));
+      const snap = await getDocs(q);
+      await Promise.all(snap.docs.map(d => updateDoc(d.ref, { amount: Math.abs(newAmount) })));
+    } catch (err) {
+      console.error('Gagal memperbarui riwayat mutasi terkait:', err);
+    }
   };
 
   const handleCancelSubmit = async (e) => {
@@ -1191,7 +1226,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         const paxShare = baseShare + (i === 0 ? remainder : 0);
 
         if (paxShare > 0) {
-          await addDoc(collection(db, 'payments_income'), {
+          const payRef = await addDoc(collection(db, 'payments_income'), {
             bookingId: item.id,
             bookingCode: item.bookingCode,
             jamaahName: item.jamaahName,
@@ -1204,6 +1239,18 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             createdAt: resolvePaymentCreatedAt(groupPaymentForm.date),
             groupTransactionId
           });
+          // 1 baris mutasi per dokumen (bukan 1 baris gabungan per submit) —
+          // biar pas 1 dokumen ini dihapus/diedit nanti, baris mutasinya bisa
+          // ditemukan & disesuaikan sendiri lewat sourceDocId.
+          if (groupPaymentForm.paymentMethod !== 'Saldo Deposit') {
+            await adjustAccountBalance(groupPaymentForm.accountId, paxShare, {
+              description: `Setoran Grup ${groupPaymentTarget.code} - ${item.jamaahName || item.bookingCode}`,
+              reference: item.bookingCode,
+              source: 'group_payment',
+              date: resolvePaymentCreatedAt(groupPaymentForm.date),
+              sourceDocId: payRef.id
+            });
+          }
         }
 
         // Sinkronkan totalPaid/paymentStatus tiap pax dari data payments_income
@@ -1214,13 +1261,6 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       if (groupPaymentForm.paymentMethod === 'Saldo Deposit') {
         await adjustDepositBalance(groupOrdererId, groupOrdererName, -amount, 'usage', `Bayar setoran grup ${groupPaymentTarget.code}`, groupPaymentTarget.code);
-      } else {
-        await adjustAccountBalance(groupPaymentForm.accountId, amount, {
-          description: `Setoran Grup ${groupPaymentTarget.code} - an. ${groupOrdererName || '-'}`,
-          reference: groupPaymentTarget.code,
-          source: 'group_payment',
-          date: resolvePaymentCreatedAt(groupPaymentForm.date)
-        });
       }
 
       setShowGroupPaymentModal(false);
@@ -1278,11 +1318,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     if (!confirm("Apakah Anda yakin ingin menghapus catatan pembayaran ini?")) return;
     try {
       await deleteDoc(doc(db, 'payments_income', pay.id));
-      if (pay.accountId) await adjustAccountBalance(pay.accountId, -(Number(pay.amount) || 0), {
-        description: `Koreksi hapus setoran grup - Booking ${pay.bookingCode || '-'}`,
-        reference: pay.bookingCode || '',
-        source: 'group_payment_delete_reversal'
-      });
+      if (pay.accountId) await removeAccountMutationBySource(pay.accountId, pay.id, -(Number(pay.amount) || 0));
       const bookingItem = groupHistoryItems.find(b => b.id === pay.bookingId);
       if (bookingItem) await syncBookingTotalPaid(bookingItem.id, bookingItem.totalAmount);
       await fetchGroupHistoryPayments(groupHistoryItems);
@@ -1312,11 +1348,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       if (pay.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
         const delta = Number(paymentEditForm.amount) - (Number(pay.amount) || 0);
-        await adjustAccountBalance(pay.accountId, delta, {
-          description: `Koreksi edit setoran grup - Booking ${pay.bookingCode || '-'}`,
-          reference: pay.bookingCode || '',
-          source: 'group_payment_edit_adjustment'
-        });
+        await updateAccountMutationAmount(pay.accountId, pay.id, Number(paymentEditForm.amount), delta);
       }
 
       setEditingGroupPaymentId(null);
@@ -1343,13 +1375,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     if (!confirm(`Apakah Anda yakin ingin menghapus transaksi setoran ini? ${docs.length} catatan pembagian ke peserta akan ikut terhapus.`)) return;
     try {
       await Promise.all(docs.map(d => deleteDoc(doc(db, 'payments_income', d.id))));
-      // Tiap doc balikin porsinya sendiri ke saldo akun Kas/Bank asalnya (doc
-      // yang dibayar pakai Saldo Deposit dilewati — nggak punya accountId).
-      await Promise.all(docs.map(d => d.accountId ? adjustAccountBalance(d.accountId, -(Number(d.amount) || 0), {
-        description: `Koreksi hapus transaksi setoran grup - Booking ${d.bookingCode || '-'}`,
-        reference: d.bookingCode || '',
-        source: 'group_merged_payment_delete_reversal'
-      }) : Promise.resolve()));
+      // Tiap doc balikin porsinya sendiri ke saldo akun Kas/Bank asalnya, dan
+      // baris mutasinya masing-masing ikut hilang dari riwayat (doc yang
+      // dibayar pakai Saldo Deposit dilewati — nggak punya accountId).
+      await Promise.all(docs.map(d => d.accountId ? removeAccountMutationBySource(d.accountId, d.id, -(Number(d.amount) || 0)) : Promise.resolve()));
 
       // Sinkronkan totalPaid/paymentStatus tiap booking unik yang kena dampak
       const uniqueBookingIds = [...new Set(docs.map(d => d.bookingId))];
@@ -1548,7 +1577,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           const item = sortedActive[i];
           const share = baseShare + (i === 0 ? remainder : 0);
           if (share > 0) {
-            await addDoc(collection(db, 'payments_income'), {
+            const payRef = await addDoc(collection(db, 'payments_income'), {
               bookingId: item.id,
               bookingCode: item.bookingCode,
               jamaahName: item.jamaahName,
@@ -1561,18 +1590,20 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               createdAt: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
               groupTransactionId
             });
+            if (groupEditForm.addPaymentMethod !== 'Saldo Deposit') {
+              await adjustAccountBalance(groupEditForm.addAccountId, share, {
+                description: `Setoran Grup (Edit) ${groupEditTarget.code} - ${item.jamaahName || item.bookingCode}`,
+                reference: item.bookingCode,
+                source: 'group_edit_payment',
+                date: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
+                sourceDocId: payRef.id
+              });
+            }
           }
         }
 
         if (groupEditForm.addPaymentMethod === 'Saldo Deposit') {
           await adjustDepositBalance(ordererId, ordererName, -addAmount, 'usage', `Bayar setoran grup ${groupEditTarget.code}`, groupEditTarget.code);
-        } else {
-          await adjustAccountBalance(groupEditForm.addAccountId, addAmount, {
-            description: `Setoran Grup (Edit) ${groupEditTarget.code} - an. ${ordererName || '-'}`,
-            reference: groupEditTarget.code,
-            source: 'group_edit_payment',
-            date: resolvePaymentCreatedAt(groupEditForm.addPaymentDate)
-          });
         }
       }
 
@@ -2588,7 +2619,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         });
 
         if (paymentVal > 0) {
-          await addDoc(collection(db, 'payments_income'), {
+          const payRef = await addDoc(collection(db, 'payments_income'), {
             bookingId: editingBookingId,
             bookingCode: currentBooking.bookingCode,
             jamaahName: selectedJamaah.fullName,
@@ -2607,7 +2638,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               description: `Setoran Booking ${currentBooking.bookingCode} - an. ${selectedJamaah.fullName || '-'}`,
               reference: currentBooking.bookingCode,
               source: 'booking_edit_payment',
-              date: resolvePaymentCreatedAt(formData.paymentDate)
+              date: resolvePaymentCreatedAt(formData.paymentDate),
+              sourceDocId: payRef.id
             });
           }
         }
@@ -2662,7 +2694,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           });
 
           if (paymentVal > 0) {
-            await addDoc(collection(db, 'payments_income'), {
+            const payRef = await addDoc(collection(db, 'payments_income'), {
               bookingId: newBookingRef.id,
               bookingCode: bookingCode,
               jamaahName: selectedJamaah.fullName,
@@ -2681,7 +2713,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 description: `DP Booking ${bookingCode} - an. ${selectedJamaah.fullName || '-'}`,
                 reference: bookingCode,
                 source: 'booking_new_payment',
-                date: resolvePaymentCreatedAt(formData.paymentDate)
+                date: resolvePaymentCreatedAt(formData.paymentDate),
+                sourceDocId: payRef.id
               });
             }
           }
@@ -2748,7 +2781,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             });
 
             if (paxShare > 0) {
-              await addDoc(collection(db, 'payments_income'), {
+              const payRef = await addDoc(collection(db, 'payments_income'), {
                 bookingId: newBookingRef.id,
                 bookingCode,
                 jamaahName: pax.jamaahName,
@@ -2761,18 +2794,20 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 createdAt: resolvePaymentCreatedAt(formData.paymentDate),
                 groupTransactionId
               });
+              if (formData.paymentMethod !== 'Saldo Deposit') {
+                await adjustAccountBalance(formData.accountId, paxShare, {
+                  description: `DP Booking Grup ${groupBookingCode} - ${pax.jamaahName || bookingCode}`,
+                  reference: bookingCode,
+                  source: 'booking_group_new_payment',
+                  date: resolvePaymentCreatedAt(formData.paymentDate),
+                  sourceDocId: payRef.id
+                });
+              }
             }
           }
 
           if (formData.paymentMethod === 'Saldo Deposit' && paymentVal > 0) {
             await adjustDepositBalance(ordererId, ordererName, -paymentVal, 'usage', `Bayar DP booking grup ${groupBookingCode}`, groupBookingCode);
-          } else if (paymentVal > 0) {
-            await adjustAccountBalance(formData.accountId, paymentVal, {
-              description: `DP Booking Grup ${groupBookingCode} - an. ${ordererName || '-'}`,
-              reference: groupBookingCode,
-              source: 'booking_group_new_payment',
-              date: resolvePaymentCreatedAt(formData.paymentDate)
-            });
           }
 
           await updateDoc(doc(db, 'packages', selectedPkg.id), { quotaRemaining: increment(-paxCount) });
