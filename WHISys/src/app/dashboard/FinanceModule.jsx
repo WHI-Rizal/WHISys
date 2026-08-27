@@ -570,14 +570,23 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   };
 
   const handleDeleteVendorMaster = async (v) => {
-    // Sama kayak akun Kas/Bank — vendor yang masih ada saldo depositnya
-    // jangan bisa kehapus gitu aja, biar jejak kreditnya nggak ilang.
+    // Jaga-jaga pertama: vendor yang masih ada saldo depositnya jangan bisa
+    // kehapus gitu aja, biar jejak kreditnya nggak ilang.
     if (Number(v.depositBalance || 0) !== 0) {
       alert(`Vendor "${v.name}" masih punya saldo deposit Rp ${Number(v.depositBalance).toLocaleString('id-ID')}. Pakai dulu atau koreksi saldonya sebelum vendor ini dihapus.`);
       return;
     }
-    if (!confirm(`Hapus vendor "${v.name}"? Riwayat pembayaran yang udah keiket ke vendor ini nggak ikut kehapus, cuma referensinya jadi nggak ketemu lagi.`)) return;
+    // Jaga-jaga kedua: walau saldonya 0, tetep diwanti-wanti kalau vendor
+    // ini udah punya riwayat pembayaran — biar staff sadar riwayat itu
+    // bakal jadi nggak nyambung ke vendor manapun lagi kalau dihapus.
     try {
+      const vpQ = query(collection(db, 'payments_vendor'), where('vendorId', '==', v.id));
+      const vpSnap = await getDocs(vpQ);
+      if (!vpSnap.empty) {
+        if (!confirm(`Vendor "${v.name}" udah punya ${vpSnap.size} riwayat pembayaran (saldo depositnya emang 0, tapi pernah dipakai). Riwayat itu nggak ikut kehapus, cuma jadi nggak nyambung ke vendor manapun lagi kalau vendor ini dihapus. Tetap hapus?`)) return;
+      } else {
+        if (!confirm(`Hapus vendor "${v.name}"?`)) return;
+      }
       await deleteDoc(doc(db, 'vendors', v.id));
       fetchData();
     } catch (err) {
