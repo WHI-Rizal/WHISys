@@ -722,11 +722,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     if (!confirm(confirmMsg)) return;
     try {
       await Promise.all(row.docs.map(d => deleteDoc(doc(db, 'payments_income', d.id))));
-      // Tiap doc balikin porsinya sendiri ke saldo akun Kas/Bank asalnya
-      // (doc yang dibayar pakai Saldo Deposit nggak punya accountId, jadi
-      // otomatis dilewati — saldo deposit-nya juga sengaja nggak dibalikin
-      // di sini, itu koreksi manual terpisah lewat modul Booking).
-      await Promise.all(row.docs.map(d => d.accountId ? adjustAccountBalance(d.accountId, Number(d.amount) || 0, {
+      // Tiap doc yang kehapus BUKAN uang beneran masuk lagi (catatannya
+      // kehapus), jadi saldo akun Kas/Bank asalnya harus DIKURANGI sebesar
+      // porsinya masing-masing (bukan ditambah) — kalau nggak, malah
+      // kedobel jadi seolah-olah uangnya masuk 2x. (doc yang dibayar pakai
+      // Saldo Deposit nggak punya accountId, jadi otomatis dilewati —
+      // saldo deposit-nya juga sengaja nggak dibalikin di sini, itu koreksi
+      // manual terpisah lewat modul Booking).
+      await Promise.all(row.docs.map(d => d.accountId ? adjustAccountBalance(d.accountId, -(Number(d.amount) || 0), {
         description: `Koreksi hapus setoran - Booking ${d.bookingCode || '-'}`,
         reference: d.bookingCode || '',
         source: 'income_delete_reversal'
