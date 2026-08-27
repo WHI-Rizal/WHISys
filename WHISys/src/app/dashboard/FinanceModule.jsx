@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, getDoc, deleteDoc, doc, updateDoc, query, where, increment } from 'firebase/firestore';
-import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock, Download } from 'lucide-react';
+import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock, Download, Pencil } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import DateFieldID from '@/components/DateFieldID';
@@ -103,6 +103,7 @@ const buildIncomeRow = (docs, bookingsById, isFallbackMerge) => {
     amount: totalAmount,
     paymentMethod: first.paymentMethod,
     bankName: first.bankName || '',
+    accountName: first.accountName || '',
     notes,
     createdAt: first.createdAt,
     groupCode,
@@ -193,12 +194,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const [bookingsList, setBookingsList] = useState([]);
   const [packagesList, setPackagesList] = useState([]);
   const [jamaahList, setJamaahList] = useState([]);
+  const [financialAccounts, setFinancialAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [showVendorModal, setShowVendorModal] = useState(false);
   const [showOperationalModal, setShowOperationalModal] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [editingAccountId, setEditingAccountId] = useState(null);
   const [activeTab, setActiveTab] = useState('income');
 
   const [showProfitDetailModal, setShowProfitDetailModal] = useState(false);
@@ -208,19 +212,18 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     groupCode: '',
     amount: '',
     paymentMethod: 'Transfer Bank',
-    bankName: BANK_LIST[0],
-    customBankName: '',
+    accountId: '',
     notes: 'DP Keberangkatan',
     date: new Date().toISOString().slice(0, 10)
   });
 
   // Modal "+ Tambah Deposit" — buat nyatet transferan yang udah masuk tapi
-  // belum jelas dipakai buat booking mana, langsung masuk saldo Pemesan.
+  // belum jelas dipakai buat booking mana, langsung masuk saldo Pemesan DAN
+  // saldo akun Kas/Bank yang nerima duitnya.
   const [depositForm, setDepositForm] = useState({
     customerId: '',
     amount: '',
-    bankName: BANK_LIST[0],
-    customBankName: '',
+    accountId: '',
     notes: 'Titip Deposit (belum ada booking)',
     date: todayISODate()
   });
@@ -230,6 +233,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     vendorName: '',
     category: 'Tiket Pesawat',
     amount: '',
+    accountId: '',
     notes: 'DP Booking Seat',
     paymentDate: todayISODate()
   });
@@ -237,8 +241,20 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const [operationalForm, setOperationalForm] = useState({
     category: OPERATIONAL_CATEGORIES[0],
     amount: '',
+    accountId: '',
     notes: '',
     expenseDate: todayISODate()
+  });
+
+  // Form Data Master Kas & Bank — tiap akun punya saldo berjalan (balance)
+  // yang otomatis nambah/berkurang tiap ada transaksi yang diiket ke akun ini.
+  const [accountForm, setAccountForm] = useState({
+    name: '',
+    type: 'Kas',
+    bankName: BANK_LIST[0],
+    customBankName: '',
+    accountNumber: '',
+    openingBalance: ''
   });
 
   const [plPeriod, setPlPeriod] = useState('all');
@@ -260,6 +276,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       const jmhSnap = await getDocs(collection(db, 'jamaah'));
       setJamaahList(jmhSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      const accSnap = await getDocs(collection(db, 'financial_accounts'));
+      setFinancialAccounts(accSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       const txSnap = await getDocs(collection(db, 'payments_income'));
       setTransactions(txSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -326,6 +345,74 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     });
   };
 
+  // Saldo tiap akun Kas/Bank (collection 'financial_accounts') — delta positif
+  // = uang beneran masuk ke akun ini (setoran jamaah, top up deposit), delta
+  // negatif = uang keluar dari akun ini (bayar vendor, biaya operasional).
+  // Metode Bayar "Saldo Deposit" SENGAJA nggak lewat sini — itu cuma
+  // mindahin saldo titipan customer, bukan uang baru yang masuk/keluar kas.
+  const adjustAccountBalance = async (accountId, delta) => {
+    if (!accountId || !delta) return;
+    await updateDoc(doc(db, 'financial_accounts', accountId), { balance: increment(delta) });
+  };
+
+  const handleAccountSubmit = async (e) => {
+    e.preventDefault();
+    if (!accountForm.name.trim()) {
+      alert("Isi nama akunnya dulu.");
+      return;
+    }
+    try {
+      const payload = {
+        name: accountForm.name.trim(),
+        type: accountForm.type,
+        ...(accountForm.type === 'Bank' ? {
+          bankName: resolveBankName(accountForm.bankName, accountForm.customBankName),
+          accountNumber: accountForm.accountNumber || ''
+        } : { bankName: '', accountNumber: '' })
+      };
+      if (editingAccountId) {
+        await updateDoc(doc(db, 'financial_accounts', editingAccountId), payload);
+      } else {
+        const openingBalanceVal = Number(accountForm.openingBalance || 0);
+        await addDoc(collection(db, 'financial_accounts'), {
+          ...payload,
+          openingBalance: openingBalanceVal,
+          balance: openingBalanceVal,
+          createdAt: new Date().toISOString()
+        });
+      }
+      setShowAccountModal(false);
+      setEditingAccountId(null);
+      setAccountForm({ name: '', type: 'Kas', bankName: BANK_LIST[0], customBankName: '', accountNumber: '', openingBalance: '' });
+      fetchData();
+    } catch (err) {
+      alert("Gagal menyimpan akun: " + err.message);
+    }
+  };
+
+  const handleEditAccount = (acc) => {
+    setEditingAccountId(acc.id);
+    setAccountForm({
+      name: acc.name || '',
+      type: acc.type || 'Kas',
+      bankName: BANK_LIST.includes(acc.bankName) ? acc.bankName : (acc.bankName ? 'Bank Lainnya' : BANK_LIST[0]),
+      customBankName: BANK_LIST.includes(acc.bankName) ? '' : (acc.bankName || ''),
+      accountNumber: acc.accountNumber || '',
+      openingBalance: acc.openingBalance ?? ''
+    });
+    setShowAccountModal(true);
+  };
+
+  const handleDeleteAccount = async (acc) => {
+    if (!confirm(`Hapus akun "${acc.name}"? Riwayat transaksi yang udah keiket ke akun ini nggak ikut kehapus, cuma referensinya jadi nggak ketemu lagi.`)) return;
+    try {
+      await deleteDoc(doc(db, 'financial_accounts', acc.id));
+      fetchData();
+    } catch (err) {
+      alert("Gagal menghapus akun: " + err.message);
+    }
+  };
+
   const handleDepositSubmit = async (e) => {
     e.preventDefault();
     const customer = jamaahList.find(j => j.id === depositForm.customerId);
@@ -338,39 +425,47 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       alert("Isi nominal deposit yang valid (lebih dari 0).");
       return;
     }
+    if (!depositForm.accountId) {
+      alert("Pilih akun Kas/Bank yang nerima transferan ini dulu.");
+      return;
+    }
     try {
-      const finalBankName = resolveBankName(depositForm.bankName, depositForm.customBankName);
+      const account = financialAccounts.find(a => a.id === depositForm.accountId);
       await adjustDepositBalance(
         customer.id,
         customer.fullName,
         amountVal,
         'topup',
-        `${depositForm.notes}${finalBankName ? ` (${finalBankName})` : ''}`,
+        `${depositForm.notes}${account ? ` (${account.name})` : ''}`,
         '',
         resolvePaymentCreatedAt(depositForm.date)
       );
+      await adjustAccountBalance(depositForm.accountId, amountVal);
       setShowDepositModal(false);
-      setDepositForm({ customerId: '', amount: '', bankName: BANK_LIST[0], customBankName: '', notes: 'Titip Deposit (belum ada booking)', date: todayISODate() });
+      setDepositForm({ customerId: '', amount: '', accountId: '', notes: 'Titip Deposit (belum ada booking)', date: todayISODate() });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat deposit: " + err.message);
     }
   };
 
-  const handleDeleteVendorPayment = async (vpId) => {
+  const handleDeleteVendorPayment = async (vp) => {
     if (!confirm("Apakah Anda yakin ingin menghapus catatan pengeluaran vendor ini?")) return;
     try {
-      await deleteDoc(doc(db, 'payments_vendor', vpId));
+      await deleteDoc(doc(db, 'payments_vendor', vp.id));
+      // Uangnya balik lagi ke saldo akun Kas/Bank yang tadinya kepotong.
+      if (vp.accountId) await adjustAccountBalance(vp.accountId, Number(vp.amount) || 0);
       fetchData();
     } catch (err) {
       alert("Gagal menghapus pembayaran vendor: " + err.message);
     }
   };
 
-  const handleDeleteOperationalExpense = async (opId) => {
+  const handleDeleteOperationalExpense = async (op) => {
     if (!confirm("Apakah Anda yakin ingin menghapus catatan biaya operasional ini?")) return;
     try {
-      await deleteDoc(doc(db, 'expenses_operational', opId));
+      await deleteDoc(doc(db, 'expenses_operational', op.id));
+      if (op.accountId) await adjustAccountBalance(op.accountId, Number(op.amount) || 0);
       fetchData();
     } catch (err) {
       alert("Gagal menghapus biaya operasional: " + err.message);
@@ -450,8 +545,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
           alert(`Saldo Deposit Pemesan tidak cukup. Saldo saat ini: Rp ${currentBalance.toLocaleString('id-ID')}, dibutuhkan: Rp ${amountVal.toLocaleString('id-ID')}.`);
           return;
         }
+      } else if (!incomeForm.accountId) {
+        alert("Pilih akun Kas/Bank yang nerima setoran ini dulu.");
+        return;
       }
-      const incomeFinalBankName = resolveBankName(incomeForm.bankName, incomeForm.customBankName);
+      const incomeAccount = financialAccounts.find(a => a.id === incomeForm.accountId);
 
       // Setoran dibagi rata ke semua pax dalam kode booking ini (sisa
       // pembagian jatuh ke pax pertama) — pola sama persis dengan setoran
@@ -479,7 +577,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
             packageName: item.packageName,
             amount: paxShare,
             paymentMethod: incomeForm.paymentMethod,
-            ...(incomeForm.paymentMethod === 'Transfer Bank' ? { bankName: incomeFinalBankName } : {}),
+            ...(incomeForm.paymentMethod !== 'Saldo Deposit' ? { accountId: incomeForm.accountId, accountName: incomeAccount?.name || '' } : {}),
             notes: isGroup ? `${incomeForm.notes} (Grup ${incomeForm.groupCode})` : incomeForm.notes,
             createdAt: resolvePaymentCreatedAt(incomeForm.date),
             ...(isGroup ? { groupTransactionId } : {})
@@ -491,10 +589,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       if (incomeForm.paymentMethod === 'Saldo Deposit' && amountVal > 0) {
         await adjustDepositBalance(incomeOrdererId, incomeOrdererName, -amountVal, 'usage', `Bayar setoran kode booking ${incomeForm.groupCode}`, incomeForm.groupCode, resolvePaymentCreatedAt(incomeForm.date));
+      } else if (amountVal > 0) {
+        await adjustAccountBalance(incomeForm.accountId, amountVal);
       }
 
       setShowIncomeModal(false);
-      setIncomeForm({ groupCode: '', amount: '', paymentMethod: 'Transfer Bank', bankName: BANK_LIST[0], customBankName: '', notes: 'DP Keberangkatan', date: new Date().toISOString().slice(0, 10) });
+      setIncomeForm({ groupCode: '', amount: '', paymentMethod: 'Transfer Bank', accountId: '', notes: 'DP Keberangkatan', date: new Date().toISOString().slice(0, 10) });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat pembayaran: " + err.message);
@@ -508,6 +608,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     if (!confirm(confirmMsg)) return;
     try {
       await Promise.all(row.docs.map(d => deleteDoc(doc(db, 'payments_income', d.id))));
+      // Tiap doc balikin porsinya sendiri ke saldo akun Kas/Bank asalnya
+      // (doc yang dibayar pakai Saldo Deposit nggak punya accountId, jadi
+      // otomatis dilewati — saldo deposit-nya juga sengaja nggak dibalikin
+      // di sini, itu koreksi manual terpisah lewat modul Booking).
+      await Promise.all(row.docs.map(d => d.accountId ? adjustAccountBalance(d.accountId, Number(d.amount) || 0) : Promise.resolve()));
       const affectedBookingIds = Array.from(new Set(row.docs.map(d => d.bookingId).filter(Boolean)));
       await Promise.all(affectedBookingIds.map(id => syncBookingTotalPaid(id)));
       fetchData();
@@ -524,19 +629,28 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         alert("Pilih paket keberangkatan terkait dulu. Kalau ini biaya kantor yang bukan buat trip tertentu, catat lewat tombol \"Biaya Operasional Kantor\", bukan di sini.");
         return;
       }
+      if (!vendorForm.accountId) {
+        alert("Pilih akun Kas/Bank yang dipakai bayar vendor ini dulu.");
+        return;
+      }
+      const vendorAccount = financialAccounts.find(a => a.id === vendorForm.accountId);
+      const vendorAmountVal = Number(vendorForm.amount);
 
       await addDoc(collection(db, 'payments_vendor'), {
         packageId: selectedPkg.id,
         packageName: selectedPkg.name,
         vendorName: vendorForm.vendorName,
         category: vendorForm.category,
-        amount: Number(vendorForm.amount),
+        amount: vendorAmountVal,
+        accountId: vendorForm.accountId,
+        accountName: vendorAccount?.name || '',
         notes: vendorForm.notes,
         createdAt: resolvePaymentCreatedAt(vendorForm.paymentDate)
       });
+      await adjustAccountBalance(vendorForm.accountId, -vendorAmountVal);
 
       setShowVendorModal(false);
-      setVendorForm({ packageId: '', vendorName: '', category: 'Tiket Pesawat', amount: '', notes: 'DP Booking Seat', paymentDate: todayISODate() });
+      setVendorForm({ packageId: '', vendorName: '', category: 'Tiket Pesawat', amount: '', accountId: '', notes: 'DP Booking Seat', paymentDate: todayISODate() });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat pembayaran vendor: " + err.message);
@@ -546,16 +660,26 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const handleOperationalSubmit = async (e) => {
     e.preventDefault();
     try {
+      if (!operationalForm.accountId) {
+        alert("Pilih akun Kas/Bank yang dipakai bayar biaya ini dulu.");
+        return;
+      }
+      const opAccount = financialAccounts.find(a => a.id === operationalForm.accountId);
+      const opAmountVal = Number(operationalForm.amount);
+
       await addDoc(collection(db, 'expenses_operational'), {
         category: operationalForm.category,
-        amount: Number(operationalForm.amount),
+        amount: opAmountVal,
+        accountId: operationalForm.accountId,
+        accountName: opAccount?.name || '',
         notes: operationalForm.notes,
         expenseDate: operationalForm.expenseDate || todayISODate(),
         createdAt: new Date().toISOString()
       });
+      await adjustAccountBalance(operationalForm.accountId, -opAmountVal);
 
       setShowOperationalModal(false);
-      setOperationalForm({ category: OPERATIONAL_CATEGORIES[0], amount: '', notes: '', expenseDate: todayISODate() });
+      setOperationalForm({ category: OPERATIONAL_CATEGORIES[0], amount: '', accountId: '', notes: '', expenseDate: todayISODate() });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat biaya operasional: " + err.message);
@@ -915,6 +1039,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         >
           <TrendingUp className="w-3.5 h-3.5" /> Laporan Keuangan (P&L)
         </button>
+        <button
+          onClick={() => setActiveTab('accounts')}
+          className={`px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+            activeTab === 'accounts' ? `${styles.tabActive} text-blue-500 border` : `${styles.textSub} hover:${styles.textTitle}`
+          }`}
+        >
+          <Wallet className="w-3.5 h-3.5" /> Kas & Bank ({financialAccounts.length})
+        </button>
       </div>
 
       {activeTab === 'income' && (
@@ -955,7 +1087,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                       </td>
                       <td className={`p-4 ${styles.textTitle}`}>{row.packageName}</td>
                       <td className="p-4">
-                        <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] mr-1`}>{row.paymentMethod}{row.bankName ? ` - ${row.bankName}` : ''}</span>
+                        <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] mr-1`}>{row.paymentMethod}{row.accountName ? ` - ${row.accountName}` : ''}</span>
                         <span className={styles.textSub}>{row.notes}</span>
                       </td>
                       <td className={`p-4 ${styles.textSub}`}>{formatDateDDMMYYYY(row.createdAt)}</td>
@@ -1025,7 +1157,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                       </td>
                       <td className="p-4 text-center">
                         <button
-                          onClick={() => handleDeleteVendorPayment(vp.id)}
+                          onClick={() => handleDeleteVendorPayment(vp)}
                           className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
                           title="Hapus Pembayaran Vendor"
                         >
@@ -1075,7 +1207,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                       </td>
                       <td className="p-4 text-center">
                         <button
-                          onClick={() => handleDeleteOperationalExpense(op.id)}
+                          onClick={() => handleDeleteOperationalExpense(op)}
                           className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
                           title="Hapus Biaya Operasional"
                         >
@@ -1284,6 +1416,180 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         </div>
       )}
 
+      {activeTab === 'accounts' && (
+        <div className="space-y-4">
+          <div className={`${styles.cardBg} border rounded-xl p-4 flex justify-between items-center`}>
+            <div>
+              <p className={`text-xs font-medium ${styles.textSub}`}>Total Saldo Seluruh Akun</p>
+              <p className={`text-xl font-bold ${styles.textTitle}`}>
+                Rp {financialAccounts.reduce((acc, a) => acc + (Number(a.balance) || 0), 0).toLocaleString('id-ID')}
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setEditingAccountId(null);
+                setAccountForm({ name: '', type: 'Kas', bankName: BANK_LIST[0], customBankName: '', accountNumber: '', openingBalance: '' });
+                setShowAccountModal(true);
+              }}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
+            >
+              <Wallet className="w-4 h-4" /> + Tambah Akun
+            </button>
+          </div>
+
+          <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                  <tr>
+                    <th className="p-4">Nama Akun</th>
+                    <th className="p-4">Jenis</th>
+                    <th className="p-4">No. Rekening</th>
+                    <th className="p-4 text-right">Saldo Berjalan</th>
+                    <th className="p-4 text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                  {financialAccounts.length === 0 ? (
+                    <tr>
+                      <td colSpan="5" className={`p-8 text-center ${styles.textSub}`}>Belum ada akun Kas/Bank. Tambahkan dulu biar transaksi setoran/pengeluaran bisa diiket ke akun tertentu.</td>
+                    </tr>
+                  ) : (
+                    financialAccounts.map(acc => (
+                      <tr key={acc.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                        <td className={`p-4 font-semibold ${styles.textTitle}`}>{acc.name}</td>
+                        <td className="p-4">
+                          <span className={`${acc.type === 'Bank' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'} border px-2.5 py-1 rounded-full font-medium`}>
+                            {acc.type}
+                          </span>
+                        </td>
+                        <td className={`p-4 ${styles.textSub}`}>{acc.type === 'Bank' ? (acc.accountNumber || '-') : '-'}</td>
+                        <td className={`p-4 text-right font-bold ${styles.textTitle}`}>Rp {Number(acc.balance || 0).toLocaleString('id-ID')}</td>
+                        <td className="p-4 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => handleEditAccount(acc)}
+                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                              title="Edit Akun"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteAccount(acc)}
+                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                              title="Hapus Akun"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAccountModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+            <button onClick={() => setShowAccountModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-4 flex items-center gap-2`}>
+              <Wallet className="w-5 h-5 text-blue-500" /> {editingAccountId ? 'Edit Akun Kas/Bank' : 'Tambah Akun Kas/Bank'}
+            </h3>
+
+            <form onSubmit={handleAccountSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div>
+                <label className="block mb-1 font-medium">Nama Akun</label>
+                <input
+                  type="text" required placeholder="Contoh: Kas Kecil Kantor / BCA Operasional"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={accountForm.name}
+                  onChange={e => setAccountForm({ ...accountForm, name: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Jenis Akun</label>
+                <select
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={accountForm.type}
+                  onChange={e => setAccountForm({ ...accountForm, type: e.target.value })}
+                >
+                  <option value="Kas">Kas (Cash)</option>
+                  <option value="Bank">Bank</option>
+                </select>
+              </div>
+
+              {accountForm.type === 'Bank' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block mb-1 font-medium">Nama Bank</label>
+                    <select
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={accountForm.bankName}
+                      onChange={e => setAccountForm({ ...accountForm, bankName: e.target.value })}
+                    >
+                      {BANK_LIST.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block mb-1 font-medium">No. Rekening</label>
+                    <input
+                      type="text" placeholder="1234567890"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={accountForm.accountNumber}
+                      onChange={e => setAccountForm({ ...accountForm, accountNumber: e.target.value })}
+                    />
+                  </div>
+                  {accountForm.bankName === 'Bank Lainnya' && (
+                    <div className="col-span-2">
+                      <label className="block mb-1 font-medium">Nama Bank Lainnya</label>
+                      <input
+                        type="text" placeholder="Ketik nama banknya"
+                        className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                        value={accountForm.customBankName}
+                        onChange={e => setAccountForm({ ...accountForm, customBankName: e.target.value })}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!editingAccountId && (
+                <div>
+                  <label className="block mb-1 font-medium">Saldo Awal (Rp)</label>
+                  <input
+                    type="number" placeholder="0"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={accountForm.openingBalance}
+                    onChange={e => setAccountForm({ ...accountForm, openingBalance: e.target.value })}
+                  />
+                  <p className="text-[10px] mt-1 opacity-70">Saldo yang udah ada di akun ini SEBELUM mulai dicatat di sistem (boleh dikosongin/0 kalau mulai dari nol).</p>
+                </div>
+              )}
+              {editingAccountId && (
+                <p className="text-[10px] opacity-70">Saldo berjalan akun ini cuma berubah otomatis lewat transaksi (setoran/bayar vendor/dll), nggak bisa diubah manual dari sini.</p>
+              )}
+
+              <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowAccountModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium">
+                  Simpan Akun
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {showProfitDetailModal && selectedPackageForDetail && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className={`${styles.cardBg} border rounded-2xl w-full max-w-3xl p-6 relative max-h-[90vh] overflow-y-auto`}>
@@ -1375,7 +1681,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                               <span className="block text-[10px] text-emerald-500 font-mono">{tx.bookingCode}</span>
                             </td>
                             <td className="p-2.5">
-                              <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{tx.paymentMethod}{tx.bankName ? ` - ${tx.bankName}` : ''}</span>
+                              <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{tx.paymentMethod}{tx.accountName ? ` - ${tx.accountName}` : ''}</span>
                               <span className={styles.textSub}>{tx.notes}</span>
                             </td>
                             <td className="p-2.5 text-right font-bold text-emerald-500">+ Rp {Number(tx.amount).toLocaleString('id-ID')}</td>
@@ -1501,28 +1807,22 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </div>
               </div>
 
-              {incomeForm.paymentMethod === 'Transfer Bank' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block mb-1 font-medium">Nama Bank</label>
-                    <select
-                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                      value={incomeForm.bankName}
-                      onChange={e => setIncomeForm({ ...incomeForm, bankName: e.target.value })}
-                    >
-                      {BANK_LIST.map(b => <option key={b} value={b}>{b}</option>)}
-                    </select>
-                  </div>
-                  {incomeForm.bankName === 'Bank Lainnya' && (
-                    <div>
-                      <label className="block mb-1 font-medium">Nama Bank Lainnya</label>
-                      <input
-                        type="text" placeholder="Ketik nama banknya"
-                        className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                        value={incomeForm.customBankName}
-                        onChange={e => setIncomeForm({ ...incomeForm, customBankName: e.target.value })}
-                      />
-                    </div>
+              {incomeForm.paymentMethod !== 'Saldo Deposit' && (
+                <div>
+                  <label className="block mb-1 font-medium">Masuk ke Akun Kas/Bank</label>
+                  <select
+                    required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={incomeForm.accountId}
+                    onChange={e => setIncomeForm({ ...incomeForm, accountId: e.target.value })}
+                  >
+                    <option value="">-- Pilih Akun --</option>
+                    {financialAccounts.map(a => (
+                      <option key={a.id} value={a.id}>{a.name} (Saldo: Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
+                    ))}
+                  </select>
+                  {financialAccounts.length === 0 && (
+                    <p className="text-[10px] mt-1 text-amber-500">Belum ada akun Kas/Bank. Tambahkan dulu lewat tab "Kas & Bank".</p>
                   )}
                 </div>
               )}
@@ -1612,28 +1912,19 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block mb-1 font-medium">Nama Bank</label>
-                  <select
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    value={depositForm.bankName}
-                    onChange={e => setDepositForm({ ...depositForm, bankName: e.target.value })}
-                  >
-                    {BANK_LIST.map(b => <option key={b} value={b}>{b}</option>)}
-                  </select>
-                </div>
-                {depositForm.bankName === 'Bank Lainnya' && (
-                  <div>
-                    <label className="block mb-1 font-medium">Nama Bank Lainnya</label>
-                    <input
-                      type="text" placeholder="Ketik nama banknya"
-                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                      value={depositForm.customBankName}
-                      onChange={e => setDepositForm({ ...depositForm, customBankName: e.target.value })}
-                    />
-                  </div>
-                )}
+              <div>
+                <label className="block mb-1 font-medium">Masuk ke Akun Kas/Bank</label>
+                <select
+                  required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={depositForm.accountId}
+                  onChange={e => setDepositForm({ ...depositForm, accountId: e.target.value })}
+                >
+                  <option value="">-- Pilih Akun --</option>
+                  {financialAccounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.name} (Saldo: Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -1725,14 +2016,30 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </div>
               </div>
 
-              <div>
-                <label className="block mb-1 font-medium">Tanggal Pembayaran</label>
-                <DateFieldID
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={vendorForm.paymentDate}
-                  onChange={(val) => setVendorForm({ ...vendorForm, paymentDate: val })}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1 font-medium">Tanggal Pembayaran</label>
+                  <DateFieldID
+                    required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={vendorForm.paymentDate}
+                    onChange={(val) => setVendorForm({ ...vendorForm, paymentDate: val })}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Keluar dari Akun Kas/Bank</label>
+                  <select
+                    required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={vendorForm.accountId}
+                    onChange={e => setVendorForm({ ...vendorForm, accountId: e.target.value })}
+                  >
+                    <option value="">-- Pilih Akun --</option>
+                    {financialAccounts.map(a => (
+                      <option key={a.id} value={a.id}>{a.name} (Saldo: Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div>
@@ -1796,14 +2103,30 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </div>
               </div>
 
-              <div>
-                <label className="block mb-1 font-medium">Tanggal Biaya</label>
-                <DateFieldID
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={operationalForm.expenseDate}
-                  onChange={(val) => setOperationalForm({ ...operationalForm, expenseDate: val })}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1 font-medium">Tanggal Biaya</label>
+                  <DateFieldID
+                    required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={operationalForm.expenseDate}
+                    onChange={(val) => setOperationalForm({ ...operationalForm, expenseDate: val })}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Keluar dari Akun Kas/Bank</label>
+                  <select
+                    required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={operationalForm.accountId}
+                    onChange={e => setOperationalForm({ ...operationalForm, accountId: e.target.value })}
+                  >
+                    <option value="">-- Pilih Akun --</option>
+                    {financialAccounts.map(a => (
+                      <option key={a.id} value={a.id}>{a.name} (Saldo: Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div>
