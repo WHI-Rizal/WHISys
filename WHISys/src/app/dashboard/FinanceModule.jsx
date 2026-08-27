@@ -450,8 +450,24 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   };
 
   const handleDeleteAccount = async (acc) => {
-    if (!confirm(`Hapus akun "${acc.name}"? Riwayat transaksi yang udah keiket ke akun ini nggak ikut kehapus, cuma referensinya jadi nggak ketemu lagi.`)) return;
+    // Jaga-jaga: akun yang saldonya masih ada isinya jangan bisa kehapus
+    // gitu aja — begitu dihapus, jejak duitnya ilang (nggak ada lagi akun
+    // buat nampung riwayat mutasinya). Harus dikosongin/dipindah dulu.
+    if (Number(acc.balance || 0) !== 0) {
+      alert(`Akun "${acc.name}" masih punya saldo Rp ${Number(acc.balance).toLocaleString('id-ID')}. Kosongkan dulu saldonya (pastikan semua transaksi yang keiket ke akun ini sudah beres) sebelum akunnya dihapus.`);
+      return;
+    }
+    // Jaga-jaga kedua: akun yang udah pernah kepake (ada riwayat mutasi),
+    // walau saldonya udah balik ke 0, tetep diwanti-wanti biar staff sadar
+    // riwayatnya bakal jadi nggak nyambung ke akun manapun kalau dihapus.
     try {
+      const mutQ = query(collection(db, 'account_mutations'), where('accountId', '==', acc.id));
+      const mutSnap = await getDocs(mutQ);
+      if (!mutSnap.empty) {
+        if (!confirm(`Akun "${acc.name}" udah punya ${mutSnap.size} riwayat mutasi (saldonya sekarang emang 0, tapi pernah dipakai). Riwayat itu nggak ikut kehapus, cuma jadi nggak nyambung ke akun manapun lagi kalau akun ini dihapus. Tetap hapus?`)) return;
+      } else {
+        if (!confirm(`Hapus akun "${acc.name}"?`)) return;
+      }
       await deleteDoc(doc(db, 'financial_accounts', acc.id));
       fetchData();
     } catch (err) {
