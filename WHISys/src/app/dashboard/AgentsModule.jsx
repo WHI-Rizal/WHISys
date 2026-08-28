@@ -111,11 +111,18 @@ export default function AgentsModule({ theme = 'dark' }) {
 
   const [showPartnerModal, setShowPartnerModal] = useState(false);
   const [editingPartnerId, setEditingPartnerId] = useState(null);
-  const [partnerForm, setPartnerForm] = useState({ name: '', type: 'Mitra', contactPerson: '', phone: '', commissionPercent: '', notes: '', active: true });
+  const [partnerForm, setPartnerForm] = useState({ name: '', type: 'Mitra', contactPerson: '', phone: '', commissionType: 'percent', commissionValue: '', notes: '', active: true });
+
+  // Label komisi siap-tampil, dipakai di tabel & dropdown — otomatis nyesuain
+  // format persen atau nominal rupiah.
+  const formatCommission = (type, value) => {
+    const v = Number(value) || 0;
+    return type === 'fixed' ? `Rp ${v.toLocaleString('id-ID')}` : `${v}%`;
+  };
 
   const handleOpenAddPartner = () => {
     setEditingPartnerId(null);
-    setPartnerForm({ name: '', type: 'Mitra', contactPerson: '', phone: '', commissionPercent: '', notes: '', active: true });
+    setPartnerForm({ name: '', type: 'Mitra', contactPerson: '', phone: '', commissionType: 'percent', commissionValue: '', notes: '', active: true });
     setShowPartnerModal(true);
   };
 
@@ -123,7 +130,7 @@ export default function AgentsModule({ theme = 'dark' }) {
     setEditingPartnerId(p.id);
     setPartnerForm({
       name: p.name || '', type: p.type || 'Mitra', contactPerson: p.contactPerson || '',
-      phone: p.phone || '', commissionPercent: String(p.commissionPercent ?? ''), notes: p.notes || '',
+      phone: p.phone || '', commissionType: p.commissionType || 'percent', commissionValue: String(p.commissionValue ?? ''), notes: p.notes || '',
       active: p.active !== false
     });
     setShowPartnerModal(true);
@@ -138,7 +145,8 @@ export default function AgentsModule({ theme = 'dark' }) {
         type: partnerForm.type,
         contactPerson: partnerForm.contactPerson || '',
         phone: partnerForm.phone || '',
-        commissionPercent: Number(partnerForm.commissionPercent) || 0,
+        commissionType: partnerForm.commissionType === 'fixed' ? 'fixed' : 'percent',
+        commissionValue: Number(partnerForm.commissionValue) || 0,
         notes: partnerForm.notes || '',
         active: !!partnerForm.active
       };
@@ -183,7 +191,7 @@ export default function AgentsModule({ theme = 'dark' }) {
   // ============ 2. TRACKING KOMISI PER BOOKING ============
 
   const [showLinkModal, setShowLinkModal] = useState(false);
-  const [linkForm, setLinkForm] = useState({ partnerId: '', bookingId: '', commissionPercent: '' });
+  const [linkForm, setLinkForm] = useState({ partnerId: '', bookingId: '', commissionType: 'percent', commissionValue: '' });
 
   const assignedBookingIds = new Set(partnerBookings.map(pb => pb.bookingId));
   const availableBookings = bookingsList
@@ -191,18 +199,30 @@ export default function AgentsModule({ theme = 'dark' }) {
     .filter(b => !assignedBookingIds.has(b.id))
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 
+  // Ngitung nominal komisi sesuai jenisnya — persentase dari total booking,
+  // atau flat rupiah berapapun total tagihannya.
+  const computeCommissionAmount = (type, value, totalAmount) => {
+    const v = Number(value) || 0;
+    return type === 'fixed' ? v : (Number(totalAmount) || 0) * v / 100;
+  };
+
   const handleOpenLinkModal = () => {
     if (partnersList.length === 0) {
       alert('Tambah dulu data mitra/agen di tab "Data Mitra & Agen".');
       return;
     }
-    setLinkForm({ partnerId: '', bookingId: '', commissionPercent: '' });
+    setLinkForm({ partnerId: '', bookingId: '', commissionType: 'percent', commissionValue: '' });
     setShowLinkModal(true);
   };
 
   const handlePartnerChangeInLink = (partnerId) => {
     const p = partnersList.find(x => x.id === partnerId);
-    setLinkForm({ ...linkForm, partnerId, commissionPercent: p ? String(p.commissionPercent ?? '') : '' });
+    setLinkForm({
+      ...linkForm,
+      partnerId,
+      commissionType: p?.commissionType || 'percent',
+      commissionValue: p ? String(p.commissionValue ?? '') : ''
+    });
   };
 
   const handleLinkSubmit = async (e) => {
@@ -211,8 +231,9 @@ export default function AgentsModule({ theme = 'dark' }) {
     const booking = bookingsList.find(b => b.id === linkForm.bookingId);
     if (!partner) { alert('Pilih mitra/agen dulu.'); return; }
     if (!booking) { alert('Pilih booking yang mau dihubungkan.'); return; }
-    const commissionPercent = Number(linkForm.commissionPercent) || 0;
-    const commissionAmount = (Number(booking.totalAmount) || 0) * commissionPercent / 100;
+    const commissionType = linkForm.commissionType === 'fixed' ? 'fixed' : 'percent';
+    const commissionValue = Number(linkForm.commissionValue) || 0;
+    const commissionAmount = computeCommissionAmount(commissionType, commissionValue, booking.totalAmount);
     try {
       await addDoc(collection(db, 'partner_bookings'), {
         partnerId: partner.id,
@@ -223,7 +244,8 @@ export default function AgentsModule({ theme = 'dark' }) {
         jamaahName: booking.jamaahName,
         packageName: booking.packageName,
         totalAmount: Number(booking.totalAmount) || 0,
-        commissionPercent,
+        commissionType,
+        commissionValue,
         commissionAmount,
         createdAt: new Date().toISOString()
       });
@@ -401,7 +423,7 @@ export default function AgentsModule({ theme = 'dark' }) {
                             <td className={`p-4 ${styles.textSub}`}>
                               {p.contactPerson || '-'}{p.phone ? ` • ${p.phone}` : ''}
                             </td>
-                            <td className={`p-4 text-right ${styles.textTitle}`}>{Number(p.commissionPercent || 0)}%</td>
+                            <td className={`p-4 text-right ${styles.textTitle}`}>{formatCommission(p.commissionType, p.commissionValue)}</td>
                             <td className={`p-4 text-right font-bold ${outstanding > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
                               Rp {outstanding.toLocaleString('id-ID')}
                             </td>
@@ -489,7 +511,9 @@ export default function AgentsModule({ theme = 'dark' }) {
                           <td className={`p-4 text-right ${styles.textTitle}`}>Rp {Number(pb.totalAmount || 0).toLocaleString('id-ID')}</td>
                           <td className="p-4 text-right font-bold text-emerald-500">
                             Rp {Number(pb.commissionAmount || 0).toLocaleString('id-ID')}
-                            <span className={`block text-[10px] font-normal ${styles.textSub}`}>{pb.commissionPercent}%</span>
+                            <span className={`block text-[10px] font-normal ${styles.textSub}`}>
+                              {pb.commissionType === 'fixed' ? 'Flat' : formatCommission('percent', pb.commissionValue)}
+                            </span>
                           </td>
                           <td className="p-4 text-center">
                             <button
@@ -598,15 +622,41 @@ export default function AgentsModule({ theme = 'dark' }) {
                     <option value="Agen">Agen</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block mb-1 font-medium">Komisi Default (%)</label>
-                  <input
-                    type="number" min="0" max="100" step="0.1"
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    value={partnerForm.commissionPercent}
-                    onChange={e => setPartnerForm({ ...partnerForm, commissionPercent: e.target.value })}
-                  />
+              </div>
+              <div>
+                <label className="block mb-1 font-medium">Komisi Default</label>
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => setPartnerForm({ ...partnerForm, commissionType: 'percent' })}
+                    className={`py-2 rounded-lg border font-medium transition-colors ${
+                      partnerForm.commissionType === 'percent' ? 'bg-emerald-600 border-emerald-600 text-white' : `${styles.inputBg}`
+                    }`}
+                  >
+                    Persentase (%)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPartnerForm({ ...partnerForm, commissionType: 'fixed' })}
+                    className={`py-2 rounded-lg border font-medium transition-colors ${
+                      partnerForm.commissionType === 'fixed' ? 'bg-emerald-600 border-emerald-600 text-white' : `${styles.inputBg}`
+                    }`}
+                  >
+                    Nominal (Rp)
+                  </button>
                 </div>
+                <input
+                  type="number" min="0" max={partnerForm.commissionType === 'percent' ? 100 : undefined} step={partnerForm.commissionType === 'percent' ? 0.1 : 1000}
+                  placeholder={partnerForm.commissionType === 'percent' ? 'Misal: 5 (artinya 5%)' : 'Misal: 500000 (flat per booking)'}
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={partnerForm.commissionValue}
+                  onChange={e => setPartnerForm({ ...partnerForm, commissionValue: e.target.value })}
+                />
+                <p className="text-[10.5px] mt-1">
+                  {partnerForm.commissionType === 'percent'
+                    ? 'Komisi dihitung dari % x total tagihan tiap booking yang terhubung ke mitra ini.'
+                    : 'Komisi flat Rp segini per booking, berapapun total tagihannya.'}
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -677,7 +727,7 @@ export default function AgentsModule({ theme = 'dark' }) {
                 >
                   <option value="">-- Pilih Mitra/Agen --</option>
                   {partnersList.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.type}) - {p.commissionPercent || 0}%</option>
+                    <option key={p.id} value={p.id}>{p.name} ({p.type}) - {formatCommission(p.commissionType, p.commissionValue)}</option>
                   ))}
                 </select>
               </div>
@@ -701,18 +751,42 @@ export default function AgentsModule({ theme = 'dark' }) {
                 )}
               </div>
               <div>
-                <label className="block mb-1 font-medium">Komisi (%) — bisa disesuaikan dari default mitra</label>
+                <label className="block mb-1 font-medium">Jenis Komisi — bisa disesuaikan dari default mitra</label>
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => setLinkForm({ ...linkForm, commissionType: 'percent' })}
+                    className={`py-2 rounded-lg border font-medium transition-colors ${
+                      linkForm.commissionType === 'percent' ? 'bg-emerald-600 border-emerald-600 text-white' : `${styles.inputBg}`
+                    }`}
+                  >
+                    Persentase (%)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLinkForm({ ...linkForm, commissionType: 'fixed' })}
+                    className={`py-2 rounded-lg border font-medium transition-colors ${
+                      linkForm.commissionType === 'fixed' ? 'bg-emerald-600 border-emerald-600 text-white' : `${styles.inputBg}`
+                    }`}
+                  >
+                    Nominal (Rp)
+                  </button>
+                </div>
                 <input
-                  type="number" min="0" max="100" step="0.1" required
+                  type="number" min="0" max={linkForm.commissionType === 'percent' ? 100 : undefined} step={linkForm.commissionType === 'percent' ? 0.1 : 1000} required
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={linkForm.commissionPercent}
-                  onChange={e => setLinkForm({ ...linkForm, commissionPercent: e.target.value })}
+                  value={linkForm.commissionValue}
+                  onChange={e => setLinkForm({ ...linkForm, commissionValue: e.target.value })}
                 />
               </div>
               {linkForm.bookingId && (
                 <div className={`${styles.innerBg} p-3 rounded-lg border`}>
                   Preview Komisi: <strong className={styles.textTitle}>
-                    Rp {(((bookingsList.find(b => b.id === linkForm.bookingId)?.totalAmount) || 0) * (Number(linkForm.commissionPercent) || 0) / 100).toLocaleString('id-ID')}
+                    Rp {computeCommissionAmount(
+                      linkForm.commissionType,
+                      linkForm.commissionValue,
+                      bookingsList.find(b => b.id === linkForm.bookingId)?.totalAmount
+                    ).toLocaleString('id-ID')}
                   </strong>
                 </div>
               )}
