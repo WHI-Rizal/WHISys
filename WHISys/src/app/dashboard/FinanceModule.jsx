@@ -81,6 +81,16 @@ const todayISODate = () => new Date().toISOString().slice(0, 10);
 // SEKARANG, biar createdAt tetap kronologis kalau dibandingkan sama transaksi
 // lain yang dicatat hari yang sama — sama persis dgn resolvePaymentCreatedAt
 // yang dipakai di BookingsModule.jsx.
+// Tanggal setoran nggak boleh diisi SEBELUM tanggal pemesanan/booking-nya
+// sendiri dibuat — nggak masuk akal ada uang masuk sebelum bookingnya ada.
+// Ambil bagian yyyy-mm-dd doang dari createdAt biar perbandingannya adil
+// (createdAt aslinya nyimpen jam-menit-detik juga).
+const getBookingMinDate = (createdAt) => (createdAt ? String(createdAt).slice(0, 10) : '');
+const isPaymentDateBeforeBooking = (paymentDateStr, bookingCreatedAt) => {
+  const minDate = getBookingMinDate(bookingCreatedAt);
+  return !!(paymentDateStr && minDate && paymentDateStr < minDate);
+};
+
 const resolvePaymentCreatedAt = (dateStr) => {
   if (!dateStr) return new Date().toISOString();
   const now = new Date();
@@ -908,6 +918,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       const paxCount = groupItems.length;
       const incomeOrdererId = groupItems[0]?.ordererId;
       const incomeOrdererName = groupItems[0]?.ordererName;
+
+      if (isPaymentDateBeforeBooking(incomeForm.date, groupItems[0]?.createdAt)) {
+        const minDate = getBookingMinDate(groupItems[0]?.createdAt);
+        alert(`Tanggal setoran nggak boleh sebelum tanggal pemesanan kode ${incomeForm.groupCode} dibuat (${minDate.split('-').reverse().join('/')}).`);
+        return;
+      }
 
       if (incomeForm.paymentMethod === 'Saldo Deposit') {
         const ordererData = jamaahList.find(j => j.id === incomeOrdererId);
@@ -2625,7 +2641,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                     className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                     value={incomeForm.date}
                     onChange={(val) => setIncomeForm({ ...incomeForm, date: val })}
+                    min={getBookingMinDate(groupedBookingOptions.find(g => g.code === incomeForm.groupCode)?.primary?.createdAt)}
                   />
+                  {incomeForm.groupCode && (
+                    <p className={`text-[10px] mt-1 ${styles.textSub}`}>
+                      Nggak bisa sebelum tanggal pemesanan dibuat ({getBookingMinDate(groupedBookingOptions.find(g => g.code === incomeForm.groupCode)?.primary?.createdAt).split('-').reverse().join('/')}).
+                    </p>
+                  )}
                 </div>
               </div>
 
