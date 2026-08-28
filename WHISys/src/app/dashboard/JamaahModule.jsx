@@ -185,16 +185,35 @@ export default function JamaahModule({ theme = 'dark' }) {
     setShowModal(true);
   };
 
-  const handleDelete = async (id, name) => {
+  const handleDelete = async (item) => {
+    const id = item.id;
+    const name = item.fullName;
     try {
-      // Cek dobel: berdasarkan jamaahId (cara normal) DAN berdasarkan nama
-      // (jaga-jaga buat data booking lama yang jamaahId-nya sempat nggak
-      // sinkron — sama kayak logika fallback yang sudah dipakai di modul
-      // Booking buat mencocokkan data jamaah).
-      const qById = query(collection(db, 'bookings'), where('jamaahId', '==', id));
-      const byIdSnap = await getDocs(qById);
+      // Jaga-jaga 1: saldo deposit yang belum nol nggak boleh ikut kehapus
+      // gitu aja — itu duit customer yang masih "dititipin" di sistem
+      // (dicatat via +Tambah Deposit di modul Keuangan). Kalau langsung
+      // dihapus, saldonya ilang dari data padahal kewajiban ke customer-nya
+      // masih ada.
+      if (Number(item.depositBalance || 0) !== 0) {
+        const bal = Number(item.depositBalance || 0);
+        alert(`Data jamaah "${name || ''}" masih punya saldo deposit ${bal > 0 ? 'sebesar' : 'minus'} Rp ${Math.abs(bal).toLocaleString('id-ID')}.\n\nBeresin dulu saldo depositnya (tarik/pindahkan) lewat menu Keuangan sebelum data jamaah ini dihapus.`);
+        return;
+      }
 
-      let byNameSnap = { empty: true, size: 0 };
+      // Cek dobel: berdasarkan jamaahId (cara normal, dia jadi PESERTA
+      // booking) DAN berdasarkan nama (jaga-jaga buat data booking lama yang
+      // jamaahId-nya sempat nggak sinkron — sama kayak logika fallback yang
+      // sudah dipakai di modul Booking buat mencocokkan data jamaah). Dicek
+      // juga sebagai ordererId — orang ini bisa aja berperan sebagai
+      // "Pemesan" suatu booking/grup tanpa pernah jadi peserta (jamaahId)-nya
+      // sendiri, dan booking manapun nyimpen ordererId/ordererName buat
+      // atribusi setoran & refund — kalau nggak dicek, booking2 itu bakal
+      // nyisa nunjuk ke jamaah yang udah nggak ada.
+      const qById = query(collection(db, 'bookings'), where('jamaahId', '==', id));
+      const qByOrdererId = query(collection(db, 'bookings'), where('ordererId', '==', id));
+      const [byIdSnap, byOrdererIdSnap] = await Promise.all([getDocs(qById), getDocs(qByOrdererId)]);
+
+      let byNameSnap = { empty: true, size: 0, docs: [] };
       if (name) {
         const qByName = query(collection(db, 'bookings'), where('jamaahName', '==', name));
         byNameSnap = await getDocs(qByName);
@@ -202,11 +221,12 @@ export default function JamaahModule({ theme = 'dark' }) {
 
       const relatedIds = new Set([
         ...byIdSnap.docs.map(d => d.id),
+        ...byOrdererIdSnap.docs.map(d => d.id),
         ...byNameSnap.docs.map(d => d.id)
       ]);
 
       if (relatedIds.size > 0) {
-        alert(`Data jamaah "${name || ''}" tidak dapat dihapus karena masih memiliki ${relatedIds.size} data booking di sistem.\n\nSilakan hapus/selesaikan dulu booking-nya di menu Booking & Manifest sebelum menghapus data jamaah ini.`);
+        alert(`Data jamaah "${name || ''}" tidak dapat dihapus karena masih memiliki ${relatedIds.size} data booking di sistem (sebagai peserta dan/atau Pemesan).\n\nSilakan hapus/selesaikan dulu booking-nya di menu Booking & Manifest sebelum menghapus data jamaah ini.`);
         return;
       }
 
@@ -355,7 +375,7 @@ export default function JamaahModule({ theme = 'dark' }) {
                             <Edit className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => handleDelete(item.id, item.fullName)}
+                            onClick={() => handleDelete(item)}
                             className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
                             title="Hapus Jamaah"
                           >
