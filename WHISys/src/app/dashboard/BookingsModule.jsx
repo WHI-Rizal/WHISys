@@ -5,6 +5,17 @@ import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where, increment } from 'firebase/firestore';
 import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus } from 'lucide-react';
 
+// Firestore where(..., 'in', [...]) cuma dukung maks 30 nilai sekaligus —
+// buat query yang array-nya bisa aja lebih dari itu (grup rombongan gede),
+// dipecah dulu jadi beberapa potongan @<=30, query per potongan, terus hasil
+// docs-nya digabung balik jadi 1 array. Grup travel normal jarang >30 pax,
+// tapi dipasang biar nggak diam-diam skip/nge-throw kalau suatu saat kejadian.
+const chunkArray = (arr, size = 30) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+};
+
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
   const date = new Date(dateString);
@@ -1169,6 +1180,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   // transaksi (dicari lewat sourceDocId) — dipake pas transaksi asalnya
   // diedit nominalnya, biar riwayat mutasi tetap 1 baris per transaksi
   // (bukan nambah baris "koreksi edit"). Saldo akun disesuaikan pakai delta.
+  // CATATAN: collection account_mutations di Firestore Rules sengaja cuma
+  // dikasih izin create & delete (nggak ada "update"), biar riwayat mutasi
+  // nggak bisa diam-diam diubah lewat cara laen di luar app ini — jadi
+  // nominal baris di sini DIGANTI lewat hapus-baris-lama+tulis-baris-baru,
+  // BUKAN updateDoc langsung (yang bakal ditolak Rules & gagal diem-diem).
   const updateAccountMutationAmount = async (accountId, sourceDocId, newAmount, delta) => {
     if (!accountId) return;
     if (delta) {
@@ -1178,7 +1194,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     try {
       const q = query(collection(db, 'account_mutations'), where('accountId', '==', accountId), where('sourceDocId', '==', sourceDocId));
       const snap = await getDocs(q);
-      await Promise.all(snap.docs.map(d => updateDoc(d.ref, { amount: Math.abs(newAmount) })));
+      await Promise.all(snap.docs.map(async (d) => {
+        const old = d.data();
+        await deleteDoc(d.ref);
+        await addDoc(collection(db, 'account_mutations'), { ...old, amount: Math.abs(newAmount) });
+      }));
     } catch (err) {
       console.error('Gagal memperbarui riwayat mutasi terkait:', err);
     }
@@ -1195,6 +1215,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   // updateAccountMutationAmount yang nyari lewat id dokumen sendiri —  nggak
   // bakal pernah ketemu buat kasus ini karena sourceDocId-nya groupTransactionId,
   // bukan id dokumen pax ini). Baris dihapus kalau abis sisa <= 0.
+  // Sama kayak updateAccountMutationAmount — account_mutations nggak boleh
+  // di-updateDoc langsung (Rules-nya cuma izinin create/delete), jadi nominal
+  // baru ditulis lewat hapus-baris-lama+tulis-baris-baru (dgn field2 lain
+  // yang sama biar tetep 1 baris per transaksi), bukan updateDoc.
   const adjustGroupMutationShare = async (accountId, groupTransactionId, deltaAmount) => {
     if (!accountId || !groupTransactionId || !deltaAmount) return;
     try {
@@ -1202,11 +1226,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       const q = query(collection(db, 'account_mutations'), where('accountId', '==', accountId), where('sourceDocId', '==', groupTransactionId));
       const snap = await getDocs(q);
       await Promise.all(snap.docs.map(async (d) => {
-        const newAmount = (Number(d.data().amount) || 0) + deltaAmount;
-        if (newAmount <= 0) {
-          await deleteDoc(d.ref);
-        } else {
-          await updateDoc(d.ref, { amount: newAmount });
+        const old = d.data();
+        const newAmount = (Number(old.amount) || 0) + deltaAmount;
+        await deleteDoc(d.ref);
+        if (newAmount > 0) {
+          await addDoc(collection(db, 'account_mutations'), { ...old, amount: newAmount });
         }
       }));
     } catch (err) {
@@ -1226,9 +1250,12 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     const ids = (bookingIds || []).filter(Boolean);
     if (ids.length === 0) return;
     try {
-      const equipQ = query(collection(db, 'equipment_distribution'), where('bookingId', 'in', ids), where('given', '==', true));
-      const equipSnap = await getDocs(equipQ);
-      await Promise.all(equipSnap.docs.map(async (d) => {
+      const chunks = chunkArray(ids);
+      const snaps = await Promise.all(chunks.map(chunk =>
+        getDocs(query(collection(db, 'equipment_distribution'), where('bookingId', 'in', chunk), where('given', '==', true)))
+      ));
+      const allDocs = snaps.flatMap(s => s.docs);
+      await Promise.all(allDocs.map(async (d) => {
         const data = d.data();
         await updateDoc(doc(db, 'equipment_items', data.itemId), { stock: increment(Number(data.qty) || 1) });
         await updateDoc(d.ref, { given: false, givenAt: null });
@@ -2257,13 +2284,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       const ids = allItems.map(b => b.id);
       if (ids.length === 0) return;
 
-      // 1 query pakai where(..., 'in', ids) drpd loop query per booking satu-satu
-      // — Firestore 'in' support s.d. 30 value, jauh lebih dari cukup buat 1 grup travel.
-      const q = query(collection(db, 'payments_income'), where('bookingId', 'in', ids));
-      const paySnap = await getDocs(q);
+      // Query pakai where(..., 'in', ids) drpd loop query per booking satu-satu
+      // — Firestore 'in' cuma dukung s.d. 30 value sekaligus, jadi dipecah dulu
+      // (chunkArray) buat jaga-jaga grup rombongan yang pax-nya >30.
+      const paySnaps = await Promise.all(chunkArray(ids).map(chunk =>
+        getDocs(query(collection(db, 'payments_income'), where('bookingId', 'in', chunk)))
+      ));
+      const payDocs = paySnaps.flatMap(s => s.docs);
 
-      if (!paySnap.empty) {
-        const bookingIdsWithPayments = new Set(paySnap.docs.map(d => d.data().bookingId));
+      if (payDocs.length > 0) {
+        const bookingIdsWithPayments = new Set(payDocs.map(d => d.data().bookingId));
         alert(`Grup ${group.code} tidak dapat dihapus karena ${bookingIdsWithPayments.size} dari ${allItems.length} booking di grup ini masih memiliki riwayat transaksi pembayaran di Arus Kas.\n\nSilakan hapus semua riwayat pembayaran jamaah-jamaah tsb terlebih dahulu di menu Arus Kas/Riwayat Setoran.`);
         return;
       }
@@ -2304,17 +2334,17 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // SELURUH booking di grup ini, balikin dulu stok barang yang statusnya
       // udah "given" sebelum record distribusinya ikut kehapus.
       try {
-        const equipQ = query(collection(db, 'equipment_distribution'), where('bookingId', 'in', ids));
-        const equipSnap = await getDocs(equipQ);
-        if (!equipSnap.empty) {
-          await Promise.all(equipSnap.docs.map(async (d) => {
-            const data = d.data();
-            if (data.given === true) {
-              await updateDoc(doc(db, 'equipment_items', data.itemId), { stock: increment(Number(data.qty) || 1) });
-            }
-            await deleteDoc(d.ref);
-          }));
-        }
+        const equipSnaps = await Promise.all(chunkArray(ids).map(chunk =>
+          getDocs(query(collection(db, 'equipment_distribution'), where('bookingId', 'in', chunk)))
+        ));
+        const equipDocs = equipSnaps.flatMap(s => s.docs);
+        await Promise.all(equipDocs.map(async (d) => {
+          const data = d.data();
+          if (data.given === true) {
+            await updateDoc(doc(db, 'equipment_items', data.itemId), { stock: increment(Number(data.qty) || 1) });
+          }
+          await deleteDoc(d.ref);
+        }));
       } catch (equipErr) {
         console.error('Gagal mengembalikan stok perlengkapan:', equipErr);
       }
