@@ -671,8 +671,18 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       const oldPay = paymentHistory.find(p => p.id === payId);
       await deleteDoc(doc(db, 'payments_income', payId));
       // Balikin lagi saldo akun Kas/Bank asalnya (kalau bukan dibayar pakai
-      // Saldo Deposit — itu nggak nyentuh akun sama sekali).
-      if (oldPay?.accountId) await removeAccountMutationBySource(oldPay.accountId, payId, -(Number(oldPay.amount) || 0));
+      // Saldo Deposit — itu nggak nyentuh akun sama sekali). Kalau doc ini
+      // porsi dari setoran grup yang digabung jadi 1 baris mutasi
+      // (groupTransactionId), baris gabungannya cuma dikurangi porsinya —
+      // bukan dicari lewat id doc sendiri (nggak bakal ketemu, lihat
+      // catatan di adjustGroupMutationShare).
+      if (oldPay?.accountId) {
+        if (oldPay.groupTransactionId) {
+          await adjustGroupMutationShare(oldPay.accountId, oldPay.groupTransactionId, -(Number(oldPay.amount) || 0));
+        } else {
+          await removeAccountMutationBySource(oldPay.accountId, payId, -(Number(oldPay.amount) || 0));
+        }
+      }
       await syncBookingTotalPaid(selectedBookingForHistory.id, selectedBookingForHistory.totalAmount);
       await fetchPaymentHistory(selectedBookingForHistory.id);
       fetchData();
@@ -709,10 +719,17 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       });
 
       // Selisih nominal lama vs baru disesuaikan ke akun yang sama (edit ini
-      // nggak dukung pindah akun sekaligus ganti nominal, biar simpel).
+      // nggak dukung pindah akun sekaligus ganti nominal, biar simpel). Kalau
+      // doc ini porsi dari setoran grup yang digabung (groupTransactionId),
+      // selisihnya diterapkan ke baris mutasi gabungan (bukan dicari lewat id
+      // doc sendiri yang nggak bakal ketemu — lihat adjustGroupMutationShare).
       if (oldPay?.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
         const delta = Number(paymentEditForm.amount) - (Number(oldPay.amount) || 0);
-        await updateAccountMutationAmount(oldPay.accountId, payId, Number(paymentEditForm.amount), delta);
+        if (oldPay.groupTransactionId) {
+          await adjustGroupMutationShare(oldPay.accountId, oldPay.groupTransactionId, delta);
+        } else {
+          await updateAccountMutationAmount(oldPay.accountId, payId, Number(paymentEditForm.amount), delta);
+        }
       }
 
       setEditingPaymentId(null);
@@ -962,11 +979,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       }
 
       // Sama kayak hapus grup — cek juga link komisi Mitra/Agen yang nempel
-      // ke kode booking ini (booking single-pax dianggap "pemesanan" sendiri
-      // di modul Mitra & Agen, groupBookingCode-nya = bookingCode). Kalau
-      // mitranya udah punya riwayat pembayaran komisi, hapus booking-nya
-      // diblok dulu (lihat catatan lengkap di handleGroupDeleteBooking).
-      const partnerLinkQ = query(collection(db, 'partner_bookings'), where('groupBookingCode', '==', item.bookingCode));
+      // ke pemesanan ini. Kode "pemesanan" yang dipakai modul Mitra & Agen
+      // adalah groupBookingCode kalau ada (booking ini bagian dari rombongan),
+      // fallback ke bookingCode sendiri kalau ini booking single-pax berdiri
+      // sendiri (harus SAMA persis dengan cara AgentsModule.jsx ngelompokkin
+      // `b.groupBookingCode || b.bookingCode` — sebelumnya di sini cuma pakai
+      // bookingCode doang, jadi kalau yang dihapus adalah salah satu pax dari
+      // rombongan, pengecekan ini nggak pernah ketemu linknya sama sekali).
+      const matchCode = item.groupBookingCode || item.bookingCode;
+      const partnerLinkQ = query(collection(db, 'partner_bookings'), where('groupBookingCode', '==', matchCode));
       const partnerLinkSnap = await getDocs(partnerLinkQ);
 
       if (!partnerLinkSnap.empty) {
@@ -975,19 +996,29 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         const payQ = query(collection(db, 'partner_commission_payments'), where('partnerId', '==', partnerId));
         const paySnapPartner = await getDocs(payQ);
         if (!paySnapPartner.empty) {
-          alert(`Booking ${item.bookingCode} tidak dapat dihapus karena sudah terhubung ke Mitra/Agen "${partnerName}" yang sudah punya riwayat pembayaran komisi.\n\nHapus dulu riwayat pembayaran komisi "${partnerName}" di menu Mitra & Agen > Pembayaran Komisi, baru booking ini bisa dihapus (link komisinya akan otomatis ikut terhapus).`);
+          alert(`Booking ${item.bookingCode} tidak dapat dihapus karena pemesanan ini sudah terhubung ke Mitra/Agen "${partnerName}" yang sudah punya riwayat pembayaran komisi.\n\nHapus dulu riwayat pembayaran komisi "${partnerName}" di menu Mitra & Agen > Pembayaran Komisi, baru booking ini bisa dihapus (link komisinya akan otomatis ikut terhapus).`);
           return;
         }
       }
 
+      // Booking lain yang MASIH ada & masih share kode pemesanan yang sama
+      // (berarti item ini cuma salah satu pax dari rombongan, bukan satu-
+      // satunya) — kalau masih ada sisa, link komisi mitra JANGAN ikut
+      // dihapus (pax lain di rombongan itu masih valid & masih butuh link-nya),
+      // cukup diinget-inget aja ke staff biar paxCount/nominal komisinya
+      // dicek manual di modul Mitra & Agen.
+      const siblingStillExists = !partnerLinkSnap.empty && bookings.some(b => b.id !== item.id && (b.groupBookingCode || b.bookingCode) === matchCode);
+
       const partnerWarning = !partnerLinkSnap.empty
-        ? `\n\nBooking ini juga masih terhubung ke Mitra/Agen "${partnerLinkSnap.docs[0].data().partnerName || '-'}" — link komisinya akan ikut terhapus.`
+        ? (siblingStillExists
+            ? `\n\nPemesanan ini masih terhubung ke Mitra/Agen "${partnerLinkSnap.docs[0].data().partnerName || '-'}" — karena masih ada pax lain di rombongan yang sama, link komisinya TIDAK ikut dihapus, tapi jumlah pax/nominalnya perlu dicek ulang manual di menu Mitra & Agen.`
+            : `\n\nBooking ini juga masih terhubung ke Mitra/Agen "${partnerLinkSnap.docs[0].data().partnerName || '-'}" — link komisinya akan ikut terhapus.`)
         : '';
       if (!confirm(`Apakah Anda yakin ingin menghapus booking ${item.bookingCode}?${partnerWarning}`)) return;
 
       await deleteDoc(doc(db, 'bookings', item.id));
 
-      if (!partnerLinkSnap.empty) {
+      if (!partnerLinkSnap.empty && !siblingStillExists) {
         await Promise.all(partnerLinkSnap.docs.map(d => deleteDoc(d.ref)));
       }
 
@@ -1153,6 +1184,60 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     }
   };
 
+  // Sesuaikan (bukan hapus/timpa) baris account_mutations GABUNGAN yang
+  // dibentuk dari beberapa dokumen payments_income sekaligus (satu setoran
+  // grup yang dipecah per-pax, sourceDocId = groupTransactionId). Dipakai
+  // kalau yang dihapus/diedit cuma SATU porsi pax dari transaksi itu lewat
+  // modal Riwayat Pembayaran booking-nya sendiri (bukan modal Riwayat Grup) —
+  // porsi pax lain dalam transaksi yang sama masih valid & masih harus
+  // kehitung, jadi baris mutasinya cuma dikurangi/ditambah selisihnya, bukan
+  // dihapus/diganti total (beda dari removeAccountMutationBySource /
+  // updateAccountMutationAmount yang nyari lewat id dokumen sendiri —  nggak
+  // bakal pernah ketemu buat kasus ini karena sourceDocId-nya groupTransactionId,
+  // bukan id dokumen pax ini). Baris dihapus kalau abis sisa <= 0.
+  const adjustGroupMutationShare = async (accountId, groupTransactionId, deltaAmount) => {
+    if (!accountId || !groupTransactionId || !deltaAmount) return;
+    try {
+      await updateDoc(doc(db, 'financial_accounts', accountId), { balance: increment(deltaAmount) });
+      const q = query(collection(db, 'account_mutations'), where('accountId', '==', accountId), where('sourceDocId', '==', groupTransactionId));
+      const snap = await getDocs(q);
+      await Promise.all(snap.docs.map(async (d) => {
+        const newAmount = (Number(d.data().amount) || 0) + deltaAmount;
+        if (newAmount <= 0) {
+          await deleteDoc(d.ref);
+        } else {
+          await updateDoc(d.ref, { amount: newAmount });
+        }
+      }));
+    } catch (err) {
+      console.error('Gagal menyesuaikan porsi riwayat mutasi gabungan:', err);
+    }
+  };
+
+  // Balikin stok perlengkapan (equipment_distribution) yang statusnya udah
+  // "given" buat booking-booking ini — dipakai pas booking BATAL/RESCHEDULE
+  // (bukan dihapus). Booking-nya sendiri masih ada, cuma nggak aktif lagi,
+  // jadi record distribusinya TIDAK dihapus (beda dari hapus booking) —
+  // cukup ditandai given:false persis kayak staff uncheck manual di modul
+  // Perlengkapan, biar stok gudang balik akurat dan, kalau booking ini
+  // nantinya beneran dihapus, proses hapus nggak nyoba balikin stok yang
+  // sama dua kali (di situ query-nya udah nggak match given:true lagi).
+  const restoreEquipmentStockForBookings = async (bookingIds) => {
+    const ids = (bookingIds || []).filter(Boolean);
+    if (ids.length === 0) return;
+    try {
+      const equipQ = query(collection(db, 'equipment_distribution'), where('bookingId', 'in', ids), where('given', '==', true));
+      const equipSnap = await getDocs(equipQ);
+      await Promise.all(equipSnap.docs.map(async (d) => {
+        const data = d.data();
+        await updateDoc(doc(db, 'equipment_items', data.itemId), { stock: increment(Number(data.qty) || 1) });
+        await updateDoc(d.ref, { given: false, givenAt: null });
+      }));
+    } catch (err) {
+      console.error('Gagal mengembalikan stok perlengkapan:', err);
+    }
+  };
+
   const handleCancelSubmit = async (e) => {
     e.preventDefault();
     if (!selectedBookingForAction) return;
@@ -1186,6 +1271,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       // Kuota seat yang dibatalkan dikembalikan ke paket
       await releaseQuotaToPackage(selectedBookingForAction.packageId);
+
+      // Balikin juga stok perlengkapan yang udah kepotong buat booking ini.
+      await restoreEquipmentStockForBookings([selectedBookingForAction.id]);
 
       setShowActionModal(false);
       fetchData();
@@ -1278,6 +1366,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       await updateDoc(doc(db, 'packages', newPkg.id), {
         quotaRemaining: increment(-1)
       });
+
+      // 5. Balikin stok perlengkapan yang udah kepotong buat booking lama —
+      // keberangkatannya beda sekarang, jadi distribusi barang yang lama
+      // nggak relevan lagi & stoknya harus balik ke gudang.
+      await restoreEquipmentStockForBookings([oldBooking.id]);
 
       setShowActionModal(false);
       fetchData();
@@ -2019,6 +2112,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       }
       await updateDoc(doc(db, 'packages', newPkg.id), { quotaRemaining: increment(-sortedActive.length) });
 
+      // Balikin stok perlengkapan yang udah kepotong buat SELURUH booking
+      // lama di grup ini — keberangkatannya beda sekarang.
+      await restoreEquipmentStockForBookings(sortedActive.map(b => b.id));
+
       setShowGroupRescheduleModal(false);
       // Grup lama udah nggak aktif lagi (semua pax-nya pindah ke grup baru) —
       // balik ke tampilan ringkasan, bukan nyoba nampilin grup lama yang kosong.
@@ -2102,6 +2199,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       if (oldPackageId) {
         await updateDoc(doc(db, 'packages', oldPackageId), { quotaRemaining: increment(sortedActive.length) });
       }
+
+      // Balikin stok perlengkapan yang udah kepotong buat SELURUH pax aktif
+      // yang dibatalkan di grup ini.
+      await restoreEquipmentStockForBookings(sortedActive.map(item => item.id));
 
       setShowGroupCancelModal(false);
       fetchData();
