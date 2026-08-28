@@ -961,9 +961,35 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         return;
       }
 
-      if (!confirm(`Apakah Anda yakin ingin menghapus booking ${item.bookingCode}?`)) return;
+      // Sama kayak hapus grup — cek juga link komisi Mitra/Agen yang nempel
+      // ke kode booking ini (booking single-pax dianggap "pemesanan" sendiri
+      // di modul Mitra & Agen, groupBookingCode-nya = bookingCode). Kalau
+      // mitranya udah punya riwayat pembayaran komisi, hapus booking-nya
+      // diblok dulu (lihat catatan lengkap di handleGroupDeleteBooking).
+      const partnerLinkQ = query(collection(db, 'partner_bookings'), where('groupBookingCode', '==', item.bookingCode));
+      const partnerLinkSnap = await getDocs(partnerLinkQ);
+
+      if (!partnerLinkSnap.empty) {
+        const partnerId = partnerLinkSnap.docs[0].data().partnerId;
+        const partnerName = partnerLinkSnap.docs[0].data().partnerName || '-';
+        const payQ = query(collection(db, 'partner_commission_payments'), where('partnerId', '==', partnerId));
+        const paySnapPartner = await getDocs(payQ);
+        if (!paySnapPartner.empty) {
+          alert(`Booking ${item.bookingCode} tidak dapat dihapus karena sudah terhubung ke Mitra/Agen "${partnerName}" yang sudah punya riwayat pembayaran komisi.\n\nHapus dulu riwayat pembayaran komisi "${partnerName}" di menu Mitra & Agen > Pembayaran Komisi, baru booking ini bisa dihapus (link komisinya akan otomatis ikut terhapus).`);
+          return;
+        }
+      }
+
+      const partnerWarning = !partnerLinkSnap.empty
+        ? `\n\nBooking ini juga masih terhubung ke Mitra/Agen "${partnerLinkSnap.docs[0].data().partnerName || '-'}" — link komisinya akan ikut terhapus.`
+        : '';
+      if (!confirm(`Apakah Anda yakin ingin menghapus booking ${item.bookingCode}?${partnerWarning}`)) return;
 
       await deleteDoc(doc(db, 'bookings', item.id));
+
+      if (!partnerLinkSnap.empty) {
+        await Promise.all(partnerLinkSnap.docs.map(d => deleteDoc(d.ref)));
+      }
 
       if (item.packageId) {
         // Pakai increment() (atomic di server) — bukan baca-lalu-tulis dari
@@ -2088,9 +2114,37 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         return;
       }
 
-      if (!confirm(`Apakah Anda yakin ingin menghapus SELURUH ${allItems.length} booking dalam grup ${group.code}?`)) return;
+      // Cek juga apakah pemesanan ini udah dihubungkan ke Mitra/Agen (modul
+      // Mitra & Agen). Kalau iya DAN mitranya udah punya riwayat pembayaran
+      // komisi, hapus booking-nya diBLOK dulu — soalnya pembayaran komisi
+      // dicatat per-mitra (bukan per-link), jadi nggak bisa dipastikan porsi
+      // mana yang udah kebayar buat link spesifik ini. Staff harus hapus dulu
+      // riwayat pembayaran komisi mitra itu di modul Mitra & Agen, baru
+      // booking-nya bisa dihapus (link komisinya otomatis ikut kehapus).
+      const partnerLinkQ = query(collection(db, 'partner_bookings'), where('groupBookingCode', '==', group.code));
+      const partnerLinkSnap = await getDocs(partnerLinkQ);
+
+      if (!partnerLinkSnap.empty) {
+        const partnerId = partnerLinkSnap.docs[0].data().partnerId;
+        const partnerName = partnerLinkSnap.docs[0].data().partnerName || '-';
+        const payQ = query(collection(db, 'partner_commission_payments'), where('partnerId', '==', partnerId));
+        const paySnapPartner = await getDocs(payQ);
+        if (!paySnapPartner.empty) {
+          alert(`Grup ${group.code} tidak dapat dihapus karena sudah terhubung ke Mitra/Agen "${partnerName}" yang sudah punya riwayat pembayaran komisi.\n\nHapus dulu riwayat pembayaran komisi "${partnerName}" di menu Mitra & Agen > Pembayaran Komisi, baru booking ini bisa dihapus (link komisinya akan otomatis ikut terhapus).`);
+          return;
+        }
+      }
+
+      const partnerWarning = !partnerLinkSnap.empty
+        ? `\n\nPemesanan ini juga masih terhubung ke Mitra/Agen "${partnerLinkSnap.docs[0].data().partnerName || '-'}" — link komisinya akan ikut terhapus.`
+        : '';
+      if (!confirm(`Apakah Anda yakin ingin menghapus SELURUH ${allItems.length} booking dalam grup ${group.code}?${partnerWarning}`)) return;
 
       await Promise.all(allItems.map(item => deleteDoc(doc(db, 'bookings', item.id))));
+
+      if (!partnerLinkSnap.empty) {
+        await Promise.all(partnerLinkSnap.docs.map(d => deleteDoc(d.ref)));
+      }
 
       // Kuota cuma dilepas buat booking yang statusnya masih 'active' — yang
       // udah cancelled/rescheduled sebelumnya udah dilepas kuotanya duluan,
