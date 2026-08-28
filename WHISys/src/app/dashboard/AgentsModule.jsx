@@ -458,17 +458,15 @@ export default function AgentsModule({ theme = 'dark' }) {
                       <th className="p-4">Jenis</th>
                       <th className="p-4">Kontak</th>
                       <th className="p-4 text-right">Komisi Default</th>
-                      <th className="p-4 text-right">Sisa Komisi Belum Dibayar</th>
                       <th className="p-4 text-center">Status</th>
                       <th className="p-4 text-center">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className={`divide-y ${styles.tableRowBorder}`}>
                     {partnersList.length === 0 ? (
-                      <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada data mitra/agen. Tambah dulu profilnya.</td></tr>
+                      <tr><td colSpan="6" className={`p-8 text-center ${styles.textSub}`}>Belum ada data mitra/agen. Tambah dulu profilnya.</td></tr>
                     ) : (
                       partnersList.map(p => {
-                        const { outstanding } = getPartnerSummary(p.id);
                         return (
                           <tr key={p.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
                             <td className={`p-4 font-semibold ${styles.textTitle}`}>{p.name}</td>
@@ -477,9 +475,6 @@ export default function AgentsModule({ theme = 'dark' }) {
                               {p.contactPerson || '-'}{p.phone ? ` • ${p.phone}` : ''}
                             </td>
                             <td className={`p-4 text-right ${styles.textTitle}`}>{formatCommission(p.commissionType, p.commissionValue)}</td>
-                            <td className={`p-4 text-right font-bold ${outstanding > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
-                              Rp {outstanding.toLocaleString('id-ID')}
-                            </td>
                             <td className="p-4 text-center">
                               {p.active !== false ? (
                                 <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">Aktif</span>
@@ -537,6 +532,32 @@ export default function AgentsModule({ theme = 'dark' }) {
                 <Link2 className="w-3.5 h-3.5" /> Hubungkan Pemesanan ke Mitra
               </button>
             </div>
+
+            {/* Ringkasan komisi mitra terpilih — pindah dari tabel Data Mitra
+                & Agen ke sini, biar nempel langsung sama rincian booking yang
+                jadi sumber hitungannya. */}
+            {filterPartnerId && (() => {
+              const partner = partnersList.find(p => p.id === filterPartnerId);
+              if (!partner) return null;
+              const { accrued, paid, outstanding } = getPartnerSummary(filterPartnerId);
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                  <div className={`${styles.innerBg} border rounded-xl p-3`}>
+                    <p className={`text-[11px] ${styles.textSub} mb-1`}>Total Komisi — {partner.name}</p>
+                    <p className={`text-sm font-bold ${styles.textTitle}`}>Rp {accrued.toLocaleString('id-ID')}</p>
+                  </div>
+                  <div className={`${styles.innerBg} border rounded-xl p-3`}>
+                    <p className={`text-[11px] ${styles.textSub} mb-1`}>Sudah Dibayar</p>
+                    <p className="text-sm font-bold text-emerald-500">Rp {paid.toLocaleString('id-ID')}</p>
+                  </div>
+                  <div className={`${styles.innerBg} border rounded-xl p-3`}>
+                    <p className={`text-[11px] ${styles.textSub} mb-1`}>Sisa Komisi Belum Dibayar</p>
+                    <p className={`text-sm font-bold ${outstanding > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>Rp {outstanding.toLocaleString('id-ID')}</p>
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className={`${styles.innerBg} border rounded-xl overflow-hidden`}>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
