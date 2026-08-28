@@ -20,7 +20,9 @@ export default function DateFieldID({
   className = '',
   nativeClassName = '',
   name,
-  placeholder = 'dd/mm/yyyy'
+  placeholder = 'dd/mm/yyyy',
+  min,
+  max
 }) {
   const displayValue = formatDDMMYYYY(value);
 
@@ -34,6 +36,8 @@ export default function DateFieldID({
         type="date"
         name={name}
         required={required}
+        min={min}
+        max={max}
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
         className={`absolute inset-0 w-full h-full opacity-0 cursor-pointer ${nativeClassName}`}
