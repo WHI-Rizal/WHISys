@@ -107,6 +107,26 @@ export default function AgentsModule({ theme = 'dark' }) {
     });
   };
 
+  // Hapus baris account_mutations yang berasal dari SATU dokumen pembayaran
+  // komisi (dicari lewat sourceDocId) — dipake pas pembayarannya dihapus,
+  // biar baris "Bayar Komisi Mitra" ikut hilang dari Riwayat Mutasi (bukan
+  // nambah baris "Koreksi Hapus" baru). Saldo akun tetap disesuaikan
+  // langsung lewat increment, pola sama persis dengan modul Keuangan & Booking.
+  const removeAccountMutationBySource = async (accountId, sourceDocId, delta) => {
+    if (!accountId) return;
+    if (delta) {
+      await updateDoc(doc(db, 'financial_accounts', accountId), { balance: increment(delta) });
+    }
+    if (!sourceDocId) return;
+    try {
+      const q = query(collection(db, 'account_mutations'), where('accountId', '==', accountId), where('sourceDocId', '==', sourceDocId));
+      const snap = await getDocs(q);
+      await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+    } catch (err) {
+      console.error('Gagal menghapus riwayat mutasi terkait:', err);
+    }
+  };
+
   // ============ 1. DATA MASTER MITRA & AGEN ============
 
   // Jenis mitra bawaan — tapi nggak dikunci cuma ini doang. User bisa nambah
@@ -405,12 +425,11 @@ export default function AgentsModule({ theme = 'dark' }) {
     setProcessingPaymentId(pay.id);
     try {
       if (pay.accountId) {
-        await adjustAccountBalance(pay.accountId, Number(pay.amount) || 0, {
-          description: `Koreksi Hapus Pembayaran Komisi - ${pay.partnerName}`,
-          reference: pay.partnerName,
-          source: 'partner_commission_payment_delete',
-          sourceDocId: pay.id
-        });
+        // Baris "Bayar Komisi Mitra" di Riwayat Mutasi ikut dihapus sekalian
+        // (bukan nambah baris "Koreksi Hapus" baru) — saldo akun dikembalikan
+        // lewat increment, riwayatnya jadi bersih seolah pembayaran ini
+        // memang belum pernah dicatat.
+        await removeAccountMutationBySource(pay.accountId, pay.id, Number(pay.amount) || 0);
       }
       // Ikut hapus catatan "Biaya Operasional Kantor" yang otomatis dibikin
       // pas pembayaran ini dicatat, biar nggak ada jejak biaya yang ketinggalan.
