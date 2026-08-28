@@ -34,6 +34,7 @@ import FinanceModule from './FinanceModule';
 import AiAnalyzerModule from './AiAnalyzerModule';
 import SettingsModule from './SettingsModule';
 import FeedbackModule from './FeedbackModule';
+import EquipmentModule from './EquipmentModule';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -659,6 +660,9 @@ export default function DashboardPage() {
         {/* MODUL FEEDBACK & ULASAN */}
         {activeMenu === 'feedback' && <FeedbackModule theme={theme} />}
 
+        {/* MODUL PERLENGKAPAN JAMAAH */}
+        {activeMenu === 'equipment' && <EquipmentModule theme={theme} />}
+
         {/* MODUL PENGATURAN SISTEM */}
         {activeMenu === 'settings' && <SettingsModule theme={theme} />}
 
@@ -670,6 +674,7 @@ export default function DashboardPage() {
          activeMenu !== 'finance' &&
          activeMenu !== 'ai-analyzer' &&
          activeMenu !== 'feedback' &&
+         activeMenu !== 'equipment' &&
          activeMenu !== 'settings' && (
           <div className={`${currentTheme.card} border rounded-xl p-12 text-center`}>
             <div className={`p-4 ${theme === 'dark' ? 'bg-white/5' : 'bg-slate-100'} ${currentTheme.subText} w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center`}>
