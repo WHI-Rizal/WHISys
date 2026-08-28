@@ -1238,6 +1238,27 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     }
   };
 
+  // Ngasih tau staff kalau pemesanan yang barusan dibatalin/di-reschedule/
+  // diedit itu masih terhubung ke Mitra/Agen — biar nggak "diem-diem" nyisa
+  // komisi yang keitung padahal datanya udah nggak akurat lagi (misal
+  // tripnya batal tapi komisinya tetep keitung penuh, atau pax/harganya
+  // baru aja berubah). Sengaja CUMA ngasih peringatan, bukan otomatis
+  // ngutak-atik nominal komisi atau hapus link-nya sendiri — itu keputusan
+  // finansial yang harus staff yang putuskan manual (misal pakai "Putuskan
+  // Hubungan" atau nge-link ulang) di menu Mitra & Agen > Komisi per Booking.
+  const warnIfPartnerLinked = async (groupCode, actionLabel) => {
+    if (!groupCode) return;
+    try {
+      const linkQ = query(collection(db, 'partner_bookings'), where('groupBookingCode', '==', groupCode));
+      const linkSnap = await getDocs(linkQ);
+      if (linkSnap.empty) return;
+      const link = linkSnap.docs[0].data();
+      alert(`Catatan: pemesanan ${groupCode} yang barusan ${actionLabel} masih terhubung ke Mitra/Agen "${link.partnerName}" dengan komisi tercatat Rp ${Number(link.commissionAmount || 0).toLocaleString('id-ID')}.\n\nSistem TIDAK otomatis menyesuaikan nominal ini — silakan cek & sesuaikan manual (atau putuskan hubungannya kalau memang sudah tidak relevan lagi) di menu Mitra & Agen > Komisi per Booking.`);
+    } catch (err) {
+      console.error('Gagal mengecek link mitra:', err);
+    }
+  };
+
   const handleCancelSubmit = async (e) => {
     e.preventDefault();
     if (!selectedBookingForAction) return;
@@ -1274,6 +1295,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       // Balikin juga stok perlengkapan yang udah kepotong buat booking ini.
       await restoreEquipmentStockForBookings([selectedBookingForAction.id]);
+
+      await warnIfPartnerLinked(selectedBookingForAction.groupBookingCode || selectedBookingForAction.bookingCode, 'dibatalkan');
 
       setShowActionModal(false);
       fetchData();
@@ -1371,6 +1394,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // keberangkatannya beda sekarang, jadi distribusi barang yang lama
       // nggak relevan lagi & stoknya harus balik ke gudang.
       await restoreEquipmentStockForBookings([oldBooking.id]);
+
+      await warnIfPartnerLinked(oldBooking.groupBookingCode || oldBooking.bookingCode, 'di-reschedule');
 
       setShowActionModal(false);
       fetchData();
@@ -1789,6 +1814,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       await updateDoc(doc(db, 'packages', pkg.id), { quotaRemaining: increment(-1) });
 
       alert(`Peserta baru "${newJamaahData.fullName}" berhasil ditambahkan ke grup ${groupEditTarget.code}. Setoran untuk peserta ini bisa dicatat lewat "Catat Setoran Grup" atau riwayat pembayaran per-peserta.`);
+      await warnIfPartnerLinked(groupEditTarget.code, 'ditambah pesertanya');
       setShowGroupEditModal(false);
       fetchData();
     } catch (err) {
@@ -1985,6 +2011,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         syncBookingTotalPaid(item.id, perPaxExtras[i].totalAmount)
       ));
 
+      await warnIfPartnerLinked(groupEditTarget.code, 'diedit (paket/harga/biaya tambahan)');
+
       setShowGroupEditModal(false);
       fetchData();
     } catch (err) {
@@ -2116,6 +2144,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // lama di grup ini — keberangkatannya beda sekarang.
       await restoreEquipmentStockForBookings(sortedActive.map(b => b.id));
 
+      await warnIfPartnerLinked(groupRescheduleTarget.code, 'di-reschedule');
+
       setShowGroupRescheduleModal(false);
       // Grup lama udah nggak aktif lagi (semua pax-nya pindah ke grup baru) —
       // balik ke tampilan ringkasan, bukan nyoba nampilin grup lama yang kosong.
@@ -2203,6 +2233,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // Balikin stok perlengkapan yang udah kepotong buat SELURUH pax aktif
       // yang dibatalkan di grup ini.
       await restoreEquipmentStockForBookings(sortedActive.map(item => item.id));
+
+      await warnIfPartnerLinked(groupCancelTarget.code, 'dibatalkan');
 
       setShowGroupCancelModal(false);
       fetchData();
