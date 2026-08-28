@@ -1804,7 +1804,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           const item = sortedActive[i];
           const share = baseShare + (i === 0 ? remainder : 0);
           if (share > 0) {
-            const payRef = await addDoc(collection(db, 'payments_income'), {
+            await addDoc(collection(db, 'payments_income'), {
               bookingId: item.id,
               bookingCode: item.bookingCode,
               jamaahName: item.jamaahName,
@@ -1817,16 +1817,20 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               createdAt: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
               groupTransactionId
             });
-            if (groupEditForm.addPaymentMethod !== 'Saldo Deposit') {
-              await adjustAccountBalance(groupEditForm.addAccountId, share, {
-                description: `Setoran Grup (Edit) ${groupEditTarget.code} - ${item.jamaahName || item.bookingCode}`,
-                reference: item.bookingCode,
-                source: 'group_edit_payment',
-                date: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
-                sourceDocId: payRef.id
-              });
-            }
           }
+        }
+
+        // Mutasi Kas/Bank dicatat SATU KALI per transaksi setoran ini (bukan
+        // per pecahan pax) — pola sama persis dengan setoran grup lainnya,
+        // biar "Riwayat Mutasi" persis sama jumlah uang yang beneran masuk.
+        if (groupEditForm.addPaymentMethod !== 'Saldo Deposit' && addAmount > 0) {
+          await adjustAccountBalance(groupEditForm.addAccountId, addAmount, {
+            description: `Setoran Grup (Edit) ${groupEditTarget.code} (${sortedActive.length} peserta)`,
+            reference: groupEditTarget.code,
+            source: 'group_edit_payment',
+            date: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
+            sourceDocId: groupTransactionId
+          });
         }
 
         if (groupEditForm.addPaymentMethod === 'Saldo Deposit') {
@@ -3048,7 +3052,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             });
 
             if (paxShare > 0) {
-              const payRef = await addDoc(collection(db, 'payments_income'), {
+              await addDoc(collection(db, 'payments_income'), {
                 bookingId: newBookingRef.id,
                 bookingCode,
                 jamaahName: pax.jamaahName,
@@ -3061,16 +3065,23 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 createdAt: resolvePaymentCreatedAt(formData.paymentDate),
                 groupTransactionId
               });
-              if (formData.paymentMethod !== 'Saldo Deposit') {
-                await adjustAccountBalance(formData.accountId, paxShare, {
-                  description: `DP Booking Grup ${groupBookingCode} - ${pax.jamaahName || bookingCode}`,
-                  reference: bookingCode,
-                  source: 'booking_group_new_payment',
-                  date: resolvePaymentCreatedAt(formData.paymentDate),
-                  sourceDocId: payRef.id
-                });
-              }
             }
+          }
+
+          // Mutasi Kas/Bank dicatat SATU KALI per transaksi DP awal grup ini
+          // (bukan per pecahan pax) — biar "Riwayat Mutasi" persis sama
+          // jumlah uang yang beneran masuk ke rekening, gampang direkonsiliasi
+          // sama mutasi bank aslinya. Rincian per-peserta tetap ada di
+          // payments_income, dicari lewat groupTransactionId yang sama —
+          // dipakai juga pas transaksinya dihapus (handleDeleteMergedGroupPayment).
+          if (formData.paymentMethod !== 'Saldo Deposit' && paymentVal > 0) {
+            await adjustAccountBalance(formData.accountId, paymentVal, {
+              description: `DP Booking Grup ${groupBookingCode} (${paxCount} peserta)`,
+              reference: groupBookingCode,
+              source: 'booking_group_new_payment',
+              date: resolvePaymentCreatedAt(formData.paymentDate),
+              sourceDocId: groupTransactionId
+            });
           }
 
           if (formData.paymentMethod === 'Saldo Deposit' && paymentVal > 0) {
