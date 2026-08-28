@@ -337,6 +337,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [cancelForm, setCancelForm] = useState({
     refundAmount: '',
     refundMethod: 'Transfer Bank',
+    refundAccountId: '',
     reason: ''
   });
   const [rescheduleForm, setRescheduleForm] = useState({
@@ -429,6 +430,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [groupCancelForm, setGroupCancelForm] = useState({
     refundAmount: '',
     refundMethod: 'Transfer Bank',
+    refundAccountId: '',
     reason: ''
   });
 
@@ -1089,6 +1091,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     setCancelForm({
       refundAmount: item.totalPaid || 0,
       refundMethod: 'Transfer Bank',
+      refundAccountId: '',
       reason: ''
     });
     setRescheduleForm({
@@ -1294,13 +1297,23 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       return;
     }
 
+    const refundAmountVal = Number(cancelForm.refundAmount || 0);
+    // Refund yang beneran keluar dari rekening/kas perusahaan (Transfer Bank
+    // / Cash) WAJIB milih akunnya dulu, biar bisa dicatat & direkonsiliasi —
+    // beda dari "Deposit / Saldo Akun" yang nggak ngeluarin duit fisik sama
+    // sekali (cuma mindahin ke saldo Pemesan di sistem).
+    if (cancelForm.refundMethod !== 'Deposit / Saldo Akun' && refundAmountVal > 0 && !cancelForm.refundAccountId) {
+      alert("Pilih akun Kas/Bank sumber dana refund ini dulu.");
+      return;
+    }
+
     try {
-      const refundAmountVal = Number(cancelForm.refundAmount || 0);
       await updateDoc(doc(db, 'bookings', selectedBookingForAction.id), {
         status: 'cancelled',
         cancelReason: cancelForm.reason || '-',
         refundAmount: refundAmountVal,
         refundMethod: cancelForm.refundMethod,
+        ...(cancelForm.refundMethod !== 'Deposit / Saldo Akun' ? { refundAccountId: cancelForm.refundAccountId, refundAccountName: financialAccounts.find(a => a.id === cancelForm.refundAccountId)?.name || '' } : {}),
         cancelledAt: new Date().toISOString()
       });
 
@@ -1315,6 +1328,17 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           `Konversi refund pembatalan booking ${selectedBookingForAction.bookingCode}`,
           selectedBookingForAction.bookingCode
         );
+      } else if (refundAmountVal > 0 && cancelForm.refundAccountId) {
+        // Refund Transfer Bank/Cash beneran keluar dari akun Kas/Bank —
+        // dicatat sebagai mutasi KELUAR biar Riwayat Mutasi-nya kepakai buat
+        // rekonsiliasi (sebelumnya nggak kecatat sama sekali di sini).
+        await adjustAccountBalance(cancelForm.refundAccountId, -refundAmountVal, {
+          description: `Refund pembatalan booking ${selectedBookingForAction.bookingCode} (${cancelForm.refundMethod})`,
+          reference: selectedBookingForAction.bookingCode,
+          source: 'booking_cancel_refund',
+          date: new Date().toISOString(),
+          sourceDocId: `refund_${selectedBookingForAction.id}`
+        });
       }
 
       // Kuota seat yang dibatalkan dikembalikan ke paket
@@ -2194,6 +2218,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     setGroupCancelForm({
       refundAmount: activeItems.reduce((acc, b) => acc + Number(b.totalPaid || 0), 0),
       refundMethod: 'Transfer Bank',
+      refundAccountId: '',
       reason: ''
     });
     setShowGroupCancelModal(true);
@@ -2204,6 +2229,12 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     if (!groupCancelTarget) return;
     if (!canManageBookings) {
       alert("Cuma Finance & Super Admin yang boleh memproses pembatalan/refund.");
+      return;
+    }
+
+    const totalRefund = Number(groupCancelForm.refundAmount || 0);
+    if (groupCancelForm.refundMethod !== 'Deposit / Saldo Akun' && totalRefund > 0 && !groupCancelForm.refundAccountId) {
+      alert("Pilih akun Kas/Bank sumber dana refund ini dulu.");
       return;
     }
 
@@ -2220,10 +2251,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       // Nominal refund total dibagi rata ke semua pax aktif (sisa pembagian
       // masuk ke pax pertama) — pola sama persis dgn Setoran Grup/DP awal grup.
-      const totalRefund = Number(groupCancelForm.refundAmount || 0);
       const baseShare = Math.floor(totalRefund / sortedActive.length);
       const remainder = totalRefund - (baseShare * sortedActive.length);
       const nowIso = new Date().toISOString();
+      const refundAccount = financialAccounts.find(a => a.id === groupCancelForm.refundAccountId);
 
       await Promise.all(sortedActive.map((item, i) => {
         const share = baseShare + (i === 0 ? remainder : 0);
@@ -2232,6 +2263,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           cancelReason: groupCancelForm.reason || '-',
           refundAmount: share,
           refundMethod: groupCancelForm.refundMethod,
+          ...(groupCancelForm.refundMethod !== 'Deposit / Saldo Akun' ? { refundAccountId: groupCancelForm.refundAccountId, refundAccountName: refundAccount?.name || '' } : {}),
           cancelledAt: nowIso
         });
       }));
@@ -2248,6 +2280,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           `Konversi refund pembatalan grup ${groupCancelTarget.code}`,
           groupCancelTarget.code
         );
+      } else if (totalRefund > 0 && groupCancelForm.refundAccountId) {
+        // Refund Transfer Bank/Cash utk SELURUH grup dicatat SATU baris
+        // mutasi keluar (bukan per-pax) — pola sama persis dgn setoran grup.
+        await adjustAccountBalance(groupCancelForm.refundAccountId, -totalRefund, {
+          description: `Refund pembatalan grup ${groupCancelTarget.code} (${groupCancelForm.refundMethod})`,
+          reference: groupCancelTarget.code,
+          source: 'booking_cancel_refund_group',
+          date: nowIso,
+          sourceDocId: `refund_${groupCancelTarget.code}`
+        });
       }
 
       // Kuota seat yang dibatalkan dikembalikan ke paket — 1 updateDoc pakai
@@ -4776,6 +4818,23 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                     <option value="Deposit / Saldo Akun">Deposit / Saldo Akun</option>
                   </select>
                 </div>
+                {cancelForm.refundMethod !== 'Deposit / Saldo Akun' && (
+                  <div>
+                    <label className="block mb-1 font-medium">Akun Kas/Bank Sumber Dana Refund</label>
+                    <select
+                      required
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={cancelForm.refundAccountId}
+                      onChange={e => setCancelForm({ ...cancelForm, refundAccountId: e.target.value })}
+                    >
+                      <option value="">-- Pilih Akun --</option>
+                      {financialAccounts.map(a => (
+                        <option key={a.id} value={a.id}>{a.name} (Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] mt-1 opacity-70">Saldo akun ini akan berkurang & tercatat di Riwayat Mutasi, biar bisa direkonsiliasi.</p>
+                  </div>
+                )}
                 <div>
                   <label className="block mb-1 font-medium">Alasan Pembatalan</label>
                   <textarea
@@ -5677,6 +5736,23 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                   <option value="Deposit / Saldo Akun">Deposit / Saldo Akun</option>
                 </select>
               </div>
+              {groupCancelForm.refundMethod !== 'Deposit / Saldo Akun' && (
+                <div>
+                  <label className="block mb-1 font-medium">Akun Kas/Bank Sumber Dana Refund</label>
+                  <select
+                    required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={groupCancelForm.refundAccountId}
+                    onChange={e => setGroupCancelForm({ ...groupCancelForm, refundAccountId: e.target.value })}
+                  >
+                    <option value="">-- Pilih Akun --</option>
+                    {financialAccounts.map(a => (
+                      <option key={a.id} value={a.id}>{a.name} (Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] mt-1 opacity-70">Saldo akun ini akan berkurang & tercatat di Riwayat Mutasi, biar bisa direkonsiliasi.</p>
+                </div>
+              )}
               <div>
                 <label className="block mb-1 font-medium">Alasan Pembatalan</label>
                 <textarea
