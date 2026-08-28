@@ -326,6 +326,12 @@ export default function AgentsModule({ theme = 'dark' }) {
 
   const [showPayModal, setShowPayModal] = useState(false);
   const [payForm, setPayForm] = useState({ partnerId: '', amount: '', accountId: '', notes: '', paymentDate: todayDateStr() });
+  // Nge-guard submit/hapus pembayaran biar nggak keklik dobel — tiap aksi
+  // di sini motong/ngembaliin saldo Kas/Bank beneran, jadi kalau kepencet
+  // dua kali sebelum request pertama kelar, saldo bisa kepotong/kebalikin
+  // dua kali juga. ID payment yang lagi diproses disimpen di sini, atau
+  // 'new' pas lagi nyimpen pembayaran baru.
+  const [processingPaymentId, setProcessingPaymentId] = useState(null);
 
   const handleOpenPayModal = () => {
     if (partnersList.length === 0) {
@@ -338,6 +344,7 @@ export default function AgentsModule({ theme = 'dark' }) {
 
   const handlePaySubmit = async (e) => {
     e.preventDefault();
+    if (processingPaymentId) return; // udah ada request lagi jalan, cegah dobel klik
     const partner = partnersList.find(p => p.id === payForm.partnerId);
     if (!partner) { alert('Pilih mitra/agen dulu.'); return; }
     if (!payForm.accountId) { alert('Pilih akun Kas/Bank yang dipakai bayar komisi ini.'); return; }
@@ -349,6 +356,7 @@ export default function AgentsModule({ theme = 'dark' }) {
       return;
     }
     const account = financialAccounts.find(a => a.id === payForm.accountId);
+    setProcessingPaymentId('new');
     try {
       const payRef = await addDoc(collection(db, 'partner_commission_payments'), {
         partnerId: partner.id,
@@ -386,11 +394,15 @@ export default function AgentsModule({ theme = 'dark' }) {
       fetchData();
     } catch (err) {
       alert('Gagal mencatat pembayaran komisi: ' + err.message);
+    } finally {
+      setProcessingPaymentId(null);
     }
   };
 
   const handleDeletePayment = async (pay) => {
+    if (processingPaymentId) return; // udah ada request lagi jalan, cegah dobel klik
     if (!confirm(`Hapus riwayat pembayaran komisi Rp ${Number(pay.amount).toLocaleString('id-ID')} ke "${pay.partnerName}"? Saldo Kas/Bank akan dikembalikan.`)) return;
+    setProcessingPaymentId(pay.id);
     try {
       if (pay.accountId) {
         await adjustAccountBalance(pay.accountId, Number(pay.amount) || 0, {
@@ -409,6 +421,8 @@ export default function AgentsModule({ theme = 'dark' }) {
       fetchData();
     } catch (err) {
       alert('Gagal menghapus riwayat pembayaran: ' + err.message);
+    } finally {
+      setProcessingPaymentId(null);
     }
   };
 
@@ -670,7 +684,8 @@ export default function AgentsModule({ theme = 'dark' }) {
                           <td className="p-4 text-center">
                             <button
                               onClick={() => handleDeletePayment(pay)}
-                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                              disabled={!!processingPaymentId}
+                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed`}
                               title="Hapus Riwayat"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -958,8 +973,12 @@ export default function AgentsModule({ theme = 'dark' }) {
                   onChange={e => setPayForm({ ...payForm, notes: e.target.value })}
                 />
               </div>
-              <button type="submit" className="w-full bg-rose-600 hover:bg-rose-500 text-white font-medium py-2.5 rounded-lg transition-colors">
-                Bayar Komisi
+              <button
+                type="submit"
+                disabled={!!processingPaymentId}
+                className="w-full bg-rose-600 hover:bg-rose-500 text-white font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {processingPaymentId === 'new' ? 'Memproses...' : 'Bayar Komisi'}
               </button>
             </form>
           </div>
