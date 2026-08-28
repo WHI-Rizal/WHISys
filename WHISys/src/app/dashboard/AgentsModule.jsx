@@ -625,33 +625,23 @@ export default function AgentsModule({ theme = 'dark' }) {
               </div>
               <div>
                 <label className="block mb-1 font-medium">Komisi Default</label>
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <button
-                    type="button"
-                    onClick={() => setPartnerForm({ ...partnerForm, commissionType: 'percent' })}
-                    className={`py-2 rounded-lg border font-medium transition-colors ${
-                      partnerForm.commissionType === 'percent' ? 'bg-emerald-600 border-emerald-600 text-white' : `${styles.inputBg}`
-                    }`}
+                <div className="flex gap-2">
+                  <select
+                    className={`w-20 shrink-0 ${styles.inputBg} rounded-lg p-2.5`}
+                    value={partnerForm.commissionType}
+                    onChange={e => setPartnerForm({ ...partnerForm, commissionType: e.target.value })}
                   >
-                    Persentase (%)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPartnerForm({ ...partnerForm, commissionType: 'fixed' })}
-                    className={`py-2 rounded-lg border font-medium transition-colors ${
-                      partnerForm.commissionType === 'fixed' ? 'bg-emerald-600 border-emerald-600 text-white' : `${styles.inputBg}`
-                    }`}
-                  >
-                    Nominal (Rp)
-                  </button>
+                    <option value="percent">%</option>
+                    <option value="fixed">Rp</option>
+                  </select>
+                  <input
+                    type="number" min="0" max={partnerForm.commissionType === 'percent' ? 100 : undefined} step={partnerForm.commissionType === 'percent' ? 0.1 : 1000}
+                    placeholder={partnerForm.commissionType === 'percent' ? 'Misal: 5 (artinya 5%)' : 'Misal: 500000 (flat per booking)'}
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={partnerForm.commissionValue}
+                    onChange={e => setPartnerForm({ ...partnerForm, commissionValue: e.target.value })}
+                  />
                 </div>
-                <input
-                  type="number" min="0" max={partnerForm.commissionType === 'percent' ? 100 : undefined} step={partnerForm.commissionType === 'percent' ? 0.1 : 1000}
-                  placeholder={partnerForm.commissionType === 'percent' ? 'Misal: 5 (artinya 5%)' : 'Misal: 500000 (flat per booking)'}
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={partnerForm.commissionValue}
-                  onChange={e => setPartnerForm({ ...partnerForm, commissionValue: e.target.value })}
-                />
                 <p className="text-[10.5px] mt-1">
                   {partnerForm.commissionType === 'percent'
                     ? 'Komisi dihitung dari % x total tagihan tiap booking yang terhubung ke mitra ini.'
@@ -752,32 +742,22 @@ export default function AgentsModule({ theme = 'dark' }) {
               </div>
               <div>
                 <label className="block mb-1 font-medium">Jenis Komisi — bisa disesuaikan dari default mitra</label>
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <button
-                    type="button"
-                    onClick={() => setLinkForm({ ...linkForm, commissionType: 'percent' })}
-                    className={`py-2 rounded-lg border font-medium transition-colors ${
-                      linkForm.commissionType === 'percent' ? 'bg-emerald-600 border-emerald-600 text-white' : `${styles.inputBg}`
-                    }`}
+                <div className="flex gap-2">
+                  <select
+                    className={`w-20 shrink-0 ${styles.inputBg} rounded-lg p-2.5`}
+                    value={linkForm.commissionType}
+                    onChange={e => setLinkForm({ ...linkForm, commissionType: e.target.value })}
                   >
-                    Persentase (%)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLinkForm({ ...linkForm, commissionType: 'fixed' })}
-                    className={`py-2 rounded-lg border font-medium transition-colors ${
-                      linkForm.commissionType === 'fixed' ? 'bg-emerald-600 border-emerald-600 text-white' : `${styles.inputBg}`
-                    }`}
-                  >
-                    Nominal (Rp)
-                  </button>
+                    <option value="percent">%</option>
+                    <option value="fixed">Rp</option>
+                  </select>
+                  <input
+                    type="number" min="0" max={linkForm.commissionType === 'percent' ? 100 : undefined} step={linkForm.commissionType === 'percent' ? 0.1 : 1000} required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={linkForm.commissionValue}
+                    onChange={e => setLinkForm({ ...linkForm, commissionValue: e.target.value })}
+                  />
                 </div>
-                <input
-                  type="number" min="0" max={linkForm.commissionType === 'percent' ? 100 : undefined} step={linkForm.commissionType === 'percent' ? 0.1 : 1000} required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={linkForm.commissionValue}
-                  onChange={e => setLinkForm({ ...linkForm, commissionValue: e.target.value })}
-                />
               </div>
               {linkForm.bookingId && (
                 <div className={`${styles.innerBg} p-3 rounded-lg border`}>
