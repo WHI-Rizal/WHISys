@@ -51,6 +51,7 @@ const OPERATIONAL_CATEGORIES = [
   'Listrik & Internet',
   'ATK',
   'Marketing',
+  'Komisi Mitra/Agen',
   'Lain-lain'
 ];
 
