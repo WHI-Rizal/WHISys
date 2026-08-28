@@ -273,15 +273,13 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     extraDiscounts: [],
     // Sumber Closing — catetan dari mana closing pemesanan ini berasal: TC/CS
     // internal (Data Master TC/Sales di modul Jamaah) atau Mitra/Agen
-    // eksternal. Buat TC, komisinya diisi manual di sini (beda-beda tiap trip,
-    // nggak ada tarif tetap) dan langsung dipakai buat hitungan Komisi TC di
-    // modul Jamaah. Buat Mitra/Agen, ini cuma catetan referensi — komisi
-    // aktualnya tetap diformalkan lewat "Hubungkan Pemesanan ke Mitra" di
-    // modul Mitra & Agen (yang komisinya bisa % atau nominal dari total).
+    // eksternal. Cuma catetan referensi buat rekap — perhitungan/pembayaran
+    // komisi TC SENGAJA nggak ada di sistem (nominal komisi TC bersifat
+    // rahasia). Buat Mitra/Agen, komisi aktualnya tetap diformalkan lewat
+    // "Hubungkan Pemesanan ke Mitra" di modul Mitra & Agen.
     closingSourceType: '',
     closingSourceId: '',
-    closingSourceName: '',
-    closingCommissionAmount: ''
+    closingSourceName: ''
   });
 
   // Draft form buat nambah/edit 1 baris di tabel "Biaya Tambahan" & "Potongan
@@ -737,7 +735,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       initialPayment: '', paymentMethod: 'Transfer Bank', accountId: '', paymentNotes: 'DP Pendaftaran',
       paymentDate: todayDateStr(),
       extraCharges: [], extraDiscounts: [],
-      closingSourceType: '', closingSourceId: '', closingSourceName: '', closingCommissionAmount: ''
+      closingSourceType: '', closingSourceId: '', closingSourceName: ''
     });
     setChargeDraft({ name: '', amount: '', notes: '' });
     setEditingChargeId(null);
@@ -778,8 +776,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // dikoreksi belakangan, misal salah pilih TC pas awal input).
       closingSourceType: item.closingSourceType || '',
       closingSourceId: item.closingSourceId || '',
-      closingSourceName: item.closingSourceName || '',
-      closingCommissionAmount: item.closingCommissionAmount != null ? String(item.closingCommissionAmount) : ''
+      closingSourceName: item.closingSourceName || ''
     });
     setChargeDraft({ name: '', amount: '', notes: '' });
     setEditingChargeId(null);
@@ -2875,7 +2872,6 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           closingSourceType: formData.closingSourceType || '',
           closingSourceId: formData.closingSourceId || '',
           closingSourceName: formData.closingSourceName || '',
-          closingCommissionAmount: formData.closingSourceType === 'tc' ? (Number(formData.closingCommissionAmount) || 0) : 0,
           updatedAt: new Date().toISOString()
         });
 
@@ -2950,8 +2946,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             closingSourceType: formData.closingSourceType || '',
             closingSourceId: formData.closingSourceId || '',
             closingSourceName: formData.closingSourceName || '',
-            closingCommissionAmount: formData.closingSourceType === 'tc' ? (Number(formData.closingCommissionAmount) || 0) : 0,
-            // Waktu Transaksi booking ikut field tanggal yang diisi staff pas
+              // Waktu Transaksi booking ikut field tanggal yang diisi staff pas
             // registrasi/DP awal (formData.paymentDate) — bukan jam submit
             // sistem, biar bisa tetap akurat kalau input booking dilakukan
             // belakangan dari tanggal transaksi aslinya.
@@ -3047,8 +3042,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               closingSourceType: formData.closingSourceType || '',
               closingSourceId: formData.closingSourceId || '',
               closingSourceName: formData.closingSourceName || '',
-              closingCommissionAmount: formData.closingSourceType === 'tc' ? (Number(formData.closingCommissionAmount) || 0) : 0,
-              // Sama kayak alur 1 pax — Waktu Transaksi ikut field tanggal
+                  // Sama kayak alur 1 pax — Waktu Transaksi ikut field tanggal
               // yang diisi staff, bukan jam submit sistem.
               createdAt: resolvePaymentCreatedAt(formData.paymentDate)
             });
@@ -3956,14 +3950,14 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
               <div className={`${styles.innerBg} p-4 rounded-xl border space-y-3`}>
                 <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">Sumber Closing (Opsional)</p>
-                <p className="text-[10px] opacity-70 -mt-2">Catetan closing pemesanan ini dari TC/CS siapa atau Mitra/Agen mana — buat rekap & hitungan komisi.</p>
+                <p className="text-[10px] opacity-70 -mt-2">Catetan closing pemesanan ini dari TC/CS siapa atau Mitra/Agen mana — buat rekap. (Perhitungan komisi TC nggak ada di sistem ini.)</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block mb-1 font-medium">Closing Dari</label>
                     <select
                       className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                       value={formData.closingSourceType}
-                      onChange={e => setFormData({ ...formData, closingSourceType: e.target.value, closingSourceId: '', closingSourceName: '', closingCommissionAmount: '' })}
+                      onChange={e => setFormData({ ...formData, closingSourceType: e.target.value, closingSourceId: '', closingSourceName: '' })}
                     >
                       <option value="">-- Tidak Ada --</option>
                       <option value="tc">TC / Sales Internal</option>
@@ -4013,18 +4007,6 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                     </div>
                   )}
                 </div>
-                {formData.closingSourceType === 'tc' && (
-                  <div>
-                    <label className="block mb-1 font-medium">Nominal Komisi TC (Rp)</label>
-                    <input
-                      type="number" placeholder="Beda-beda tiap trip, isi manual"
-                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                      value={formData.closingCommissionAmount}
-                      onChange={e => setFormData({ ...formData, closingCommissionAmount: e.target.value })}
-                    />
-                    <p className="text-[10px] mt-1 opacity-70">Nominal komisi TC ini beda-beda tergantung paket/trip-nya, jadi diisi manual per pemesanan. Bisa dicek & dibayar lewat tab "Komisi TC / Sales" di menu Jamaah.</p>
-                  </div>
-                )}
                 {formData.closingSourceType === 'partner' && (
                   <p className="text-[10px] opacity-70">Ini cuma catetan referensi. Komisi aktual buat Mitra/Agen tetap diformalkan lewat "Hubungkan Pemesanan ke Mitra" di menu Mitra & Agen.</p>
                 )}
