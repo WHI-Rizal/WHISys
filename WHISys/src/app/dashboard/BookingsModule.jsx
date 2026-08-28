@@ -565,6 +565,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     return isNaN(combined.getTime()) ? now.toISOString() : combined.toISOString();
   };
 
+  // Tanggal setoran (DP maupun tambahan) nggak boleh diisi SEBELUM tanggal
+  // pemesanan/booking-nya sendiri dibuat — nggak masuk akal ada uang masuk
+  // sebelum bookingnya ada. Ambil bagian yyyy-mm-dd doang dari createdAt biar
+  // perbandingannya adil (createdAt aslinya nyimpen jam-menit-detik juga).
+  const getBookingMinDate = (createdAt) => (createdAt ? String(createdAt).slice(0, 10) : '');
+  const isPaymentDateBeforeBooking = (paymentDateStr, bookingCreatedAt) => {
+    const minDate = getBookingMinDate(bookingCreatedAt);
+    return !!(paymentDateStr && minDate && paymentDateStr < minDate);
+  };
+
   const syncBookingTotalPaid = async (bookingId, totalTagihan) => {
     try {
       const q = query(collection(db, 'payments_income'), where('bookingId', '==', bookingId));
@@ -659,6 +669,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     const oldPay = paymentHistory.find(p => p.id === payId);
     if (oldPay && (oldPay.paymentMethod === 'Saldo Deposit') !== (paymentEditForm.paymentMethod === 'Saldo Deposit')) {
       alert("Ganti Metode Bayar ke/dari \"Saldo Deposit\" nggak bisa lewat edit ini (biar saldo deposit & akun Kas/Bank tetap akurat). Hapus catatan ini, terus catat ulang lewat \"+Bayar\".");
+      return;
+    }
+    if (paymentEditForm.date && isPaymentDateBeforeBooking(paymentEditForm.date, selectedBookingForHistory?.createdAt)) {
+      const minDate = getBookingMinDate(selectedBookingForHistory?.createdAt);
+      alert(`Tanggal setoran nggak boleh sebelum tanggal pemesanan ${selectedBookingForHistory?.bookingCode || ''} dibuat (${minDate.split('-').reverse().join('/')}).`);
       return;
     }
     try {
@@ -1223,6 +1238,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       alert("Isi nominal setoran yang valid (lebih dari 0).");
       return;
     }
+    if (isPaymentDateBeforeBooking(groupPaymentForm.date, groupPaymentTarget.primary?.createdAt)) {
+      const minDate = getBookingMinDate(groupPaymentTarget.primary?.createdAt);
+      alert(`Tanggal setoran nggak boleh sebelum tanggal pemesanan kode ${groupPaymentTarget.code} dibuat (${minDate.split('-').reverse().join('/')}).`);
+      return;
+    }
 
     const groupOrdererId = groupPaymentTarget.primary?.ordererId;
     const groupOrdererName = groupPaymentTarget.primary?.ordererName;
@@ -1375,6 +1395,12 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     }
     if ((pay.paymentMethod === 'Saldo Deposit') !== (paymentEditForm.paymentMethod === 'Saldo Deposit')) {
       alert("Ganti Metode Bayar ke/dari \"Saldo Deposit\" nggak bisa lewat edit ini (biar saldo deposit & akun Kas/Bank tetap akurat). Hapus catatan ini, terus catat ulang lewat \"+Bayar\".");
+      return;
+    }
+    const bookingItemForDate = groupHistoryItems.find(b => b.id === pay.bookingId);
+    if (paymentEditForm.date && isPaymentDateBeforeBooking(paymentEditForm.date, bookingItemForDate?.createdAt)) {
+      const minDate = getBookingMinDate(bookingItemForDate?.createdAt);
+      alert(`Tanggal setoran nggak boleh sebelum tanggal pemesanan ${bookingItemForDate?.bookingCode || ''} dibuat (${minDate.split('-').reverse().join('/')}).`);
       return;
     }
     try {
@@ -2765,6 +2791,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           return;
         }
         const currentBooking = bookings.find(b => b.id === editingBookingId);
+        if (paymentVal > 0 && isPaymentDateBeforeBooking(formData.paymentDate, currentBooking?.createdAt)) {
+          const minDate = getBookingMinDate(currentBooking?.createdAt);
+          alert(`Tanggal setoran tambahan nggak boleh sebelum tanggal pemesanan ${currentBooking?.bookingCode || ''} dibuat (${minDate.split('-').reverse().join('/')}).`);
+          return;
+        }
         // Edit selalu 1 booking/pax (paxCount dipaksa 1 di handleOpenEditModal),
         // jadi daftar biaya/diskonnya langsung dipakai apa adanya (nggak
         // perlu dibagi rata splitFlatAmount — itu cuma buat registrasi rombongan baru).
@@ -4100,11 +4131,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                       <label className="block mb-1 font-medium">Tanggal Setoran</label>
                       <input
                         type="date"
+                        min={editingBookingId ? getBookingMinDate(bookings.find(b => b.id === editingBookingId)?.createdAt) : undefined}
                         className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                         value={formData.paymentDate}
                         onChange={e => setFormData({ ...formData, paymentDate: e.target.value })}
                       />
-                      <p className="text-[10px] mt-1 opacity-70">Ganti tanggalnya kalau setoran ini sebenarnya diterima di hari lain (misal telat diinput ke sistem).</p>
+                      <p className="text-[10px] mt-1 opacity-70">
+                        {editingBookingId
+                          ? `Ganti tanggalnya kalau setoran ini sebenarnya diterima di hari lain (misal telat diinput ke sistem). Nggak bisa sebelum tanggal pemesanan dibuat.`
+                          : `Ganti tanggalnya kalau setoran ini sebenarnya diterima di hari lain (misal telat diinput ke sistem).`}
+                      </p>
                     </div>
                     <div>
                       <label className="block mb-1 font-medium">Catatan Pembayaran</label>
@@ -4176,6 +4212,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                               <div className="grid grid-cols-3 gap-2">
                                 <input
                                   type="date"
+                                  min={getBookingMinDate(selectedBookingForHistory?.createdAt)}
                                   className={`${styles.inputBg} p-1.5 rounded`}
                                   value={paymentEditForm.date}
                                   onChange={e => setPaymentEditForm({ ...paymentEditForm, date: e.target.value })}
@@ -4497,10 +4534,14 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 <label className="block mb-1 font-medium">Tanggal Setoran</label>
                 <input
                   type="date"
+                  min={getBookingMinDate(groupPaymentTarget.primary?.createdAt)}
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                   value={groupPaymentForm.date}
                   onChange={e => setGroupPaymentForm({ ...groupPaymentForm, date: e.target.value })}
                 />
+                <p className="text-[10px] mt-1 opacity-70">
+                  Nggak bisa sebelum tanggal pemesanan dibuat ({getBookingMinDate(groupPaymentTarget.primary?.createdAt).split('-').reverse().join('/')}).
+                </p>
               </div>
               <div>
                 <label className="block mb-1 font-medium">Catatan Pembayaran</label>
@@ -4571,6 +4612,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                                 <div className="grid grid-cols-3 gap-2">
                                   <input
                                     type="date"
+                                    min={getBookingMinDate(groupHistoryItems.find(b => b.id === singlePay.bookingId)?.createdAt)}
                                     className={`${styles.inputBg} p-1.5 rounded`}
                                     value={paymentEditForm.date}
                                     onChange={e => setPaymentEditForm({ ...paymentEditForm, date: e.target.value })}
