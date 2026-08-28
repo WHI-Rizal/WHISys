@@ -359,6 +359,22 @@ export default function AgentsModule({ theme = 'dark' }) {
         notes: payForm.notes || '',
         createdAt: resolvePaymentCreatedAt(payForm.paymentDate)
       });
+      // Ikut kecatat sebagai "Biaya Operasional Kantor" (expenses_operational)
+      // juga — biar Saldo Kas Bersih Operasional di dashboard Keuangan ikut
+      // kepotong dan tetap sinkron sama saldo Kas/Bank yang sebenarnya,
+      // bukan cuma kepotong di sisi mutasi bank doang.
+      const expenseRef = await addDoc(collection(db, 'expenses_operational'), {
+        category: 'Komisi Mitra/Agen',
+        amount,
+        accountId: payForm.accountId,
+        accountName: account?.name || '',
+        notes: `Komisi ${partner.name}${payForm.notes ? ' - ' + payForm.notes : ''}`,
+        expenseDate: payForm.paymentDate || todayDateStr(),
+        createdAt: resolvePaymentCreatedAt(payForm.paymentDate),
+        source: 'partner_commission_payment',
+        sourcePartnerPaymentId: payRef.id
+      });
+      await updateDoc(doc(db, 'partner_commission_payments', payRef.id), { operationalExpenseId: expenseRef.id });
       await adjustAccountBalance(payForm.accountId, -amount, {
         description: `Bayar Komisi Mitra - ${partner.name}`,
         reference: partner.name,
@@ -383,6 +399,11 @@ export default function AgentsModule({ theme = 'dark' }) {
           source: 'partner_commission_payment_delete',
           sourceDocId: pay.id
         });
+      }
+      // Ikut hapus catatan "Biaya Operasional Kantor" yang otomatis dibikin
+      // pas pembayaran ini dicatat, biar nggak ada jejak biaya yang ketinggalan.
+      if (pay.operationalExpenseId) {
+        await deleteDoc(doc(db, 'expenses_operational', pay.operationalExpenseId));
       }
       await deleteDoc(doc(db, 'partner_commission_payments', pay.id));
       fetchData();
