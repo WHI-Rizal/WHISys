@@ -101,8 +101,13 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
   const totalOmset = incomes.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const totalVendorCost = vendorCosts.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const netMargin = totalOmset - totalVendorCost;
+  // Cuma booking yang statusnya masih 'active' yang beneran makan seat —
+  // yang udah dibatalkan/di-reschedule kuotanya udah dikembalikan ke paket
+  // (lihat BookingsModule.jsx), jadi kalau ikut dihitung di sini okupansinya
+  // bisa keliatan lebih tinggi dari yang sebenarnya.
+  const activeBookingsCount = bookings.filter(b => (b.status || 'active') === 'active').length;
   const occupancyRate = packages.length > 0
-    ? Math.round((bookings.length / packages.reduce((acc, p) => acc + (Number(p.quotaTotal) || 0), 0)) * 100) || 0
+    ? Math.round((activeBookingsCount / packages.reduce((acc, p) => acc + (Number(p.quotaTotal) || 0), 0)) * 100) || 0
     : 0;
 
   const generateInsights = () => {
