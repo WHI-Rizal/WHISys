@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, increment } from 'firebase/firestore';
-import { Users, Plus, Search, Edit, Trash2, X, AlertCircle, UserCheck, Wallet, History } from 'lucide-react';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
+import { Users, Plus, Search, Edit, Trash2, X, AlertCircle, UserCheck } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 
 const formatDateDDMMYYYY = (dateString) => {
@@ -14,18 +14,6 @@ const formatDateDDMMYYYY = (dateString) => {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = date.getFullYear();
   return `${day}/${month}/${year}`;
-};
-
-const todayDateStr = () => new Date().toISOString().slice(0, 10);
-
-// Gabungin tanggal yang dipilih staff sama jam-menit-detik SEKARANG — pola
-// sama persis dengan modul Keuangan/Booking/Mitra & Agen.
-const resolvePaymentCreatedAt = (dateStr) => {
-  if (!dateStr) return new Date().toISOString();
-  const now = new Date();
-  const timePart = now.toTimeString().slice(0, 8);
-  const combined = new Date(`${dateStr}T${timePart}`);
-  return isNaN(combined.getTime()) ? now.toISOString() : combined.toISOString();
 };
 
 export default function JamaahModule({ theme = 'dark' }) {
@@ -64,21 +52,17 @@ export default function JamaahModule({ theme = 'dark' }) {
     address: '',
   });
 
-  // ============ DATA MASTER TC / SALES & KOMISI TC ============
+  // ============ DATA MASTER TC / SALES ============
+  // Perhitungan & pembayaran komisi TC/Sales SENGAJA ditiadakan di sistem
+  // (nominal komisi TC bersifat rahasia) — modul ini cuma nyimpen identitas
+  // TC/Sales, dipakai buat catetan "Sumber Closing" pas registrasi booking.
   const [tcList, setTcList] = useState([]);
   const [bookingsList, setBookingsList] = useState([]);
-  const [tcCommissionPayments, setTcCommissionPayments] = useState([]);
-  const [financialAccounts, setFinancialAccounts] = useState([]);
   const [tcLoading, setTcLoading] = useState(true);
 
   const [showTcModal, setShowTcModal] = useState(false);
   const [editingTcId, setEditingTcId] = useState(null);
   const [tcForm, setTcForm] = useState({ name: '', phone: '', notes: '', active: true });
-
-  const [filterTcId, setFilterTcId] = useState('');
-  const [showTcPayModal, setShowTcPayModal] = useState(false);
-  const [tcPayForm, setTcPayForm] = useState({ tcId: '', amount: '', accountId: '', notes: 'Pembayaran Komisi TC', paymentDate: todayDateStr() });
-  const [processingTcPaymentId, setProcessingTcPaymentId] = useState(null);
 
   const fetchTcData = async () => {
     setTcLoading(true);
@@ -88,12 +72,6 @@ export default function JamaahModule({ theme = 'dark' }) {
 
       const bkSnap = await getDocs(collection(db, 'bookings'));
       setBookingsList(bkSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-
-      const paySnap = await getDocs(collection(db, 'tc_commission_payments'));
-      setTcCommissionPayments(paySnap.docs.map(d => ({ id: d.id, ...d.data() })));
-
-      const accSnap = await getDocs(collection(db, 'financial_accounts'));
-      setFinancialAccounts(accSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (err) {
       console.error('Gagal mengambil data TC/Sales:', err);
     }
@@ -101,95 +79,8 @@ export default function JamaahModule({ theme = 'dark' }) {
   };
 
   useEffect(() => {
-    if (activeTab === 'tc' || activeTab === 'komisi') fetchTcData();
+    if (activeTab === 'tc') fetchTcData();
   }, [activeTab]);
-
-  // Ledger mutasi Kas/Bank — pola sama persis dengan modul lain (Keuangan,
-  // Booking, Mitra & Agen), biar pembayaran komisi TC ikut muncul & bisa
-  // direkonsiliasi di "Riwayat Mutasi".
-  const adjustAccountBalance = async (accountId, delta, meta = {}) => {
-    await updateDoc(doc(db, 'financial_accounts', accountId), { balance: increment(delta) });
-    const acc = financialAccounts.find(a => a.id === accountId);
-    await addDoc(collection(db, 'account_mutations'), {
-      accountId,
-      accountName: acc?.name || meta.accountName || '',
-      type: delta >= 0 ? 'in' : 'out',
-      amount: Math.abs(delta),
-      description: meta.description || '',
-      reference: meta.reference || '',
-      source: meta.source || 'tc_commission',
-      sourceDocId: meta.sourceDocId || '',
-      createdAt: meta.date || new Date().toISOString()
-    });
-  };
-
-  // Hapus baris mutasi yang berasal dari SATU dokumen pembayaran komisi TC
-  // (dicari lewat sourceDocId) pas pembayarannya dihapus — biar baris "Bayar
-  // Komisi TC" ikut hilang dari Riwayat Mutasi, bukan nambah baris "Koreksi
-  // Hapus" baru.
-  const removeAccountMutationBySource = async (accountId, sourceDocId, delta) => {
-    if (!accountId) return;
-    if (delta) {
-      await updateDoc(doc(db, 'financial_accounts', accountId), { balance: increment(delta) });
-    }
-    if (!sourceDocId) return;
-    try {
-      const q = query(collection(db, 'account_mutations'), where('accountId', '==', accountId), where('sourceDocId', '==', sourceDocId));
-      const snap = await getDocs(q);
-      await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
-    } catch (err) {
-      console.error('Gagal menghapus riwayat mutasi terkait:', err);
-    }
-  };
-
-  // Komisi TC diakumulasi dari booking yang closingSourceType==='tc' &
-  // closingSourceId cocok — di-dedup per PEMESANAN (groupBookingCode kalau
-  // rombongan, bookingCode kalau single) biar nominal komisinya nggak
-  // kehitung dobel walau nempel di semua pax dalam 1 grup. Booking yang
-  // dibatalkan/reschedule nggak dihitung.
-  const getTcAccrued = (tcId) => {
-    const relevant = bookingsList.filter(b =>
-      b.closingSourceType === 'tc' && b.closingSourceId === tcId &&
-      b.status !== 'cancelled' && b.status !== 'rescheduled'
-    );
-    const seenGroups = new Set();
-    let total = 0;
-    relevant.forEach(b => {
-      const key = b.groupBookingCode || b.bookingCode || b.id;
-      if (seenGroups.has(key)) return;
-      seenGroups.add(key);
-      total += Number(b.closingCommissionAmount) || 0;
-    });
-    return total;
-  };
-  const getTcPaid = (tcId) => tcCommissionPayments.filter(p => p.tcId === tcId).reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
-  const getTcSummary = (tcId) => {
-    const accrued = getTcAccrued(tcId);
-    const paid = getTcPaid(tcId);
-    return { accrued, paid, outstanding: accrued - paid };
-  };
-
-  // Daftar pemesanan (di-dedup per grup) yang closing-nya dari TC ini —
-  // dipakai buat tabel rincian di tab Komisi TC/Sales.
-  const getTcBookingRows = (tcId) => {
-    const relevant = bookingsList.filter(b =>
-      b.closingSourceType === 'tc' && b.closingSourceId === tcId &&
-      b.status !== 'cancelled' && b.status !== 'rescheduled'
-    );
-    const map = {};
-    relevant.forEach(b => {
-      const key = b.groupBookingCode || b.bookingCode || b.id;
-      if (!map[key]) map[key] = { code: key, items: [], primary: b };
-      map[key].items.push(b);
-    });
-    return Object.values(map).map(g => ({
-      code: g.code,
-      paxCount: g.items.length,
-      packageName: g.primary.packageName,
-      jamaahName: g.primary.jamaahName,
-      commissionAmount: Number(g.primary.closingCommissionAmount) || 0
-    }));
-  };
 
   const handleOpenAddTc = () => {
     setEditingTcId(null);
@@ -218,14 +109,9 @@ export default function JamaahModule({ theme = 'dark' }) {
     }
   };
   const handleDeleteTc = async (tc) => {
-    const { outstanding } = getTcSummary(tc.id);
-    if (outstanding !== 0) {
-      alert(`Data TC/Sales "${tc.name}" tidak bisa dihapus — masih ada sisa komisi Rp ${outstanding.toLocaleString('id-ID')} yang belum lunas. Selesaikan pembayarannya dulu.`);
-      return;
-    }
-    const hasHistory = bookingsList.some(b => b.closingSourceType === 'tc' && b.closingSourceId === tc.id) || tcCommissionPayments.some(p => p.tcId === tc.id);
+    const hasHistory = bookingsList.some(b => b.closingSourceType === 'tc' && b.closingSourceId === tc.id);
     const msg = hasHistory
-      ? `Data TC/Sales "${tc.name}" punya riwayat closing/pembayaran komisi. Menghapusnya cuma menghilangkan datanya dari daftar (riwayat lama tetap ada). Lanjutkan?`
+      ? `Data TC/Sales "${tc.name}" masih tercatat sebagai Sumber Closing di beberapa pemesanan. Menghapusnya cuma menghilangkan datanya dari daftar (catatan closing lama tetap ada di booking-nya). Lanjutkan?`
       : `Hapus data TC/Sales "${tc.name}"?`;
     if (!confirm(msg)) return;
     try {
@@ -233,85 +119,6 @@ export default function JamaahModule({ theme = 'dark' }) {
       fetchTcData();
     } catch (err) {
       alert('Gagal menghapus data TC/Sales: ' + err.message);
-    }
-  };
-
-  const handleOpenTcPay = (tcId) => {
-    setTcPayForm({ tcId, amount: '', accountId: '', notes: 'Pembayaran Komisi TC', paymentDate: todayDateStr() });
-    setShowTcPayModal(true);
-  };
-  const handleTcPaySubmit = async (e) => {
-    e.preventDefault();
-    if (processingTcPaymentId) return;
-    const tc = tcList.find(t => t.id === tcPayForm.tcId);
-    if (!tc) { alert('Pilih TC/Sales dulu.'); return; }
-    if (!tcPayForm.accountId) { alert('Pilih akun Kas/Bank yang dipakai bayar komisi ini.'); return; }
-    const amount = Number(tcPayForm.amount) || 0;
-    if (amount <= 0) { alert('Isi nominal yang valid.'); return; }
-    const { outstanding } = getTcSummary(tc.id);
-    if (amount > outstanding) {
-      alert(`Nominal melebihi sisa komisi yang belum dibayar. Sisa komisi "${tc.name}": Rp ${outstanding.toLocaleString('id-ID')}.`);
-      return;
-    }
-    const account = financialAccounts.find(a => a.id === tcPayForm.accountId);
-    setProcessingTcPaymentId('new');
-    try {
-      const payRef = await addDoc(collection(db, 'tc_commission_payments'), {
-        tcId: tc.id,
-        tcName: tc.name,
-        amount,
-        accountId: tcPayForm.accountId,
-        accountName: account?.name || '',
-        notes: tcPayForm.notes || '',
-        createdAt: resolvePaymentCreatedAt(tcPayForm.paymentDate)
-      });
-      // Ikut kecatat sebagai Biaya Operasional Kantor, sama persis pola
-      // komisi Mitra & Agen — biar Saldo Kas Bersih Operasional di dashboard
-      // Keuangan tetap sinkron sama saldo Kas/Bank yang sebenarnya.
-      const expenseRef = await addDoc(collection(db, 'expenses_operational'), {
-        category: 'Komisi TC/Sales',
-        amount,
-        accountId: tcPayForm.accountId,
-        accountName: account?.name || '',
-        notes: `Komisi TC ${tc.name}${tcPayForm.notes ? ' - ' + tcPayForm.notes : ''}`,
-        expenseDate: tcPayForm.paymentDate || todayDateStr(),
-        createdAt: resolvePaymentCreatedAt(tcPayForm.paymentDate),
-        source: 'tc_commission_payment',
-        sourceTcPaymentId: payRef.id
-      });
-      await updateDoc(doc(db, 'tc_commission_payments', payRef.id), { operationalExpenseId: expenseRef.id });
-      await adjustAccountBalance(tcPayForm.accountId, -amount, {
-        description: `Bayar Komisi TC - ${tc.name}`,
-        reference: tc.name,
-        source: 'tc_commission_payment',
-        date: resolvePaymentCreatedAt(tcPayForm.paymentDate),
-        sourceDocId: payRef.id
-      });
-      setShowTcPayModal(false);
-      fetchTcData();
-    } catch (err) {
-      alert('Gagal mencatat pembayaran komisi TC: ' + err.message);
-    } finally {
-      setProcessingTcPaymentId(null);
-    }
-  };
-  const handleDeleteTcPayment = async (pay) => {
-    if (processingTcPaymentId) return;
-    if (!confirm(`Hapus riwayat pembayaran komisi Rp ${Number(pay.amount).toLocaleString('id-ID')} ke "${pay.tcName}"? Saldo Kas/Bank akan dikembalikan.`)) return;
-    setProcessingTcPaymentId(pay.id);
-    try {
-      if (pay.accountId) {
-        await removeAccountMutationBySource(pay.accountId, pay.id, Number(pay.amount) || 0);
-      }
-      if (pay.operationalExpenseId) {
-        await deleteDoc(doc(db, 'expenses_operational', pay.operationalExpenseId));
-      }
-      await deleteDoc(doc(db, 'tc_commission_payments', pay.id));
-      fetchTcData();
-    } catch (err) {
-      alert('Gagal menghapus riwayat pembayaran: ' + err.message);
-    } finally {
-      setProcessingTcPaymentId(null);
     }
   };
 
@@ -455,12 +262,6 @@ export default function JamaahModule({ theme = 'dark' }) {
           className={`px-4 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 ${activeTab === 'tc' ? styles.tabActive || 'bg-emerald-600 text-white' : styles.textSub}`}
         >
           <UserCheck className="w-3.5 h-3.5" /> TC / Sales
-        </button>
-        <button
-          onClick={() => setActiveTab('komisi')}
-          className={`px-4 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 ${activeTab === 'komisi' ? styles.tabActive || 'bg-emerald-600 text-white' : styles.textSub}`}
-        >
-          <Wallet className="w-3.5 h-3.5" /> Komisi TC / Sales
         </button>
       </div>
 
@@ -797,206 +598,6 @@ export default function JamaahModule({ theme = 'dark' }) {
       </>
       )}
 
-      {activeTab === 'komisi' && (
-      <>
-      <div className={`${styles.cardBg} p-6 rounded-xl border`}>
-        <h3 className={`text-xl font-bold ${styles.textTitle} flex items-center gap-2`}>
-          <Wallet className="w-5 h-5 text-emerald-500" /> Komisi TC / Sales
-        </h3>
-        <p className={`text-xs ${styles.textSub} mt-1`}>Rekap komisi tiap TC dari pemesanan yang closing-nya ditandai lewat mereka, plus pembayarannya.</p>
-      </div>
-
-      <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className={`${styles.tableHeaderBg} uppercase tracking-wider border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-              <tr>
-                <th className="p-4">Nama TC</th>
-                <th className="p-4 text-right">Total Komisi</th>
-                <th className="p-4 text-right">Sudah Dibayar</th>
-                <th className="p-4 text-right">Sisa Belum Dibayar</th>
-                <th className="p-4 text-center">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className={`divide-y ${styles.tableRowBorder}`}>
-              {tcLoading ? (
-                <tr><td colSpan="5" className={`p-8 text-center ${styles.textSub}`}>Memuat data komisi...</td></tr>
-              ) : tcList.length === 0 ? (
-                <tr><td colSpan="5" className={`p-8 text-center ${styles.textSub}`}>Belum ada data TC/Sales.</td></tr>
-              ) : (
-                tcList.map(tc => {
-                  const { accrued, paid, outstanding } = getTcSummary(tc.id);
-                  const isExpanded = filterTcId === tc.id;
-                  return (
-                    <React.Fragment key={tc.id}>
-                      <tr className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
-                        <td className={`p-4 font-semibold ${styles.textTitle}`}>
-                          <button onClick={() => setFilterTcId(isExpanded ? '' : tc.id)} className="hover:underline">{tc.name}</button>
-                        </td>
-                        <td className={`p-4 text-right ${styles.textTitle}`}>Rp {accrued.toLocaleString('id-ID')}</td>
-                        <td className="p-4 text-right text-emerald-500">Rp {paid.toLocaleString('id-ID')}</td>
-                        <td className={`p-4 text-right font-bold ${outstanding > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>Rp {outstanding.toLocaleString('id-ID')}</td>
-                        <td className="p-4 text-center">
-                          <button
-                            onClick={() => handleOpenTcPay(tc.id)}
-                            disabled={outstanding <= 0}
-                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[11px] font-medium"
-                          >
-                            Bayar Komisi
-                          </button>
-                        </td>
-                      </tr>
-                      {isExpanded && (
-                        <tr>
-                          <td colSpan="5" className={`p-4 ${styles.innerBg}`}>
-                            <p className={`text-[11px] font-bold mb-2 ${styles.textTitle}`}>Rincian Pemesanan — {tc.name}</p>
-                            <div className="overflow-x-auto mb-4">
-                              <table className="w-full text-left text-[11px]">
-                                <thead className={`${styles.tableHeaderBg} uppercase`}>
-                                  <tr>
-                                    <th className="p-2">Kode Pemesanan</th>
-                                    <th className="p-2">Jamaah</th>
-                                    <th className="p-2">Paket</th>
-                                    <th className="p-2 text-right">Komisi</th>
-                                  </tr>
-                                </thead>
-                                <tbody className={`divide-y ${styles.tableRowBorder}`}>
-                                  {getTcBookingRows(tc.id).map(row => (
-                                    <tr key={row.code}>
-                                      <td className="p-2 font-mono">{row.code}</td>
-                                      <td className="p-2">{row.jamaahName}{row.paxCount > 1 ? ` dkk (${row.paxCount} pax)` : ''}</td>
-                                      <td className="p-2">{row.packageName}</td>
-                                      <td className="p-2 text-right">Rp {row.commissionAmount.toLocaleString('id-ID')}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                            <p className={`text-[11px] font-bold mb-2 ${styles.textTitle}`}>Riwayat Pembayaran</p>
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-left text-[11px]">
-                                <thead className={`${styles.tableHeaderBg} uppercase`}>
-                                  <tr>
-                                    <th className="p-2">Tanggal</th>
-                                    <th className="p-2">Catatan</th>
-                                    <th className="p-2 text-right">Nominal</th>
-                                    <th className="p-2 text-center">Aksi</th>
-                                  </tr>
-                                </thead>
-                                <tbody className={`divide-y ${styles.tableRowBorder}`}>
-                                  {tcCommissionPayments.filter(p => p.tcId === tc.id).length === 0 ? (
-                                    <tr><td colSpan="4" className={`p-3 text-center ${styles.textSub}`}>Belum ada pembayaran.</td></tr>
-                                  ) : (
-                                    tcCommissionPayments.filter(p => p.tcId === tc.id).map(pay => (
-                                      <tr key={pay.id}>
-                                        <td className="p-2">{formatDateDDMMYYYY(pay.createdAt)}</td>
-                                        <td className="p-2">{pay.notes || '-'}</td>
-                                        <td className="p-2 text-right">Rp {Number(pay.amount).toLocaleString('id-ID')}</td>
-                                        <td className="p-2 text-center">
-                                          <button
-                                            onClick={() => handleDeleteTcPayment(pay)}
-                                            disabled={!!processingTcPaymentId}
-                                            className="p-1 text-rose-500 disabled:opacity-40 disabled:cursor-not-allowed"
-                                            title="Hapus"
-                                          >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                          </button>
-                                        </td>
-                                      </tr>
-                                    ))
-                                  )}
-                                </tbody>
-                              </table>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {showTcPayModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
-            <button onClick={() => setShowTcPayModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
-              <X className="w-5 h-5" />
-            </button>
-            <h3 className={`text-lg font-bold ${styles.textTitle} mb-4 flex items-center gap-2`}>
-              <Wallet className="w-5 h-5 text-emerald-500" /> Bayar Komisi TC
-            </h3>
-            <form onSubmit={handleTcPaySubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
-              <div>
-                <label className="block mb-1 font-medium">TC / Sales</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={tcPayForm.tcId}
-                  onChange={e => setTcPayForm({ ...tcPayForm, tcId: e.target.value })}
-                >
-                  <option value="">-- Pilih TC --</option>
-                  {tcList.map(tc => {
-                    const { outstanding } = getTcSummary(tc.id);
-                    return <option key={tc.id} value={tc.id}>{tc.name} (Sisa: Rp {outstanding.toLocaleString('id-ID')})</option>;
-                  })}
-                </select>
-              </div>
-              <div>
-                <label className="block mb-1 font-medium">Nominal (Rp)</label>
-                <input
-                  type="number" required min="1"
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={tcPayForm.amount}
-                  onChange={e => setTcPayForm({ ...tcPayForm, amount: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="block mb-1 font-medium">Akun Kas/Bank</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={tcPayForm.accountId}
-                  onChange={e => setTcPayForm({ ...tcPayForm, accountId: e.target.value })}
-                >
-                  <option value="">-- Pilih Akun --</option>
-                  {financialAccounts.map(a => (
-                    <option key={a.id} value={a.id}>{a.name} (Saldo: Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block mb-1 font-medium">Tanggal</label>
-                <DateFieldID
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={tcPayForm.paymentDate}
-                  onChange={(val) => setTcPayForm({ ...tcPayForm, paymentDate: val })}
-                />
-              </div>
-              <div>
-                <label className="block mb-1 font-medium">Catatan</label>
-                <input
-                  type="text"
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={tcPayForm.notes}
-                  onChange={e => setTcPayForm({ ...tcPayForm, notes: e.target.value })}
-                />
-              </div>
-              <div className={`pt-3 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                <button type="button" onClick={() => setShowTcPayModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>Batal</button>
-                <button type="submit" disabled={!!processingTcPaymentId} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium">
-                  {processingTcPaymentId === 'new' ? 'Memproses...' : 'Bayar Komisi'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-      </>
-      )}
     </div>
   );
 }
