@@ -209,19 +209,49 @@ export default function AgentsModule({ theme = 'dark' }) {
     }
   };
 
-  // ============ 2. TRACKING KOMISI PER BOOKING ============
+  // ============ 2. TRACKING KOMISI PER BOOKING (per PEMESANAN, bukan per pax) ============
+  // Satu "pemesanan" = satu kode booking (kalau rombongan, groupBookingCode-nya
+  // sama buat semua pax). Dihubungkan sekaligus jadi 1 record komisi yang
+  // ngitung dari TOTAL nominal seluruh pax aktif dalam pemesanan itu, bukan
+  // satu-satu per pax — jadi mitra yang closing 1 booking rombongan cukup
+  // dihubungkan sekali aja.
 
   const [showLinkModal, setShowLinkModal] = useState(false);
-  const [linkForm, setLinkForm] = useState({ partnerId: '', bookingId: '', commissionType: 'percent', commissionValue: '' });
+  const [linkForm, setLinkForm] = useState({ partnerId: '', groupCode: '', commissionType: 'percent', commissionValue: '' });
 
-  const assignedBookingIds = new Set(partnerBookings.map(pb => pb.bookingId));
-  const availableBookings = bookingsList
-    .filter(b => (b.status || 'active') === 'active')
-    .filter(b => !assignedBookingIds.has(b.id))
-    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  const assignedGroupCodes = new Set(partnerBookings.map(pb => pb.groupBookingCode));
 
-  // Ngitung nominal komisi sesuai jenisnya — persentase dari total booking,
-  // atau flat rupiah berapapun total tagihannya.
+  // Kelompokkan booking aktif per kode pemesanan (groupBookingCode kalau
+  // rombongan, atau bookingCode kalau single), lalu buang yang udah
+  // terhubung ke mitra manapun.
+  const availableGroups = (() => {
+    const map = {};
+    bookingsList
+      .filter(b => (b.status || 'active') === 'active')
+      .forEach(b => {
+        const code = b.groupBookingCode || b.bookingCode;
+        if (!map[code]) map[code] = [];
+        map[code].push(b);
+      });
+    return Object.entries(map)
+      .map(([code, items]) => {
+        const primary = items.sort((a, b) => (Number(a.groupPaxIndex) || 0) - (Number(b.groupPaxIndex) || 0))[0];
+        return {
+          code,
+          items,
+          primary,
+          paxCount: items.length,
+          bookingIds: items.map(b => b.id),
+          totalAmount: items.reduce((acc, b) => acc + (Number(b.totalAmount) || 0), 0)
+        };
+      })
+      .filter(g => !assignedGroupCodes.has(g.code))
+      .sort((a, b) => new Date(b.primary?.createdAt || 0) - new Date(a.primary?.createdAt || 0));
+  })();
+
+  // Ngitung nominal komisi sesuai jenisnya — persentase dari TOTAL pemesanan,
+  // atau flat rupiah berapapun total tagihannya (flat berlaku per pemesanan,
+  // bukan dikali jumlah pax).
   const computeCommissionAmount = (type, value, totalAmount) => {
     const v = Number(value) || 0;
     return type === 'fixed' ? v : (Number(totalAmount) || 0) * v / 100;
@@ -232,7 +262,7 @@ export default function AgentsModule({ theme = 'dark' }) {
       alert('Tambah dulu data mitra/agen di tab "Data Mitra & Agen".');
       return;
     }
-    setLinkForm({ partnerId: '', bookingId: '', commissionType: 'percent', commissionValue: '' });
+    setLinkForm({ partnerId: '', groupCode: '', commissionType: 'percent', commissionValue: '' });
     setShowLinkModal(true);
   };
 
@@ -249,22 +279,23 @@ export default function AgentsModule({ theme = 'dark' }) {
   const handleLinkSubmit = async (e) => {
     e.preventDefault();
     const partner = partnersList.find(p => p.id === linkForm.partnerId);
-    const booking = bookingsList.find(b => b.id === linkForm.bookingId);
+    const group = availableGroups.find(g => g.code === linkForm.groupCode);
     if (!partner) { alert('Pilih mitra/agen dulu.'); return; }
-    if (!booking) { alert('Pilih booking yang mau dihubungkan.'); return; }
+    if (!group) { alert('Pilih pemesanan yang mau dihubungkan.'); return; }
     const commissionType = linkForm.commissionType === 'fixed' ? 'fixed' : 'percent';
     const commissionValue = Number(linkForm.commissionValue) || 0;
-    const commissionAmount = computeCommissionAmount(commissionType, commissionValue, booking.totalAmount);
+    const commissionAmount = computeCommissionAmount(commissionType, commissionValue, group.totalAmount);
     try {
       await addDoc(collection(db, 'partner_bookings'), {
         partnerId: partner.id,
         partnerName: partner.name,
-        bookingId: booking.id,
-        bookingCode: booking.bookingCode,
-        groupBookingCode: booking.groupBookingCode || booking.bookingCode,
-        jamaahName: booking.jamaahName,
-        packageName: booking.packageName,
-        totalAmount: Number(booking.totalAmount) || 0,
+        groupBookingCode: group.code,
+        bookingIds: group.bookingIds,
+        bookingCode: group.primary.bookingCode,
+        jamaahName: group.primary.jamaahName,
+        paxCount: group.paxCount,
+        packageName: group.primary.packageName,
+        totalAmount: group.totalAmount,
         commissionType,
         commissionValue,
         commissionAmount,
@@ -278,7 +309,8 @@ export default function AgentsModule({ theme = 'dark' }) {
   };
 
   const handleUnlinkBooking = async (pb) => {
-    if (!confirm(`Putuskan hubungan booking ${pb.bookingCode} (${pb.jamaahName}) dari mitra "${pb.partnerName}"? Komisi Rp ${Number(pb.commissionAmount).toLocaleString('id-ID')} dari booking ini nggak akan dihitung lagi.`)) return;
+    const label = pb.paxCount > 1 ? `${pb.jamaahName} dkk (${pb.paxCount} pax)` : pb.jamaahName;
+    if (!confirm(`Putuskan hubungan pemesanan ${pb.groupBookingCode} (${label}) dari mitra "${pb.partnerName}"? Komisi Rp ${Number(pb.commissionAmount).toLocaleString('id-ID')} dari pemesanan ini nggak akan dihitung lagi.`)) return;
     try {
       await deleteDoc(doc(db, 'partner_bookings', pb.id));
       fetchData();
@@ -502,7 +534,7 @@ export default function AgentsModule({ theme = 'dark' }) {
                 onClick={handleOpenLinkModal}
                 className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-medium transition-colors"
               >
-                <Link2 className="w-3.5 h-3.5" /> Hubungkan Booking ke Mitra
+                <Link2 className="w-3.5 h-3.5" /> Hubungkan Pemesanan ke Mitra
               </button>
             </div>
             <div className={`${styles.innerBg} border rounded-xl overflow-hidden`}>
@@ -510,23 +542,25 @@ export default function AgentsModule({ theme = 'dark' }) {
                 <table className="w-full text-left text-xs">
                   <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                     <tr>
-                      <th className="p-4">Kode Booking</th>
+                      <th className="p-4">Kode Pemesanan</th>
                       <th className="p-4">Jamaah</th>
                       <th className="p-4">Paket</th>
                       <th className="p-4">Mitra/Agen</th>
-                      <th className="p-4 text-right">Total Booking</th>
+                      <th className="p-4 text-right">Total Pemesanan</th>
                       <th className="p-4 text-right">Komisi</th>
                       <th className="p-4 text-center">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className={`divide-y ${styles.tableRowBorder}`}>
                     {visiblePartnerBookings.length === 0 ? (
-                      <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada booking yang dihubungkan ke mitra/agen.</td></tr>
+                      <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada pemesanan yang dihubungkan ke mitra/agen.</td></tr>
                     ) : (
                       visiblePartnerBookings.map(pb => (
                         <tr key={pb.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
-                          <td className={`p-4 font-mono text-emerald-500`}>{pb.bookingCode}</td>
-                          <td className={`p-4 ${styles.textTitle}`}>{pb.jamaahName}</td>
+                          <td className={`p-4 font-mono text-emerald-500`}>{pb.groupBookingCode}</td>
+                          <td className={`p-4 ${styles.textTitle}`}>
+                            {pb.jamaahName}{pb.paxCount > 1 ? ` dkk (${pb.paxCount} pax)` : ''}
+                          </td>
                           <td className={`p-4 ${styles.textSub}`}>{pb.packageName}</td>
                           <td className={`p-4 ${styles.textTitle}`}>{pb.partnerName}</td>
                           <td className={`p-4 text-right ${styles.textTitle}`}>Rp {Number(pb.totalAmount || 0).toLocaleString('id-ID')}</td>
@@ -733,10 +767,10 @@ export default function AgentsModule({ theme = 'dark' }) {
               <X className="w-5 h-5" />
             </button>
             <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
-              <Link2 className="w-5 h-5 text-emerald-500" /> Hubungkan Booking ke Mitra
+              <Link2 className="w-5 h-5 text-emerald-500" /> Hubungkan Pemesanan ke Mitra
             </h3>
             <p className={`text-xs ${styles.textSub} mb-4`}>
-              Komisi dihitung dari % x total tagihan booking yang dipilih. Booking yang udah terhubung ke mitra lain nggak muncul di daftar.
+              Komisi dihitung dari total keseluruhan pemesanan yang dipilih (semua pax dalam kode booking yang sama, kalau rombongan). Pemesanan yang udah terhubung ke mitra lain nggak muncul di daftar.
             </p>
             <form onSubmit={handleLinkSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
@@ -754,22 +788,25 @@ export default function AgentsModule({ theme = 'dark' }) {
                 </select>
               </div>
               <div>
-                <label className="block mb-1 font-medium">Booking</label>
+                <label className="block mb-1 font-medium">Pemesanan</label>
                 <select
                   required
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={linkForm.bookingId}
-                  onChange={e => setLinkForm({ ...linkForm, bookingId: e.target.value })}
+                  value={linkForm.groupCode}
+                  onChange={e => setLinkForm({ ...linkForm, groupCode: e.target.value })}
                 >
                   <option value="">-- Pilih Kode Booking / Jamaah --</option>
-                  {availableBookings.map(b => (
-                    <option key={b.id} value={b.id}>
-                      {b.bookingCode} - {b.jamaahName} - {b.packageName} - Rp {Number(b.totalAmount || 0).toLocaleString('id-ID')}
+                  {availableGroups.map(g => (
+                    <option key={g.code} value={g.code}>
+                      {g.code} - {g.primary.jamaahName}{g.paxCount > 1 ? ` dkk (${g.paxCount} pax)` : ''} - {g.primary.packageName} - Rp {g.totalAmount.toLocaleString('id-ID')}
                     </option>
                   ))}
                 </select>
-                {availableBookings.length === 0 && (
-                  <p className="text-[10.5px] mt-1">Semua booking aktif udah terhubung ke mitra masing-masing.</p>
+                <p className="text-[10.5px] mt-1">
+                  Kalau pemesanan ini rombongan, semua pax di kode booking yang sama ikut terhubung sekaligus — komisi dihitung dari total keseluruhan pemesanan, bukan per pax.
+                </p>
+                {availableGroups.length === 0 && (
+                  <p className="text-[10.5px] mt-1">Semua pemesanan aktif udah terhubung ke mitra masing-masing.</p>
                 )}
               </div>
               <div>
@@ -791,13 +828,13 @@ export default function AgentsModule({ theme = 'dark' }) {
                   />
                 </div>
               </div>
-              {linkForm.bookingId && (
+              {linkForm.groupCode && (
                 <div className={`${styles.innerBg} p-3 rounded-lg border`}>
                   Preview Komisi: <strong className={styles.textTitle}>
                     Rp {computeCommissionAmount(
                       linkForm.commissionType,
                       linkForm.commissionValue,
-                      bookingsList.find(b => b.id === linkForm.bookingId)?.totalAmount
+                      availableGroups.find(g => g.code === linkForm.groupCode)?.totalAmount
                     ).toLocaleString('id-ID')}
                   </strong>
                 </div>
