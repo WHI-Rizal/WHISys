@@ -109,9 +109,23 @@ export default function AgentsModule({ theme = 'dark' }) {
 
   // ============ 1. DATA MASTER MITRA & AGEN ============
 
+  // Jenis mitra bawaan — tapi nggak dikunci cuma ini doang. User bisa nambah
+  // jenis baru sendiri (misal Reseller, Referral, dst) lewat "+ Tambah Jenis
+  // Baru" di dropdown, dan jenis baru itu otomatis nempel jadi pilihan lagi
+  // di dropdown begitu ada minimal 1 mitra yang pakai jenis tersebut.
+  const DEFAULT_PARTNER_TYPES = ['Mitra', 'Agen', 'Reseller', 'Referral'];
+
   const [showPartnerModal, setShowPartnerModal] = useState(false);
   const [editingPartnerId, setEditingPartnerId] = useState(null);
   const [partnerForm, setPartnerForm] = useState({ name: '', type: 'Mitra', contactPerson: '', phone: '', commissionType: 'percent', commissionValue: '', notes: '', active: true });
+  const [customTypeInput, setCustomTypeInput] = useState('');
+
+  // Daftar jenis yang muncul di dropdown = bawaan + semua jenis unik yang
+  // udah pernah dipakai mitra manapun (termasuk yang tadinya diketik manual).
+  const partnerTypeOptions = Array.from(new Set([
+    ...DEFAULT_PARTNER_TYPES,
+    ...partnersList.map(p => p.type).filter(Boolean)
+  ]));
 
   // Label komisi siap-tampil, dipakai di tabel & dropdown — otomatis nyesuain
   // format persen atau nominal rupiah.
@@ -123,6 +137,7 @@ export default function AgentsModule({ theme = 'dark' }) {
   const handleOpenAddPartner = () => {
     setEditingPartnerId(null);
     setPartnerForm({ name: '', type: 'Mitra', contactPerson: '', phone: '', commissionType: 'percent', commissionValue: '', notes: '', active: true });
+    setCustomTypeInput('');
     setShowPartnerModal(true);
   };
 
@@ -133,16 +148,22 @@ export default function AgentsModule({ theme = 'dark' }) {
       phone: p.phone || '', commissionType: p.commissionType || 'percent', commissionValue: String(p.commissionValue ?? ''), notes: p.notes || '',
       active: p.active !== false
     });
+    setCustomTypeInput('');
     setShowPartnerModal(true);
   };
 
   const handlePartnerSubmit = async (e) => {
     e.preventDefault();
     if (!partnerForm.name.trim()) { alert('Nama mitra/agen wajib diisi.'); return; }
+    if (partnerForm.type === '__new__' && !customTypeInput.trim()) {
+      alert('Isi nama jenis mitra yang baru dulu.');
+      return;
+    }
+    const resolvedType = partnerForm.type === '__new__' ? customTypeInput.trim() : partnerForm.type;
     try {
       const payload = {
         name: partnerForm.name.trim(),
-        type: partnerForm.type,
+        type: resolvedType,
         contactPerson: partnerForm.contactPerson || '',
         phone: partnerForm.phone || '',
         commissionType: partnerForm.commissionType === 'fixed' ? 'fixed' : 'percent',
@@ -618,9 +639,20 @@ export default function AgentsModule({ theme = 'dark' }) {
                     value={partnerForm.type}
                     onChange={e => setPartnerForm({ ...partnerForm, type: e.target.value })}
                   >
-                    <option value="Mitra">Mitra</option>
-                    <option value="Agen">Agen</option>
+                    {partnerTypeOptions.map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                    <option value="__new__">➕ Tambah Jenis Baru</option>
                   </select>
+                  {partnerForm.type === '__new__' && (
+                    <input
+                      type="text"
+                      placeholder="Misal: Reseller, Referral, dst"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5 mt-2`}
+                      value={customTypeInput}
+                      onChange={e => setCustomTypeInput(e.target.value)}
+                    />
+                  )}
                 </div>
               </div>
               <div>
