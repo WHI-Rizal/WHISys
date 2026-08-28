@@ -991,6 +991,27 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         await Promise.all(partnerLinkSnap.docs.map(d => deleteDoc(d.ref)));
       }
 
+      // Booking-nya udah kehapus — perlengkapan (equipment_distribution) yang
+      // nempel ke booking ini juga harus dibersihin. Yang statusnya "given"
+      // (udah diserahin fisiknya) stoknya wajib dibalikin dulu ke Data Master
+      // Barang, baru record distribusinya dihapus (kalau nggak, stok gudang
+      // bakal keliatan kurang padahal barangnya nggak pernah kepakai lagi).
+      try {
+        const equipQ = query(collection(db, 'equipment_distribution'), where('bookingId', '==', item.id));
+        const equipSnap = await getDocs(equipQ);
+        if (!equipSnap.empty) {
+          await Promise.all(equipSnap.docs.map(async (d) => {
+            const data = d.data();
+            if (data.given === true) {
+              await updateDoc(doc(db, 'equipment_items', data.itemId), { stock: increment(Number(data.qty) || 1) });
+            }
+            await deleteDoc(d.ref);
+          }));
+        }
+      } catch (equipErr) {
+        console.error('Gagal mengembalikan stok perlengkapan:', equipErr);
+      }
+
       if (item.packageId) {
         // Pakai increment() (atomic di server) — bukan baca-lalu-tulis dari
         // client — supaya nggak salah hitung kalau ada aksi lain yang
@@ -2144,6 +2165,25 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       if (!partnerLinkSnap.empty) {
         await Promise.all(partnerLinkSnap.docs.map(d => deleteDoc(d.ref)));
+      }
+
+      // Sama kayak hapus booking single — beresin equipment_distribution buat
+      // SELURUH booking di grup ini, balikin dulu stok barang yang statusnya
+      // udah "given" sebelum record distribusinya ikut kehapus.
+      try {
+        const equipQ = query(collection(db, 'equipment_distribution'), where('bookingId', 'in', ids));
+        const equipSnap = await getDocs(equipQ);
+        if (!equipSnap.empty) {
+          await Promise.all(equipSnap.docs.map(async (d) => {
+            const data = d.data();
+            if (data.given === true) {
+              await updateDoc(doc(db, 'equipment_items', data.itemId), { stock: increment(Number(data.qty) || 1) });
+            }
+            await deleteDoc(d.ref);
+          }));
+        }
+      } catch (equipErr) {
+        console.error('Gagal mengembalikan stok perlengkapan:', equipErr);
       }
 
       // Kuota cuma dilepas buat booking yang statusnya masih 'active' — yang
