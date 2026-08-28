@@ -547,8 +547,13 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
                 filteredPackages.map((pkg) => {
                   const isTourPkg = pkg.type === 'Wisata Halal Internasional' || pkg.type === 'Land Arrangement (LA) Only';
                   
+                  // Cuma booking yang statusnya masih 'active' yang beneran
+                  // makan kuota — yang udah dibatalkan/di-reschedule kuotanya
+                  // udah dikembalikan ke paket (lihat BookingsModule.jsx),
+                  // jadi kalau ikut dihitung di sini "Sisa Seat" bisa keliatan
+                  // lebih penuh dari yang sebenarnya.
                   const bookedSeatsCount = bookingsList.filter(
-                    b => b.packageId === pkg.id || b.packageName === pkg.name
+                    b => (b.packageId === pkg.id || b.packageName === pkg.name) && (b.status || 'active') === 'active'
                   ).length;
 
                   const totalQuota = Number(pkg.quotaTotal) || 0;
