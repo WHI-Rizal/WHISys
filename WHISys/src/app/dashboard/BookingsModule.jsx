@@ -1286,7 +1286,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         const paxShare = baseShare + (i === 0 ? remainder : 0);
 
         if (paxShare > 0) {
-          const payRef = await addDoc(collection(db, 'payments_income'), {
+          await addDoc(collection(db, 'payments_income'), {
             bookingId: item.id,
             bookingCode: item.bookingCode,
             jamaahName: item.jamaahName,
@@ -1299,24 +1299,28 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             createdAt: resolvePaymentCreatedAt(groupPaymentForm.date),
             groupTransactionId
           });
-          // 1 baris mutasi per dokumen (bukan 1 baris gabungan per submit) —
-          // biar pas 1 dokumen ini dihapus/diedit nanti, baris mutasinya bisa
-          // ditemukan & disesuaikan sendiri lewat sourceDocId.
-          if (groupPaymentForm.paymentMethod !== 'Saldo Deposit') {
-            await adjustAccountBalance(groupPaymentForm.accountId, paxShare, {
-              description: `Setoran Grup ${groupPaymentTarget.code} - ${item.jamaahName || item.bookingCode}`,
-              reference: item.bookingCode,
-              source: 'group_payment',
-              date: resolvePaymentCreatedAt(groupPaymentForm.date),
-              sourceDocId: payRef.id
-            });
-          }
         }
 
         // Sinkronkan totalPaid/paymentStatus tiap pax dari data payments_income
         // asli — dijalankan utk semua pax di grup, bukan cuma yang kebagian
         // setoran nonzero, biar tetap konsisten kalau ada penyesuaian rounding.
         await syncBookingTotalPaid(item.id, item.totalAmount);
+      }
+
+      // Mutasi Kas/Bank dicatat SATU KALI per transaksi setoran grup (bukan
+      // per pecahan pax) — biar "Riwayat Mutasi" persis sama jumlah uang yang
+      // beneran masuk ke rekening, gampang direkonsiliasi sama mutasi bank
+      // aslinya, dan pas transaksinya dihapus cuma perlu hapus 1 baris (lihat
+      // handleDeleteMergedGroupPayment). Rincian per-peserta tetap ada di
+      // payments_income, dicari lewat groupTransactionId yang sama.
+      if (groupPaymentForm.paymentMethod !== 'Saldo Deposit' && amount > 0) {
+        await adjustAccountBalance(groupPaymentForm.accountId, amount, {
+          description: `Setoran Grup ${groupPaymentTarget.code} (${paxCount} peserta)`,
+          reference: groupPaymentTarget.code,
+          source: 'group_payment',
+          date: resolvePaymentCreatedAt(groupPaymentForm.date),
+          sourceDocId: groupTransactionId
+        });
       }
 
       if (groupPaymentForm.paymentMethod === 'Saldo Deposit') {
@@ -1440,11 +1444,34 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     }
     if (!confirm(`Apakah Anda yakin ingin menghapus transaksi setoran ini? ${docs.length} catatan pembagian ke peserta akan ikut terhapus.`)) return;
     try {
+      const totalAmount = docs.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
       await Promise.all(docs.map(d => deleteDoc(doc(db, 'payments_income', d.id))));
-      // Tiap doc balikin porsinya sendiri ke saldo akun Kas/Bank asalnya, dan
-      // baris mutasinya masing-masing ikut hilang dari riwayat (doc yang
-      // dibayar pakai Saldo Deposit dilewati — nggak punya accountId).
-      await Promise.all(docs.map(d => d.accountId ? removeAccountMutationBySource(d.accountId, d.id, -(Number(d.amount) || 0)) : Promise.resolve()));
+      // Setoran grup yang dicatat lewat "Terima Setoran Jamaah" di modul
+      // Keuangan cuma punya SATU baris mutasi buat seluruh transaksi
+      // (sourceDocId = groupTransactionId, lihat FinanceModule.jsx) — jadi
+      // dicoba cari & hapus itu dulu. Kalau nggak ketemu (transaksi lama /
+      // dicatat lewat "Catat Setoran Grup" yang masih 1 baris mutasi per
+      // pecahan pax), baru fallback hapus satu-satu lewat id doc aslinya.
+      const mutationAccountId = docs.find(d => d.accountId)?.accountId;
+      if (mutationAccountId) {
+        const mergedSourceDocId = docs.find(d => d.groupTransactionId)?.groupTransactionId;
+        let foundMerged = false;
+        if (mergedSourceDocId) {
+          const mutQ = query(collection(db, 'account_mutations'), where('accountId', '==', mutationAccountId), where('sourceDocId', '==', mergedSourceDocId));
+          const mutSnap = await getDocs(mutQ);
+          if (mutSnap.docs.length > 0) {
+            foundMerged = true;
+            await Promise.all(mutSnap.docs.map(d => deleteDoc(d.ref)));
+            await updateDoc(doc(db, 'financial_accounts', mutationAccountId), { balance: increment(-totalAmount) });
+          }
+        }
+        if (!foundMerged) {
+          // Tiap doc balikin porsinya sendiri ke saldo akun Kas/Bank asalnya, dan
+          // baris mutasinya masing-masing ikut hilang dari riwayat (doc yang
+          // dibayar pakai Saldo Deposit dilewati — nggak punya accountId).
+          await Promise.all(docs.map(d => d.accountId ? removeAccountMutationBySource(d.accountId, d.id, -(Number(d.amount) || 0)) : Promise.resolve()));
+        }
+      }
 
       // Sinkronkan totalPaid/paymentStatus tiap booking unik yang kena dampak
       const uniqueBookingIds = [...new Set(docs.map(d => d.bookingId))];
