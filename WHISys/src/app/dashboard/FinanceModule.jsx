@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, getDoc, deleteDoc, doc, updateDoc, query, where, increment } from 'firebase/firestore';
-import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock, Download, Pencil } from 'lucide-react';
+import { collection, addDoc, getDocs, getDoc, setDoc, deleteDoc, doc, updateDoc, query, where, increment } from 'firebase/firestore';
+import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock, Download, Pencil, Plus, Settings } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import DateFieldID from '@/components/DateFieldID';
@@ -64,6 +64,13 @@ const VENDOR_CATEGORIES = [
   'Perlengkapan Koper',
   'Lain-lain'
 ];
+
+// ID dokumen konfigurasi daftar Kategori Vendor yang bisa diedit user —
+// sengaja "disamarkan" sebagai salah satu dokumen di collection 'vendors'
+// (bukan collection terpisah) supaya hak akses tulisnya otomatis ikut
+// aturan Firestore Rules yang udah ada buat kelola data vendor
+// (Finance & Super Admin), tanpa perlu minta perubahan rules baru.
+const VENDOR_CATEGORY_CONFIG_ID = '_categories_config';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -227,6 +234,19 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
   const [editingVendorMasterId, setEditingVendorMasterId] = useState(null);
   const [vendorMasterForm, setVendorMasterForm] = useState({ name: '', category: VENDOR_CATEGORIES[0] });
 
+  // Kategori Vendor sekarang bisa ditambah/diedit sendiri lewat tombol
+  // "Kelola Kategori" (nggak melulu daftar bawaan VENDOR_CATEGORIES lagi).
+  // Disimpan sebagai satu dokumen konfigurasi di collection 'vendors' sendiri
+  // (id tetap '_categories_config', ditandai isCategoryConfig:true dan
+  // disaring keluar dari vendorsList) — biar hak akses tulisnya otomatis
+  // sama kayak yang udah berlaku buat kelola data vendor (Finance/Admin),
+  // tanpa perlu ubah Firestore Rules lagi.
+  const [vendorCategories, setVendorCategories] = useState(VENDOR_CATEGORIES);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [categoryDraft, setCategoryDraft] = useState([]);
+  const [newCategoryText, setNewCategoryText] = useState('');
+  const [savingCategories, setSavingCategories] = useState(false);
+
   // Modal "Konversi ke Saldo Deposit" — dibuka dari 1 baris riwayat Bayar
   // Vendor yang DP-nya batal dipakai (trip cancel) tapi nggak hangus.
   const [showConvertDepositModal, setShowConvertDepositModal] = useState(false);
@@ -335,7 +355,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       setFinancialAccounts(accSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       const vendorMasterSnap = await getDocs(collection(db, 'vendors'));
-      setVendorsList(vendorMasterSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const vendorDocs = vendorMasterSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const categoryConfigDoc = vendorDocs.find(v => v.id === VENDOR_CATEGORY_CONFIG_ID);
+      setVendorsList(vendorDocs.filter(v => v.id !== VENDOR_CATEGORY_CONFIG_ID));
+      if (categoryConfigDoc && Array.isArray(categoryConfigDoc.categories) && categoryConfigDoc.categories.length > 0) {
+        setVendorCategories(categoryConfigDoc.categories);
+      }
 
       const txSnap = await getDocs(collection(db, 'payments_income'));
       setTransactions(txSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -568,7 +593,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       }
       setShowVendorMasterModal(false);
       setEditingVendorMasterId(null);
-      setVendorMasterForm({ name: '', category: VENDOR_CATEGORIES[0] });
+      setVendorMasterForm({ name: '', category: vendorCategories[0] });
       fetchData();
     } catch (err) {
       alert("Gagal menyimpan data vendor: " + err.message);
@@ -577,7 +602,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
   const handleEditVendorMaster = (v) => {
     setEditingVendorMasterId(v.id);
-    setVendorMasterForm({ name: v.name || '', category: v.category || VENDOR_CATEGORIES[0] });
+    setVendorMasterForm({ name: v.name || '', category: v.category || vendorCategories[0] });
     setShowVendorMasterModal(true);
   };
 
@@ -604,6 +629,84 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     } catch (err) {
       alert("Gagal menghapus vendor: " + err.message);
     }
+  };
+
+  // ============ Kelola Kategori Vendor (Tambah/Edit/Hapus) ============
+
+  const openCategoryModal = () => {
+    setCategoryDraft(vendorCategories.map((c, i) => ({ key: `existing-${i}`, original: c, value: c })));
+    setNewCategoryText('');
+    setShowCategoryModal(true);
+  };
+
+  const handleAddCategoryDraft = () => {
+    const text = newCategoryText.trim();
+    if (!text) return;
+    const isDuplicate = categoryDraft.some(c => c.value.trim().toLowerCase() === text.toLowerCase());
+    if (isDuplicate) {
+      alert(`Kategori "${text}" udah ada di daftar.`);
+      return;
+    }
+    setCategoryDraft(prev => [...prev, { key: `new-${Date.now()}`, original: null, value: text }]);
+    setNewCategoryText('');
+  };
+
+  const handleRenameCategoryDraft = (key, value) => {
+    setCategoryDraft(prev => prev.map(c => c.key === key ? { ...c, value } : c));
+  };
+
+  const handleRemoveCategoryDraft = (key) => {
+    const target = categoryDraft.find(c => c.key === key);
+    if (!target) return;
+    if (target.original) {
+      const usedCount = vendorsList.filter(v => v.category === target.original).length;
+      if (usedCount > 0) {
+        if (!confirm(`Kategori "${target.original}" masih dipakai oleh ${usedCount} vendor. Kalau dihapus dari daftar, vendor-vendor itu tetap tersimpan kategorinya (nggak ikut kehapus/kereset), cuma nggak muncul lagi di pilihan dropdown. Tetap hapus dari daftar?`)) return;
+      }
+    }
+    setCategoryDraft(prev => prev.filter(c => c.key !== key));
+  };
+
+  const handleSaveCategories = async () => {
+    const finalValues = categoryDraft.map(c => c.value.trim()).filter(Boolean);
+    if (finalValues.length === 0) {
+      alert("Minimal harus ada 1 kategori.");
+      return;
+    }
+    const lowerSet = new Set();
+    for (const v of finalValues) {
+      const lower = v.toLowerCase();
+      if (lowerSet.has(lower)) {
+        alert(`Ada kategori yang namanya sama: "${v}". Gabungkan atau ganti dulu salah satunya.`);
+        return;
+      }
+      lowerSet.add(lower);
+    }
+
+    setSavingCategories(true);
+    try {
+      // Rename: kategori lama yang namanya diubah (bukan yang baru ditambah)
+      // ikut disesuaikan ke semua vendor yang masih pakai nama lama itu,
+      // biar data vendor existing tetap konsisten sama daftar kategori terbaru.
+      const renames = categoryDraft.filter(c => c.original && c.value.trim() && c.value.trim() !== c.original);
+      for (const r of renames) {
+        const affected = vendorsList.filter(v => v.category === r.original);
+        await Promise.all(affected.map(v => updateDoc(doc(db, 'vendors', v.id), { category: r.value.trim() })));
+      }
+
+      await setDoc(doc(db, 'vendors', VENDOR_CATEGORY_CONFIG_ID), {
+        isCategoryConfig: true,
+        categories: finalValues,
+        updatedAt: new Date().toISOString()
+      });
+
+      setVendorCategories(finalValues);
+      setShowCategoryModal(false);
+      await fetchData();
+    } catch (err) {
+      alert("Gagal menyimpan daftar kategori: " + err.message);
+    }
+    setSavingCategories(false);
   };
 
   // ============ Konversi DP Vendor batal (nggak hangus) -> Saldo Deposit Vendor ============
@@ -1113,7 +1216,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       }
 
       setShowVendorModal(false);
-      setVendorForm({ packageId: '', vendorId: '', vendorName: '', category: VENDOR_CATEGORIES[0], payMethod: 'Kas/Bank', amount: '', accountId: '', notes: 'DP Booking Seat', paymentDate: todayISODate() });
+      setVendorForm({ packageId: '', vendorId: '', vendorName: '', category: vendorCategories[0], payMethod: 'Kas/Bank', amount: '', accountId: '', notes: 'DP Booking Seat', paymentDate: todayISODate() });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat pembayaran vendor: " + err.message);
@@ -2316,7 +2419,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
             <button
               onClick={() => {
                 setEditingVendorMasterId(null);
-                setVendorMasterForm({ name: '', category: VENDOR_CATEGORIES[0] });
+                setVendorMasterForm({ name: '', category: vendorCategories[0] });
                 setShowVendorMasterModal(true);
               }}
               className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
@@ -2460,13 +2563,22 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 />
               </div>
               <div>
-                <label className="block mb-1 font-medium">Kategori</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-medium">Kategori</label>
+                  <button
+                    type="button"
+                    onClick={openCategoryModal}
+                    className="text-[10px] text-rose-500 hover:underline flex items-center gap-1"
+                  >
+                    <Settings className="w-3 h-3" /> Kelola Kategori
+                  </button>
+                </div>
                 <select
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                   value={vendorMasterForm.category}
                   onChange={e => setVendorMasterForm({ ...vendorMasterForm, category: e.target.value })}
                 >
-                  {VENDOR_CATEGORIES.map(cat => (
+                  {vendorCategories.map(cat => (
                     <option key={cat} value={cat}>{cat}</option>
                   ))}
                 </select>
@@ -2483,6 +2595,78 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showCategoryModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowCategoryModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <Settings className="w-5 h-5 text-rose-500" /> Kelola Kategori Vendor
+            </h3>
+            <p className={`text-[11px] ${styles.textSub} mb-4`}>
+              Ubah nama kategori yang udah ada, hapus yang nggak kepake, atau tambah kategori baru. Perubahan ini langsung kepakai di semua dropdown Kategori Vendor.
+            </p>
+
+            <div className="space-y-2 mb-4">
+              {categoryDraft.map((c) => (
+                <div key={c.key} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
+                    value={c.value}
+                    onChange={e => handleRenameCategoryDraft(c.key, e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveCategoryDraft(c.key)}
+                    className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors shrink-0"
+                    title="Hapus kategori ini"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              {categoryDraft.length === 0 && (
+                <p className={`text-xs ${styles.textSub}`}>Belum ada kategori. Tambahkan minimal 1 di bawah.</p>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 mb-5">
+              <input
+                type="text"
+                placeholder="Nama kategori baru, cth: Katering"
+                className={`w-full ${styles.inputBg} rounded-lg p-2.5 text-xs`}
+                value={newCategoryText}
+                onChange={e => setNewCategoryText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddCategoryDraft(); } }}
+              />
+              <button
+                type="button"
+                onClick={handleAddCategoryDraft}
+                className="flex items-center gap-1 px-3 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-medium shrink-0"
+              >
+                <Plus className="w-4 h-4" /> Tambah
+              </button>
+            </div>
+
+            <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <button type="button" onClick={() => setShowCategoryModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg text-xs`}>
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCategories}
+                disabled={savingCategories}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-60 text-white rounded-lg text-xs font-medium"
+              >
+                {savingCategories ? 'Menyimpan...' : 'Simpan Kategori'}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3287,13 +3471,22 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block mb-1 font-medium">Kategori Pengeluaran</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-medium">Kategori Pengeluaran</label>
+                    <button
+                      type="button"
+                      onClick={openCategoryModal}
+                      className="text-[10px] text-rose-500 hover:underline flex items-center gap-1"
+                    >
+                      <Settings className="w-3 h-3" /> Kelola
+                    </button>
+                  </div>
                   <select
                     className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                     value={vendorForm.category}
                     onChange={e => setVendorForm({ ...vendorForm, category: e.target.value })}
                   >
-                    {VENDOR_CATEGORIES.map(cat => (
+                    {vendorCategories.map(cat => (
                       <option key={cat} value={cat}>{cat}</option>
                     ))}
                   </select>
