@@ -327,62 +327,114 @@ export default function EquipmentModule({ theme = 'dark' }) {
                 <Plus className="w-3.5 h-3.5" /> Tambah Barang
               </button>
             </div>
-            <div className={`${styles.innerBg} border rounded-xl overflow-hidden`}>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                    <tr>
-                      <th className="p-4">Nama Barang</th>
-                      <th className="p-4">Satuan</th>
-                      <th className="p-4 text-right">Stok Tersedia</th>
-                      <th className="p-4">Catatan</th>
-                      <th className="p-4 text-center">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className={`divide-y ${styles.tableRowBorder}`}>
-                    {itemsList.length === 0 ? (
-                      <tr><td colSpan="5" className={`p-8 text-center ${styles.textSub}`}>Belum ada data master barang. Tambah dulu jenis perlengkapannya.</td></tr>
-                    ) : (
-                      itemsList.map(item => (
-                        <tr key={item.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
-                          <td className={`p-4 font-semibold ${styles.textTitle}`}>{item.name}</td>
-                          <td className={`p-4 ${styles.textSub}`}>{item.unit}</td>
-                          <td className={`p-4 text-right font-bold ${Number(item.stock || 0) === 0 ? 'text-rose-500' : styles.textTitle}`}>
-                            {Number(item.stock || 0).toLocaleString('id-ID')}
-                          </td>
-                          <td className={`p-4 ${styles.textSub}`}>{item.notes || '-'}</td>
-                          <td className="p-4">
-                            <div className="flex items-center justify-center gap-1.5">
-                              <button
-                                onClick={() => handleOpenStockAdjust(item)}
-                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
-                                title="Sesuaikan Stok"
-                              >
-                                <PackagePlus className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => handleOpenEditItem(item)}
-                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
-                                title="Edit Barang"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteItem(item)}
-                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                                title="Hapus Barang"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+            {itemsList.length === 0 ? (
+              <div className={`${styles.innerBg} border rounded-xl p-8 text-center text-xs ${styles.textSub}`}>
+                Belum ada data master barang. Tambah dulu jenis perlengkapannya.
               </div>
-            </div>
+            ) : (
+              <>
+                <div className={`${styles.innerBg} border rounded-xl overflow-hidden hidden md:block`}>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                        <tr>
+                          <th className="p-4">Nama Barang</th>
+                          <th className="p-4">Satuan</th>
+                          <th className="p-4 text-right">Stok Tersedia</th>
+                          <th className="p-4">Catatan</th>
+                          <th className="p-4 text-center">Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                        {itemsList.map(item => (
+                          <tr key={item.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                            <td className={`p-4 font-semibold ${styles.textTitle}`}>{item.name}</td>
+                            <td className={`p-4 ${styles.textSub}`}>{item.unit}</td>
+                            <td className={`p-4 text-right font-bold ${Number(item.stock || 0) === 0 ? 'text-rose-500' : styles.textTitle}`}>
+                              {Number(item.stock || 0).toLocaleString('id-ID')}
+                            </td>
+                            <td className={`p-4 ${styles.textSub}`}>{item.notes || '-'}</td>
+                            <td className="p-4">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  onClick={() => handleOpenStockAdjust(item)}
+                                  className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                                  title="Sesuaikan Stok"
+                                >
+                                  <PackagePlus className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleOpenEditItem(item)}
+                                  className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                                  title="Edit Barang"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteItem(item)}
+                                  className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                                  title="Hapus Barang"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Mobile card view */}
+                <div className="md:hidden space-y-3">
+                  {itemsList.map(item => (
+                    <div key={item.id} className={`${styles.innerBg} border rounded-xl p-4`}>
+                      <p className={`text-sm font-bold ${styles.textTitle}`}>{item.name}</p>
+                      <div className="mt-2 space-y-1.5">
+                        <div>
+                          <p className={`text-[10px] uppercase ${styles.textSub}`}>Satuan</p>
+                          <p className={`text-xs ${styles.textTitle}`}>{item.unit}</p>
+                        </div>
+                        <div>
+                          <p className={`text-[10px] uppercase ${styles.textSub}`}>Stok Tersedia</p>
+                          <p className={`text-xs font-bold ${Number(item.stock || 0) === 0 ? 'text-rose-500' : styles.textTitle}`}>
+                            {Number(item.stock || 0).toLocaleString('id-ID')}
+                          </p>
+                        </div>
+                        <div>
+                          <p className={`text-[10px] uppercase ${styles.textSub}`}>Catatan</p>
+                          <p className={`text-xs ${styles.textSub}`}>{item.notes || '-'}</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        <button
+                          onClick={() => handleOpenStockAdjust(item)}
+                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                          title="Sesuaikan Stok"
+                        >
+                          <PackagePlus className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleOpenEditItem(item)}
+                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                          title="Edit Barang"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteItem(item)}
+                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                          title="Hapus Barang"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -450,7 +502,7 @@ export default function EquipmentModule({ theme = 'dark' }) {
                   <p className={`text-xs font-bold ${styles.textTitle} mb-2 flex items-center gap-1.5`}>
                     <Truck className="w-3.5 h-3.5 text-emerald-500" /> Checklist Distribusi per Jamaah
                   </p>
-                  <div className={`${styles.innerBg} border rounded-xl overflow-hidden`}>
+                  <div className={`${styles.innerBg} border rounded-xl overflow-hidden hidden md:block`}>
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs">
                         <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
@@ -491,6 +543,37 @@ export default function EquipmentModule({ theme = 'dark' }) {
                       </table>
                     </div>
                   </div>
+
+                  {/* Mobile card view */}
+                  <div className="md:hidden space-y-3">
+                    {bookingsForPackage.map(booking => (
+                      <div key={booking.id} className={`${styles.innerBg} border rounded-xl p-4`}>
+                        <p className={`text-sm font-bold ${styles.textTitle}`}>{booking.jamaahName}</p>
+                        <p className={`text-xs font-mono text-emerald-500 mt-0.5`}>{booking.bookingCode}</p>
+                        <div className="mt-3 space-y-2">
+                          {itemsList.map(item => {
+                            const isGiven = getDistRow(booking.id, item.id)?.given === true;
+                            return (
+                              <div key={item.id} className="flex items-center justify-between gap-2">
+                                <span className={`text-xs ${styles.textSub}`}>{item.name}</span>
+                                <button
+                                  onClick={() => handleToggleGiven(booking, item)}
+                                  title={isGiven ? `Sudah dikasih ${item.name} — klik buat batalkan` : `Belum dikasih ${item.name} — klik buat tandai sudah`}
+                                  className={`w-6 h-6 rounded-md border flex items-center justify-center transition-colors ${
+                                    isGiven
+                                      ? 'bg-emerald-500 border-emerald-500 text-white'
+                                      : `${isDark ? 'border-slate-700 hover:border-emerald-500' : 'border-slate-300 hover:border-emerald-500'}`
+                                  }`}
+                                >
+                                  {isGiven && <CheckCircle className="w-4 h-4" />}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </>
             )}
@@ -501,7 +584,7 @@ export default function EquipmentModule({ theme = 'dark' }) {
       {/* MODAL TAMBAH/EDIT BARANG */}
       {showItemModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowItemModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
@@ -570,7 +653,7 @@ export default function EquipmentModule({ theme = 'dark' }) {
       {/* MODAL SESUAIKAN STOK */}
       {showStockModal && adjustingItem && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowStockModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
