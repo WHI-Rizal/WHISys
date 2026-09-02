@@ -495,7 +495,7 @@ export default function SettingsModule({ theme = 'dark' }) {
                 </div>
               ) : (
                 usersList.map((user) => (
-                  <div key={user.id} className={`p-4 rounded-xl border ${styles.innerBg} flex items-center justify-between`}>
+                  <div key={user.id} className={`p-4 rounded-xl border ${styles.innerBg} flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3`}>
                     <div className="flex items-center gap-3">
                       <div className={`p-2.5 rounded-xl font-bold text-xs uppercase ${
                         user.role === 'Super Admin' || user.role === 'admin' ? 'bg-emerald-500/20 text-emerald-400' :
@@ -593,7 +593,7 @@ export default function SettingsModule({ theme = 'dark' }) {
       {/* MODAL DIALOG TAMBAH USER BARU */}
       {showUserModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative shadow-2xl`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative shadow-2xl max-h-[90vh] overflow-y-auto`}>
             <button 
               type="button" 
               onClick={() => setShowModal(false)} 
