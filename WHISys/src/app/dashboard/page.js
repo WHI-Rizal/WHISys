@@ -387,6 +387,7 @@ export default function DashboardPage() {
             <SidebarItem
               icon={LayoutDashboard}
               label="Dashboard Utama"
+              menuKey="dashboard"
               active={activeMenu === 'dashboard'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
@@ -397,6 +398,7 @@ export default function DashboardPage() {
             <SidebarItem
               icon={Plane}
               label="Paket Travel & LA"
+              menuKey="packages"
               active={activeMenu === 'packages'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
@@ -407,6 +409,7 @@ export default function DashboardPage() {
             <SidebarItem
               icon={Users}
               label="Data Master Jamaah"
+              menuKey="jamaah"
               active={activeMenu === 'jamaah'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
@@ -417,6 +420,7 @@ export default function DashboardPage() {
             <SidebarItem
               icon={BookOpen}
               label="Booking & Manifest"
+              menuKey="bookings"
               active={activeMenu === 'bookings'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
@@ -430,6 +434,7 @@ export default function DashboardPage() {
               <SidebarItem
                 icon={Wallet}
                 label="Keuangan & Pelunasan"
+                menuKey="finance"
                 active={activeMenu === 'finance'}
                 activeClass={currentTheme.activeMenu}
                 subTextClass={currentTheme.subText}
@@ -441,6 +446,7 @@ export default function DashboardPage() {
             <SidebarItem
               icon={MessageSquareHeart}
               label="Feedback & Ulasan"
+              menuKey="feedback"
               active={activeMenu === 'feedback'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
@@ -451,6 +457,7 @@ export default function DashboardPage() {
             <SidebarItem
               icon={PackageCheck}
               label="Perlengkapan Jamaah"
+              menuKey="equipment"
               active={activeMenu === 'equipment'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
@@ -461,6 +468,7 @@ export default function DashboardPage() {
             <SidebarItem
               icon={UserCheck}
               label="Mitra & Agen"
+              menuKey="agents"
               active={activeMenu === 'agents'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
@@ -473,6 +481,7 @@ export default function DashboardPage() {
             <SidebarItem
               icon={Sparkles}
               label="AI Business Intelligence"
+              menuKey="ai-analyzer"
               active={activeMenu === 'ai-analyzer'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
@@ -483,6 +492,7 @@ export default function DashboardPage() {
             <SidebarItem
               icon={Settings}
               label="Pengaturan Sistem"
+              menuKey="settings"
               active={activeMenu === 'settings'}
               activeClass={currentTheme.activeMenu}
               subTextClass={currentTheme.subText}
@@ -756,18 +766,25 @@ export default function DashboardPage() {
   );
 }
 
-function SidebarItem({ icon: Icon, label, active, activeClass, subTextClass, collapsed, onClick }) {
+function SidebarItem({ icon: Icon, label, active, activeClass, subTextClass, collapsed, onClick, menuKey }) {
   // "collapsed" (rail ikon doang, tanpa teks label) itu konsep KHUSUS
   // desktop/tablet (md ke atas) — di HP, sidebar-nya jadi drawer full-width
   // yang selalu nampilin label penuh, apapun status collapsed-nya di
   // desktop. Makanya class "sembunyiin label"-nya dikasih prefix md: biar
   // cuma ngefek di layar gede, dan labelnya tetap DI-RENDER (bukan
   // dihilangin dari DOM) supaya bisa dikontrol lewat CSS per breakpoint.
+  //
+  // Dipakai <a href="#menuKey"> (bukan <button>) supaya menu ini beneran
+  // jadi link kayak halaman web pada umumnya — bisa diklik kanan > Buka
+  // di Tab Baru, dibuka pakai klik tengah/ctrl+klik, dsb. onClick tetap
+  // jalan seperti biasa buat urusan state (ganti activeMenu, tutup drawer
+  // HP, side-effect kayak fetchDashboardData) begitu link-nya diklik biasa.
   return (
-    <button
+    <a
+      href={`#${menuKey}`}
       onClick={onClick}
       title={collapsed ? label : undefined}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${collapsed ? 'md:justify-center md:px-0' : ''} ${
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${collapsed ? 'md:justify-center md:px-0' : ''} ${
         active
           ? `${activeClass} shadow-md`
           : `${subTextClass} hover:bg-emerald-500/10 hover:text-emerald-500`
@@ -775,6 +792,6 @@ function SidebarItem({ icon: Icon, label, active, activeClass, subTextClass, col
     >
       <Icon className="w-4 h-4 shrink-0" />
       <span className={collapsed ? 'md:hidden' : ''}>{label}</span>
-    </button>
+    </a>
   );
 }
