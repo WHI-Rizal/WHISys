@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
-import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble } from 'lucide-react';
+import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 
 // Helper Format Tanggal dd/mm/yyyy
@@ -54,6 +54,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
   const [selectedPeriod, setSelectedPeriod] = useState('');
   const [selectedDestination, setSelectedDestination] = useState('');
   const [selectedAirline, setSelectedAirline] = useState('');
+  const [sortBy, setSortBy] = useState('');
 
   const [showModal, setShowModal] = useState(false);
   const [editingPackageId, setEditingPackageId] = useState(null);
@@ -407,9 +408,22 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
   const availableAirlines = Array.from(new Set(packagesList.map(p => p.airline).filter(Boolean)));
   const availablePeriods = Array.from(new Set(packagesList.map(p => formatMonthYear(p.departureDate)).filter(Boolean)));
 
+  // Sisa Seat dihitung dari Kuota Total dikurangi booking yang statusnya
+  // masih 'active' — yang udah dibatalkan/di-reschedule kuotanya udah
+  // dikembalikan ke paket (lihat BookingsModule.jsx). Dipisah jadi helper
+  // biar dipakai bareng buat tampilan tabel/kartu dan buat sorting.
+  const getPackageSeatInfo = (pkg) => {
+    const bookedSeatsCount = bookingsList.filter(
+      b => (b.packageId === pkg.id || b.packageName === pkg.name) && (b.status || 'active') === 'active'
+    ).length;
+    const totalQuota = Number(pkg.quotaTotal) || 0;
+    const remainingQuota = Math.max(0, totalQuota - bookedSeatsCount);
+    return { totalQuota, remainingQuota };
+  };
+
   // Logika Filter
   const filteredPackages = packagesList.filter((pkg) => {
-    const matchesSearch = 
+    const matchesSearch =
       (pkg.name && pkg.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (pkg.code && pkg.code.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (pkg.destinationCity && pkg.destinationCity.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -422,11 +436,37 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
     return matchesSearch && matchesPeriod && matchesDestination && matchesAirline;
   });
 
+  // Logika Sort — dipisah dari filter biar urutan aslinya (createdAt) tetap
+  // jadi default kalau user belum pilih opsi sort apapun.
+  const sortedPackages = [...filteredPackages].sort((a, b) => {
+    switch (sortBy) {
+      case 'name_asc':
+        return (a.name || '').localeCompare(b.name || '');
+      case 'name_desc':
+        return (b.name || '').localeCompare(a.name || '');
+      case 'date_asc':
+        return new Date(a.departureDate || 0) - new Date(b.departureDate || 0);
+      case 'date_desc':
+        return new Date(b.departureDate || 0) - new Date(a.departureDate || 0);
+      case 'price_asc':
+        return Number(a.priceMain || a.priceQuad || 0) - Number(b.priceMain || b.priceQuad || 0);
+      case 'price_desc':
+        return Number(b.priceMain || b.priceQuad || 0) - Number(a.priceMain || a.priceQuad || 0);
+      case 'seat_asc':
+        return getPackageSeatInfo(a).remainingQuota - getPackageSeatInfo(b).remainingQuota;
+      case 'seat_desc':
+        return getPackageSeatInfo(b).remainingQuota - getPackageSeatInfo(a).remainingQuota;
+      default:
+        return 0;
+    }
+  });
+
   const resetFilters = () => {
     setSearchTerm('');
     setSelectedPeriod('');
     setSelectedDestination('');
     setSelectedAirline('');
+    setSortBy('');
   };
 
   const isTourOrLA = formData.type === 'Wisata Halal Internasional' || formData.type === 'Land Arrangement (LA) Only';
@@ -458,14 +498,14 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
           <span className={`text-xs font-bold ${styles.textTitle} flex items-center gap-1.5`}>
             <Filter className="w-4 h-4 text-emerald-500" /> Filter Data Keberangkatan
           </span>
-          {(searchTerm || selectedPeriod || selectedDestination || selectedAirline) && (
+          {(searchTerm || selectedPeriod || selectedDestination || selectedAirline || sortBy) && (
             <button onClick={resetFilters} className="text-[11px] text-rose-500 hover:underline flex items-center gap-1">
               <RefreshCw className="w-3 h-3" /> Reset Filter
             </button>
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
             <input
@@ -520,6 +560,25 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
               ))}
             </select>
           </div>
+
+          <div className="relative">
+            <ArrowUpDown className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className={`w-full ${styles.inputBg} pl-9 pr-3 py-2 rounded-lg text-xs focus:outline-none focus:border-emerald-500`}
+            >
+              <option value="">-- Urutan Default --</option>
+              <option value="date_asc">Keberangkatan (Terdekat)</option>
+              <option value="date_desc">Keberangkatan (Terjauh)</option>
+              <option value="name_asc">Nama Paket (A-Z)</option>
+              <option value="name_desc">Nama Paket (Z-A)</option>
+              <option value="price_asc">Harga (Termurah)</option>
+              <option value="price_desc">Harga (Termahal)</option>
+              <option value="seat_asc">Sisa Seat (Tersedikit)</option>
+              <option value="seat_desc">Sisa Seat (Terbanyak)</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -541,23 +600,12 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
             <tbody className={`divide-y ${styles.tableRowBorder}`}>
               {loading ? (
                 <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Memuat katalog paket...</td></tr>
-              ) : filteredPackages.length === 0 ? (
+              ) : sortedPackages.length === 0 ? (
                 <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Tidak ada paket yang sesuai dengan filter pencarian.</td></tr>
               ) : (
-                filteredPackages.map((pkg) => {
+                sortedPackages.map((pkg) => {
                   const isTourPkg = pkg.type === 'Wisata Halal Internasional' || pkg.type === 'Land Arrangement (LA) Only';
-                  
-                  // Cuma booking yang statusnya masih 'active' yang beneran
-                  // makan kuota — yang udah dibatalkan/di-reschedule kuotanya
-                  // udah dikembalikan ke paket (lihat BookingsModule.jsx),
-                  // jadi kalau ikut dihitung di sini "Sisa Seat" bisa keliatan
-                  // lebih penuh dari yang sebenarnya.
-                  const bookedSeatsCount = bookingsList.filter(
-                    b => (b.packageId === pkg.id || b.packageName === pkg.name) && (b.status || 'active') === 'active'
-                  ).length;
-
-                  const totalQuota = Number(pkg.quotaTotal) || 0;
-                  const remainingQuota = Math.max(0, totalQuota - bookedSeatsCount);
+                  const { totalQuota, remainingQuota } = getPackageSeatInfo(pkg);
 
                   return (
                     <tr key={pkg.id} className={`${isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'} transition-colors`}>
@@ -644,18 +692,12 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
         <div className="md:hidden space-y-3 p-4">
           {loading ? (
             <div className={`p-8 text-center text-xs ${styles.textSub}`}>Memuat katalog paket...</div>
-          ) : filteredPackages.length === 0 ? (
+          ) : sortedPackages.length === 0 ? (
             <div className={`p-8 text-center text-xs ${styles.textSub}`}>Tidak ada paket yang sesuai dengan filter pencarian.</div>
           ) : (
-            filteredPackages.map((pkg) => {
+            sortedPackages.map((pkg) => {
               const isTourPkg = pkg.type === 'Wisata Halal Internasional' || pkg.type === 'Land Arrangement (LA) Only';
-
-              const bookedSeatsCount = bookingsList.filter(
-                b => (b.packageId === pkg.id || b.packageName === pkg.name) && (b.status || 'active') === 'active'
-              ).length;
-
-              const totalQuota = Number(pkg.quotaTotal) || 0;
-              const remainingQuota = Math.max(0, totalQuota - bookedSeatsCount);
+              const { totalQuota, remainingQuota } = getPackageSeatInfo(pkg);
 
               return (
                 <div key={pkg.id} className={`${styles.innerBg} border rounded-xl p-4 text-xs space-y-2`}>
