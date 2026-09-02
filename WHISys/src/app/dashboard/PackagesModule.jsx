@@ -525,7 +525,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
 
       {/* TABEL DATA PAKET */}
       <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className={`${styles.tableHeaderBg} uppercase tracking-wider border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <tr>
@@ -639,6 +639,105 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
               )}
             </tbody>
           </table>
+        </div>
+
+        <div className="md:hidden space-y-3 p-4">
+          {loading ? (
+            <div className={`p-8 text-center text-xs ${styles.textSub}`}>Memuat katalog paket...</div>
+          ) : filteredPackages.length === 0 ? (
+            <div className={`p-8 text-center text-xs ${styles.textSub}`}>Tidak ada paket yang sesuai dengan filter pencarian.</div>
+          ) : (
+            filteredPackages.map((pkg) => {
+              const isTourPkg = pkg.type === 'Wisata Halal Internasional' || pkg.type === 'Land Arrangement (LA) Only';
+
+              const bookedSeatsCount = bookingsList.filter(
+                b => (b.packageId === pkg.id || b.packageName === pkg.name) && (b.status || 'active') === 'active'
+              ).length;
+
+              const totalQuota = Number(pkg.quotaTotal) || 0;
+              const remainingQuota = Math.max(0, totalQuota - bookedSeatsCount);
+
+              return (
+                <div key={pkg.id} className={`${styles.innerBg} border rounded-xl p-4 text-xs space-y-2`}>
+                  <div>
+                    <div className={`font-semibold ${styles.textTitle}`}>{pkg.name}</div>
+                    <div className="text-[10px] text-emerald-500 font-mono">{pkg.code} • {pkg.durationDays || '9 Hari'}</div>
+                  </div>
+
+                  <div className={`space-y-1 ${styles.textSub}`}>
+                    <div>
+                      Jenis: <span className={`${styles.textTitle} font-medium`}>{pkg.type}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      Maskapai: <Plane className="w-3 h-3 text-blue-500" /> <span className={styles.textTitle}>{pkg.airline || '-'}</span>
+                    </div>
+                    <div>
+                      Tgl Keberangkatan: <span className={styles.textTitle}>{formatDateDDMMYYYY(pkg.departureDate)}</span>
+                    </div>
+                    {isTourPkg ? (
+                      <>
+                        <div>Destinasi: <span className={`${styles.textTitle} font-medium`}>{pkg.destinationCity || '-'}</span></div>
+                        <div>Fasilitas: <span className={styles.textTitle}>{pkg.hotelTour || pkg.laScope || '-'}</span></div>
+                      </>
+                    ) : (
+                      <>
+                        <div>Makkah: <span className={styles.textTitle}>{pkg.hotelMakkah || '-'}</span></div>
+                        <div>Madinah: <span className={styles.textTitle}>{pkg.hotelMadinah || '-'}</span></div>
+                      </>
+                    )}
+                    <div>
+                      Harga Utama / Pax: <span className="font-bold text-emerald-500">
+                        Rp {(pkg.priceMain || pkg.priceQuad) ? Number(pkg.priceMain || pkg.priceQuad).toLocaleString('id-ID') : '0'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      Sisa Seat:
+                      <span className={`px-3 py-1 rounded-full text-[11px] font-bold whitespace-nowrap inline-block ${
+                        remainingQuota > 5
+                          ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                          : 'bg-rose-500/10 text-rose-500 border border-rose-500/20'
+                      }`}>
+                        {remainingQuota} / {totalQuota}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    <button
+                      onClick={() => handleOpenItinerary(pkg)}
+                      className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-purple-500 rounded-lg transition-colors relative`}
+                      title="Itinerary Perjalanan"
+                    >
+                      <ListOrdered className="w-4 h-4" />
+                      {Array.isArray(pkg.itinerary) && pkg.itinerary.length > 0 && (
+                        <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-purple-500 text-white text-[8px] rounded-full flex items-center justify-center font-bold">
+                          {pkg.itinerary.length}
+                        </span>
+                      )}
+                    </button>
+                    {canManagePackages && (
+                      <>
+                        <button
+                          onClick={() => handleOpenEdit(pkg)}
+                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                          title="Edit Paket"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(pkg)}
+                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                          title="Hapus Paket"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 
