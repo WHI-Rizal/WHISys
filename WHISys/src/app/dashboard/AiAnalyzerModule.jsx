@@ -83,7 +83,10 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
         getDocs(collection(db, 'payments_vendor'))
       ]);
 
-      setPackages(pkgSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      // "_destination_categories_config" itu dokumen konfigurasi daftar
+      // Destinasi/Kota Tujuan (dikelola dari PackagesModule.jsx), bukan
+      // paket beneran — disaring keluar biar nggak dianggap paket kosong.
+      setPackages(pkgSnap.docs.filter(d => d.id !== '_destination_categories_config').map(d => ({ id: d.id, ...d.data() })));
       setJamaah(jmhSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setBookings(bkSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setIncomes(incSnap.docs.map(d => ({ id: d.id, ...d.data() })));
