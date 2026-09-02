@@ -504,7 +504,7 @@ export default function AgentsModule({ theme = 'dark' }) {
               </button>
             </div>
             <div className={`${styles.innerBg} border rounded-xl overflow-hidden`}>
-              <div className="overflow-x-auto">
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                     <tr>
@@ -561,6 +561,55 @@ export default function AgentsModule({ theme = 'dark' }) {
                   </tbody>
                 </table>
               </div>
+              <div className="md:hidden space-y-3 p-3">
+                {partnersList.length === 0 ? (
+                  <div className={`p-8 text-center ${styles.textSub}`}>Belum ada data mitra/agen. Tambah dulu profilnya.</div>
+                ) : (
+                  partnersList.map(p => (
+                    <div key={p.id} className={`${styles.cardBg} border rounded-xl p-4 space-y-2`}>
+                      <div className={`font-semibold ${styles.textTitle}`}>{p.name}</div>
+                      <div>
+                        <span className="text-xs opacity-60">Jenis</span>
+                        <div className={styles.textSub}>{p.type}</div>
+                      </div>
+                      <div>
+                        <span className="text-xs opacity-60">Kontak</span>
+                        <div className={styles.textSub}>{p.contactPerson || '-'}{p.phone ? ` • ${p.phone}` : ''}</div>
+                      </div>
+                      <div>
+                        <span className="text-xs opacity-60">Komisi Default</span>
+                        <div className={styles.textTitle}>{formatCommission(p.commissionType, p.commissionValue)}</div>
+                      </div>
+                      <div>
+                        <span className="text-xs opacity-60">Status</span>
+                        <div>
+                          {p.active !== false ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">Aktif</span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-500/10 text-slate-400 border border-slate-500/20">Nonaktif</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          onClick={() => handleOpenEditPartner(p)}
+                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                          title="Edit Mitra"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeletePartner(p)}
+                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                          title="Hapus Mitra"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -613,7 +662,7 @@ export default function AgentsModule({ theme = 'dark' }) {
             })()}
 
             <div className={`${styles.innerBg} border rounded-xl overflow-hidden`}>
-              <div className="overflow-x-auto">
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                     <tr>
@@ -660,6 +709,51 @@ export default function AgentsModule({ theme = 'dark' }) {
                   </tbody>
                 </table>
               </div>
+              <div className="md:hidden space-y-3 p-3">
+                {visiblePartnerBookings.length === 0 ? (
+                  <div className={`p-8 text-center ${styles.textSub}`}>Belum ada pemesanan yang dihubungkan ke mitra/agen.</div>
+                ) : (
+                  visiblePartnerBookings.map(pb => (
+                    <div key={pb.id} className={`${styles.cardBg} border rounded-xl p-4 space-y-2`}>
+                      <div className={`font-semibold font-mono text-emerald-500`}>{pb.groupBookingCode}</div>
+                      <div>
+                        <span className="text-xs opacity-60">Jamaah</span>
+                        <div className={styles.textTitle}>{pb.jamaahName}{pb.paxCount > 1 ? ` dkk (${pb.paxCount} pax)` : ''}</div>
+                      </div>
+                      <div>
+                        <span className="text-xs opacity-60">Paket</span>
+                        <div className={styles.textSub}>{pb.packageName}</div>
+                      </div>
+                      <div>
+                        <span className="text-xs opacity-60">Mitra/Agen</span>
+                        <div className={styles.textTitle}>{pb.partnerName}</div>
+                      </div>
+                      <div>
+                        <span className="text-xs opacity-60">Total Pemesanan</span>
+                        <div className={styles.textTitle}>Rp {Number(pb.totalAmount || 0).toLocaleString('id-ID')}</div>
+                      </div>
+                      <div>
+                        <span className="text-xs opacity-60">Komisi</span>
+                        <div className="font-bold text-emerald-500">
+                          Rp {Number(pb.commissionAmount || 0).toLocaleString('id-ID')}
+                          <span className={`block text-[10px] font-normal ${styles.textSub}`}>
+                            {pb.commissionType === 'fixed' ? 'Flat' : formatCommission('percent', pb.commissionValue)}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          onClick={() => handleUnlinkBooking(pb)}
+                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                          title="Putuskan Hubungan"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -676,7 +770,7 @@ export default function AgentsModule({ theme = 'dark' }) {
               </button>
             </div>
             <div className={`${styles.innerBg} border rounded-xl overflow-hidden`}>
-              <div className="overflow-x-auto">
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                     <tr>
@@ -716,6 +810,42 @@ export default function AgentsModule({ theme = 'dark' }) {
                   </tbody>
                 </table>
               </div>
+              <div className="md:hidden space-y-3 p-3">
+                {commissionPayments.length === 0 ? (
+                  <div className={`p-8 text-center ${styles.textSub}`}>Belum ada riwayat pembayaran komisi.</div>
+                ) : (
+                  commissionPayments.map(pay => (
+                    <div key={pay.id} className={`${styles.cardBg} border rounded-xl p-4 space-y-2`}>
+                      <div className={`font-semibold ${styles.textTitle}`}>{pay.partnerName}</div>
+                      <div>
+                        <span className="text-xs opacity-60">Akun & Catatan</span>
+                        <div>
+                          <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] mr-1`}>{pay.accountName}</span>
+                          <span className={styles.textSub}>{pay.notes}</span>
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-xs opacity-60">Tanggal</span>
+                        <div className={styles.textSub}>{formatDateDDMMYYYY(pay.createdAt)}</div>
+                      </div>
+                      <div>
+                        <span className="text-xs opacity-60">Nominal</span>
+                        <div className="font-bold text-rose-500">- Rp {Number(pay.amount || 0).toLocaleString('id-ID')}</div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          onClick={() => handleDeletePayment(pay)}
+                          disabled={!!processingPaymentId}
+                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed`}
+                          title="Hapus Riwayat"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -724,7 +854,7 @@ export default function AgentsModule({ theme = 'dark' }) {
       {/* MODAL TAMBAH/EDIT MITRA */}
       {showPartnerModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowPartnerModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
@@ -838,7 +968,7 @@ export default function AgentsModule({ theme = 'dark' }) {
       {/* MODAL HUBUNGKAN BOOKING KE MITRA */}
       {showLinkModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowLinkModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
@@ -926,7 +1056,7 @@ export default function AgentsModule({ theme = 'dark' }) {
       {/* MODAL BAYAR KOMISI */}
       {showPayModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowPayModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
