@@ -1528,7 +1528,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       {activeTab === 'income' && (
         <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
-          <div className="overflow-x-auto">
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                 <tr>
@@ -1591,12 +1591,69 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
               </tbody>
             </table>
           </div>
+          <div className="md:hidden space-y-3 p-3">
+            {incomeRows.length === 0 ? (
+              <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada transaksi setoran jamaah.</p>
+            ) : (
+              incomeRows.map((row) => (
+                <div key={row.key} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
+                  <div>
+                    <div className={`font-semibold ${styles.textTitle}`}>
+                      {row.paxCount > 1 ? `${row.paxCount} Peserta` : (row.jamaahName || '-')}
+                    </div>
+                    {row.ordererName && (
+                      <span className={`block text-[10.5px] font-normal ${styles.textSub}`}>{row.ordererName}</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onSelectBooking && row.bookingId) {
+                          onSelectBooking(row.bookingId);
+                        }
+                      }}
+                      className="block text-[10px] text-emerald-500 font-mono hover:underline text-left cursor-pointer"
+                    >
+                      {row.groupCode} ↗
+                    </button>
+                  </div>
+                  <div>
+                    <span className="text-[10px] opacity-60 uppercase">Paket Travel</span>
+                    <div className={styles.textTitle}>{row.packageName}</div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] opacity-60 uppercase">Metode & Catatan</span>
+                    <div>
+                      <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] mr-1`}>{row.paymentMethod}{row.accountName ? ` - ${row.accountName}` : ''}</span>
+                      <span className={styles.textSub}>{row.notes}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] opacity-60 uppercase">Tanggal Setor</span>
+                    <div className={styles.textSub}>{formatDateDDMMYYYY(row.createdAt)}</div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] opacity-60 uppercase">Nominal Masuk</span>
+                    <div className="font-bold text-emerald-500">+ Rp {Number(row.amount).toLocaleString('id-ID')}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <button
+                      onClick={() => handleDeleteIncomeRow(row)}
+                      className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                      title="Hapus Transaksi Setoran"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       )}
 
       {activeTab === 'vendor' && (
         <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
-          <div className="overflow-x-auto">
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                 <tr>
@@ -1669,12 +1726,77 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
               </tbody>
             </table>
           </div>
+          <div className="md:hidden space-y-3 p-3">
+            {vendorPayments.length === 0 ? (
+              <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada riwayat pembayaran vendor.</p>
+            ) : (
+              vendorPayments.map((vp) => (
+                <div key={vp.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
+                  <div className={`font-semibold ${styles.textTitle}`}>{vp.vendorName}</div>
+                  <div>
+                    <span className="text-[10px] opacity-60 uppercase">Kategori Layanan</span>
+                    <div>
+                      <span className="bg-rose-500/10 text-rose-500 border border-rose-500/20 px-2.5 py-1 rounded-full font-medium inline-block">
+                        {vp.category}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] opacity-60 uppercase">Paket Terkait</span>
+                    <div className={styles.textTitle}>
+                      {vp.packageName}
+                      {vp.packageId === 'GLOBAL' && (
+                        <span className="block text-[10px] text-amber-500 font-medium mt-0.5">
+                          ⚠ Data lama tanpa paket — review manual
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] opacity-60 uppercase">Catatan & Tanggal</span>
+                    <div className={styles.textSub}>
+                      {vp.notes}
+                      <span className="block text-[10px] text-slate-400">{formatDateDDMMYYYY(vp.createdAt)}</span>
+                      {vp.payMethod === 'Saldo Deposit Vendor' && (
+                        <span className="inline-block mt-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-2 py-0.5 rounded-full text-[10px] font-medium">Pakai Saldo Deposit</span>
+                      )}
+                      {vp.convertedToDeposit && (
+                        <span className="inline-block mt-1 ml-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 px-2 py-0.5 rounded-full text-[10px] font-medium">✓ Dikonversi ke Deposit</span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] opacity-60 uppercase">Nominal Dibayar</span>
+                    <div className="font-bold text-rose-500">- Rp {Number(vp.amount).toLocaleString('id-ID')}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {!vp.convertedToDeposit && vp.payMethod !== 'Saldo Deposit Vendor' && (
+                      <button
+                        onClick={() => handleOpenConvertModal(vp)}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                        title="Konversi ke Saldo Deposit (DP batal, nggak hangus)"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDeleteVendorPayment(vp)}
+                      className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                      title="Hapus Pembayaran Vendor"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       )}
 
       {activeTab === 'operational' && (
         <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
-          <div className="overflow-x-auto">
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                 <tr>
@@ -1718,6 +1840,41 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="md:hidden space-y-3 p-3">
+            {operationalExpenses.length === 0 ? (
+              <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada catatan biaya operasional kantor.</p>
+            ) : (
+              operationalExpenses.map((op) => (
+                <div key={op.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
+                  <div>
+                    <span className="bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2.5 py-1 rounded-full font-medium inline-block">
+                      {op.category}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] opacity-60 uppercase">Catatan & Tanggal</span>
+                    <div className={styles.textSub}>
+                      {op.notes || '-'}
+                      <span className="block text-[10px] text-slate-400">{formatDateDDMMYYYY(op.expenseDate || op.createdAt)}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] opacity-60 uppercase">Nominal Keluar</span>
+                    <div className="font-bold text-amber-500">- Rp {Number(op.amount).toLocaleString('id-ID')}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <button
+                      onClick={() => handleDeleteOperationalExpense(op)}
+                      className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                      title="Hapus Biaya Operasional"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}
@@ -1805,7 +1962,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
               Membandingkan total setoran jamaah yang masuk (Omset Real) terhadap realisasi pembayaran biaya vendor (HPP). Klik <strong>Akui Pendapatan</strong> pada paket yang jasanya sudah terealisasi (mis. jamaah sudah berangkat) biar omset & HPP-nya masuk ke Laporan P&L. Sebelum diklik, nilainya tercatat sebagai Pendapatan/Biaya Dibayar Dimuka.
             </p>
 
-            <div className="overflow-x-auto">
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                   <tr>
@@ -1911,6 +2068,104 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </tbody>
               </table>
             </div>
+            <div className="md:hidden space-y-3">
+              {packagesList.length === 0 ? (
+                <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada paket perjalanan terdaftar.</p>
+              ) : (
+                packagesList.map((pkg) => {
+                  const pkgIncome = transactions
+                    .filter(tx => tx.packageId === pkg.id || (!tx.packageId && tx.packageName === pkg.name))
+                    .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+                  const pkgVendorCost = vendorPayments
+                    .filter(vp => vp.packageId === pkg.id || (!vp.packageId && vp.packageName === pkg.name))
+                    .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+                  const profit = pkgIncome - pkgVendorCost;
+                  const isProfit = profit >= 0;
+
+                  return (
+                    <div key={pkg.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
+                      <div>
+                        <div className={`font-semibold ${styles.textTitle}`}>{pkg.name}</div>
+                        <span className={`block text-[10px] ${styles.textSub} font-mono`}>{pkg.code} • Keberangkatan: {formatDateDDMMYYYY(pkg.departureDate)}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] opacity-60 uppercase">Pemasukan (Omset)</span>
+                        <div className="font-bold text-emerald-500">Rp {pkgIncome.toLocaleString('id-ID')}</div>
+                      </div>
+                      <div>
+                        <span className="text-[10px] opacity-60 uppercase">HPP / Biaya Vendor</span>
+                        <div className="font-bold text-rose-500">Rp {pkgVendorCost.toLocaleString('id-ID')}</div>
+                      </div>
+                      <div>
+                        <span className="text-[10px] opacity-60 uppercase">Laba / Margin Bersih</span>
+                        <div className={`font-extrabold ${isProfit ? 'text-blue-500' : 'text-amber-500'}`}>Rp {profit.toLocaleString('id-ID')}</div>
+                      </div>
+                      <div>
+                        <span className="text-[10px] opacity-60 uppercase">Status Margin</span>
+                        <div>
+                          {isProfit ? (
+                            <span className="inline-block px-2.5 py-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-full font-bold text-[10px]">
+                              PROFIT
+                            </span>
+                          ) : (
+                            <span className="inline-block px-2.5 py-1 bg-rose-500/10 text-rose-500 border border-rose-500/20 rounded-full font-bold text-[10px]">
+                              DEFISIT
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-[10px] opacity-60 uppercase">Status Pengakuan</span>
+                        <div>
+                          {pkg.revenueRecognized ? (
+                            <div className="flex flex-col items-start gap-1">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full font-bold text-[10px]">
+                                <CheckCircle2 className="w-3 h-3" /> DIAKUI
+                              </span>
+                              <span className="text-[10px] text-slate-400">{formatDateDDMMYYYY(pkg.recognizedAt)}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleUnrecognizeRevenue(pkg)}
+                                className="text-[10px] text-slate-400 hover:text-rose-500 inline-flex items-center gap-1 underline"
+                              >
+                                <RotateCcw className="w-3 h-3" /> Batalkan
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-start gap-1">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-500/10 text-slate-400 border border-slate-500/20 rounded-full font-bold text-[10px]">
+                                <Clock className="w-3 h-3" /> DITERIMA DIMUKA
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => openRecognizeModal(pkg)}
+                                className="mt-0.5 px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-[10px] font-medium inline-flex items-center gap-1"
+                              >
+                                <CheckCircle2 className="w-3 h-3" /> Akui Pendapatan
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          onClick={() => {
+                            setSelectedPackageForDetail(pkg);
+                            setShowProfitDetailModal(true);
+                          }}
+                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-amber-500 rounded-lg transition-colors inline-flex items-center gap-1`}
+                          title="Lihat Rincian Laba Rugi Paket Ini"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1937,7 +2192,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
           </div>
 
           <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
-            <div className="overflow-x-auto">
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                   <tr>
@@ -1995,6 +2250,56 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </tbody>
               </table>
             </div>
+            <div className="md:hidden space-y-3 p-3">
+              {financialAccounts.length === 0 ? (
+                <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada akun Kas/Bank. Tambahkan dulu biar transaksi setoran/pengeluaran bisa diiket ke akun tertentu.</p>
+              ) : (
+                financialAccounts.map(acc => (
+                  <div key={acc.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
+                    <div className={`font-semibold ${styles.textTitle}`}>{acc.name}</div>
+                    <div>
+                      <span className="text-[10px] opacity-60 uppercase">Jenis</span>
+                      <div>
+                        <span className={`${acc.type === 'Bank' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'} border px-2.5 py-1 rounded-full font-medium inline-block`}>
+                          {acc.type}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-[10px] opacity-60 uppercase">No. Rekening</span>
+                      <div className={styles.textSub}>{acc.type === 'Bank' ? (acc.accountNumber || '-') : '-'}</div>
+                    </div>
+                    <div>
+                      <span className="text-[10px] opacity-60 uppercase">Saldo Berjalan</span>
+                      <div className={`font-bold ${styles.textTitle}`}>Rp {Number(acc.balance || 0).toLocaleString('id-ID')}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <button
+                        onClick={() => handleOpenMutations(acc)}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                        title="Lihat Riwayat Mutasi"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleEditAccount(acc)}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                        title="Edit Akun"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteAccount(acc)}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                        title="Hapus Akun"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -2025,7 +2330,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
           </p>
 
           <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
-            <div className="overflow-x-auto">
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                   <tr>
@@ -2083,13 +2388,61 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 </tbody>
               </table>
             </div>
+            <div className="md:hidden space-y-3 p-3">
+              {vendorsList.length === 0 ? (
+                <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada vendor. Tambahkan dulu biar bisa dipilih pas catat "Bayar Vendor".</p>
+              ) : (
+                vendorsList.map(v => (
+                  <div key={v.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
+                    <div className={`font-semibold ${styles.textTitle}`}>{v.name}</div>
+                    <div>
+                      <span className="text-[10px] opacity-60 uppercase">Kategori</span>
+                      <div>
+                        <span className="bg-rose-500/10 text-rose-500 border border-rose-500/20 px-2.5 py-1 rounded-full font-medium inline-block">
+                          {v.category}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-[10px] opacity-60 uppercase">Saldo Deposit</span>
+                      <div className={`font-bold ${Number(v.depositBalance || 0) > 0 ? 'text-emerald-500' : styles.textTitle}`}>
+                        Rp {Number(v.depositBalance || 0).toLocaleString('id-ID')}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <button
+                        onClick={() => handleOpenVendorDepositAdjust(v)}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                        title="Tambah/Koreksi Saldo Deposit"
+                      >
+                        <Wallet className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleEditVendorMaster(v)}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                        title="Edit Vendor"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteVendorMaster(v)}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                        title="Hapus Vendor"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       )}
 
       {showVendorMasterModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowVendorMasterModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
@@ -2136,7 +2489,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       {showVendorDepositAdjustModal && adjustingVendor && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowVendorDepositAdjustModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
@@ -2181,7 +2534,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       {showConvertDepositModal && convertingPayment && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowConvertDepositModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
@@ -2243,7 +2596,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       {showAccountModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowAccountModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
@@ -2390,7 +2743,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
             <div className="flex-1 overflow-y-auto px-6 pb-6">
               <div className={`${isDark ? 'border-slate-800' : 'border-slate-200'} border rounded-xl overflow-hidden`}>
-                <div className="overflow-x-auto">
+                <div className="hidden md:block overflow-x-auto">
                   <table className="w-full text-left text-xs">
                     <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} sticky top-0`}>
                       <tr>
@@ -2421,6 +2774,39 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                       )}
                     </tbody>
                   </table>
+                </div>
+                <div className="md:hidden space-y-3 p-3">
+                  {mutationLoading ? (
+                    <p className={`p-8 text-center text-xs ${styles.textSub}`}>Memuat riwayat mutasi...</p>
+                  ) : getFilteredMutationRows().length === 0 ? (
+                    <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada mutasi pada rentang tanggal ini.</p>
+                  ) : (
+                    getFilteredMutationRows().map(r => (
+                      <div key={r.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
+                        <div className={`font-semibold ${styles.textTitle}`}>{formatDateDDMMYYYY(r.createdAt)}</div>
+                        <div>
+                          <span className="text-[10px] opacity-60 uppercase">Keterangan</span>
+                          <div className={styles.textTitle}>{r.description || '-'}</div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] opacity-60 uppercase">Referensi</span>
+                          <div className={styles.textSub}>{r.reference || '-'}</div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] opacity-60 uppercase">Masuk</span>
+                          <div className="font-medium text-emerald-500">{r.type === 'in' ? `Rp ${Number(r.amount).toLocaleString('id-ID')}` : '-'}</div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] opacity-60 uppercase">Keluar</span>
+                          <div className="font-medium text-rose-500">{r.type === 'out' ? `Rp ${Number(r.amount).toLocaleString('id-ID')}` : '-'}</div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] opacity-60 uppercase">Saldo</span>
+                          <div className={`font-bold ${styles.textTitle}`}>Rp {Number(r.balanceAfter).toLocaleString('id-ID')}</div>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -2497,7 +2883,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                 <h5 className="font-bold text-emerald-500 mb-2 flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
                   <ArrowDownLeft className="w-4 h-4" /> Rincian Pemasukan Setoran Jamaah ({selectedPkgIncomes.length})
                 </h5>
-                <div className={`overflow-x-auto border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg`}>
+                <div className={`hidden md:block overflow-x-auto border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg`}>
                   <table className="w-full text-left">
                     <thead className={`${styles.tableHeaderBg} uppercase`}>
                       <tr>
@@ -2529,13 +2915,42 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                     </tbody>
                   </table>
                 </div>
+                <div className={`md:hidden space-y-2 border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg p-2`}>
+                  {selectedPkgIncomes.length === 0 ? (
+                    <p className={`p-4 text-center ${styles.textSub}`}>Belum ada setoran jamaah untuk paket ini.</p>
+                  ) : (
+                    selectedPkgIncomes.map((tx) => (
+                      <div key={tx.id} className={`${styles.innerBg} border rounded-lg p-2.5 space-y-1.5`}>
+                        <div>
+                          <div className={`font-semibold ${styles.textTitle}`}>{tx.jamaahName}</div>
+                          <span className="block text-[10px] text-emerald-500 font-mono">{tx.bookingCode}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] opacity-60 uppercase">Tanggal</span>
+                          <div className={styles.textSub}>{formatDateDDMMYYYY(tx.createdAt)}</div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] opacity-60 uppercase">Metode & Catatan</span>
+                          <div>
+                            <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{tx.paymentMethod}{tx.accountName ? ` - ${tx.accountName}` : ''}</span>
+                            <span className={styles.textSub}>{tx.notes}</span>
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] opacity-60 uppercase">Nominal</span>
+                          <div className="font-bold text-emerald-500">+ Rp {Number(tx.amount).toLocaleString('id-ID')}</div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
 
               <div>
                 <h5 className="font-bold text-rose-500 mb-2 flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
                   <ArrowUpRight className="w-4 h-4" /> Rincian Pengeluaran HPP Vendor ({selectedPkgVendorCosts.length})
                 </h5>
-                <div className={`overflow-x-auto border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg`}>
+                <div className={`hidden md:block overflow-x-auto border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg`}>
                   <table className="w-full text-left">
                     <thead className={`${styles.tableHeaderBg} uppercase`}>
                       <tr>
@@ -2564,6 +2979,32 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
                     </tbody>
                   </table>
                 </div>
+                <div className={`md:hidden space-y-2 border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg p-2`}>
+                  {selectedPkgVendorCosts.length === 0 ? (
+                    <p className={`p-4 text-center ${styles.textSub}`}>Belum ada biaya vendor untuk paket ini.</p>
+                  ) : (
+                    selectedPkgVendorCosts.map((vp) => (
+                      <div key={vp.id} className={`${styles.innerBg} border rounded-lg p-2.5 space-y-1.5`}>
+                        <div>
+                          <div className={`font-semibold ${styles.textTitle}`}>{vp.vendorName}</div>
+                          <span className="block text-[10px] text-rose-500">{vp.category}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] opacity-60 uppercase">Tanggal</span>
+                          <div className={styles.textSub}>{formatDateDDMMYYYY(vp.createdAt)}</div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] opacity-60 uppercase">Catatan Pengeluaran</span>
+                          <div className={styles.textSub}>{vp.notes}</div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] opacity-60 uppercase">Nominal HPP</span>
+                          <div className="font-bold text-rose-500">- Rp {Number(vp.amount).toLocaleString('id-ID')}</div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
 
@@ -2581,7 +3022,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       {showIncomeModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowIncomeModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
@@ -2706,7 +3147,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       {showDepositModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowDepositModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
@@ -2796,7 +3237,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       {showVendorModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowVendorModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
@@ -2940,7 +3381,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       {showOperationalModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowOperationalModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
@@ -3027,7 +3468,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
 
       {showRecognizeModal && pkgToRecognize && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button
               onClick={() => { setShowRecognizeModal(false); setPkgToRecognize(null); }}
               className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}
