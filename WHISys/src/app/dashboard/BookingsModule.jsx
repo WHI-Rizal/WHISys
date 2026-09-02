@@ -3706,7 +3706,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             </button>
           </div>
         </div>
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className={`${styles.tableHeaderBg} uppercase tracking-wider border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <tr>
@@ -3910,9 +3910,141 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             </tbody>
           </table>
         </div>
+
+        {/* MOBILE CARD VIEW - Manifest Grup Aktif */}
+        <div className="md:hidden space-y-3">
+          {loading ? (
+            <div className={`p-8 text-center text-xs ${styles.textSub}`}>Memuat data manifest...</div>
+          ) : activeGroupBookings.length === 0 ? (
+            <div className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada data booking.</div>
+          ) : (
+            activeGroupBookings.map((item) => {
+              const docs = item.documents || {};
+              const collectedCount = REQUIRED_DOCUMENTS.filter(d => docs[d.key]).length;
+              const docPercent = Math.round((collectedCount / REQUIRED_DOCUMENTS.length) * 100);
+              const isDocComplete = collectedCount === REQUIRED_DOCUMENTS.length;
+
+              return (
+                <div key={item.id} className={`${styles.innerBg} border ${styles.borderColor} rounded-xl p-3.5 text-xs`}>
+                  <div className={`font-semibold ${styles.textTitle}`}>
+                    {item.jamaahName || '-'}
+                    <span className="block text-[10px] text-emerald-500 font-mono">{item.bookingCode}</span>
+                    {item.groupBookingCode && (
+                      <span className={`inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[9px] font-semibold ${isDark ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-purple-50 text-purple-600 border border-purple-200'}`}>
+                        👥 Grup {item.groupPaxIndex}/{item.groupTotalPax}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className={`mt-2 space-y-1 ${styles.textSub}`}>
+                    <div><span className="font-medium">Paket:</span> {item.packageName || '-'}</div>
+                    <div><span className="font-medium">Tgl Berangkat:</span> {formatDateDDMMYYYY(item.departureDate)}</div>
+                    <div><span className="font-medium">Kamar / Bus:</span> {item.roomType} / {item.busGroup}</div>
+                    <div>
+                      <button
+                        onClick={() => handleOpenDocModal(item)}
+                        className="font-medium underline"
+                        title="Klik untuk kelola checklist dokumen"
+                      >
+                        <span className={isDocComplete ? 'text-emerald-500' : 'text-amber-500'}>
+                          Dokumen: {collectedCount}/{REQUIRED_DOCUMENTS.length} ({docPercent}%) ↗
+                        </span>
+                      </button>
+                    </div>
+                    <div><span className="font-medium">Tagihan:</span> Rp {item.totalAmount ? Number(item.totalAmount).toLocaleString('id-ID') : '0'}</div>
+                    <div className="text-emerald-500 font-semibold"><span className="font-medium text-inherit">Setor:</span> Rp {item.totalPaid ? Number(item.totalPaid).toLocaleString('id-ID') : '0'}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium">Status:</span> {renderStatusBadge(item)}
+                    </div>
+                    {item.status === 'cancelled' && (
+                      <div className="text-rose-400">Refund: Rp {Number(item.refundAmount || 0).toLocaleString('id-ID')}</div>
+                    )}
+                    {item.status === 'rescheduled' && (
+                      <div className="text-blue-400">Ke: {item.rescheduledToBookingCode || '-'}</div>
+                    )}
+                    <div>{renderDueDates(item)}</div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    <button
+                      onClick={() => handleOpenHistory(item)}
+                      className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                      title="Riwayat & Setoran Pembayaran"
+                    >
+                      <Wallet className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      onClick={() => sendWhatsAppNotification(item)}
+                      className="p-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white rounded-lg transition-colors"
+                      title="Kirim Konfirmasi via WhatsApp"
+                    >
+                      <MessageSquare className="w-4 h-4" />
+                    </button>
+
+                    {canManageBookings && (
+                      <button
+                        onClick={() => handleOpenGroupPaymentModal({
+                          code: item.bookingCode,
+                          items: [item],
+                          primary: item,
+                          paxCount: 1
+                        })}
+                        className="p-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-500 hover:text-white rounded-lg transition-colors"
+                        title="Edit / Catat Pembayaran Booking Ini"
+                      >
+                        <Wallet className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    {canManageBookings && (
+                      <button
+                        onClick={() => handleOpenEditModal(item)}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                        title="Edit Booking"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    {(item.status || 'active') === 'active' && canReschedule && (
+                      <button
+                        onClick={() => handleOpenActionModal(item, 'reschedule')}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                        title="Reschedule ke Paket Lain"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    {(item.status || 'active') === 'active' && canManageBookings && (
+                      <button
+                        onClick={() => handleOpenActionModal(item, 'cancel')}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                        title="Batalkan Booking & Proses Refund"
+                      >
+                        <Ban className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    {canManageBookings && (
+                      <button
+                        onClick={() => handleDeleteBooking(item)}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                        title="Hapus Booking"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
         </>
         ) : (
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className={`${styles.tableHeaderBg} uppercase tracking-wider border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <tr>
@@ -4361,7 +4493,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                   <p className="text-[10px] opacity-70 -mt-2">Tiap nominal dianggap total keseluruhan pemesanan ini, otomatis dibagi rata ke {formData.paxCount} pax.</p>
                 )}
                 {(formData.extraCharges || []).length > 0 && (
-                  <div className="overflow-x-auto">
+                  <>
+                  <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-[11px]">
                       <thead>
                         <tr className="opacity-70 text-left">
@@ -4390,6 +4523,22 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                       </tbody>
                     </table>
                   </div>
+                  <div className="md:hidden space-y-2">
+                    {formData.extraCharges.map((c, idx) => (
+                      <div key={c.id} className={`${styles.innerBg} border ${styles.borderColor} rounded-lg p-2.5 text-[11px]`}>
+                        <div className="font-semibold">{idx + 1}. {c.name}</div>
+                        <div className="mt-1 space-y-0.5 opacity-90">
+                          <div>Jumlah: Rp {Number(c.amount || 0).toLocaleString('id-ID')}</div>
+                          <div className="opacity-70">Keterangan: {c.notes || '-'}</div>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <button type="button" onClick={() => handleEditChargeRow(c)} className="text-blue-400 hover:text-blue-300"><Edit className="w-3.5 h-3.5" /></button>
+                          <button type="button" onClick={() => handleDeleteChargeRow(c.id)} className="text-red-400 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  </>
                 )}
                 <div className="grid grid-cols-3 gap-2 items-end">
                   <div>
@@ -4438,7 +4587,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                   <p className="text-[10px] opacity-70 -mt-2">Tiap nominal dianggap total keseluruhan pemesanan ini, otomatis dibagi rata ke {formData.paxCount} pax.</p>
                 )}
                 {(formData.extraDiscounts || []).length > 0 && (
-                  <div className="overflow-x-auto">
+                  <>
+                  <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-[11px]">
                       <thead>
                         <tr className="opacity-70 text-left">
@@ -4467,6 +4617,22 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                       </tbody>
                     </table>
                   </div>
+                  <div className="md:hidden space-y-2">
+                    {formData.extraDiscounts.map((d, idx) => (
+                      <div key={d.id} className={`${styles.innerBg} border ${styles.borderColor} rounded-lg p-2.5 text-[11px]`}>
+                        <div className="font-semibold">{idx + 1}. {d.name}</div>
+                        <div className="mt-1 space-y-0.5 opacity-90">
+                          <div className="text-orange-500">Jumlah: - Rp {Number(d.amount || 0).toLocaleString('id-ID')}</div>
+                          <div className="opacity-70">Keterangan: {d.notes || '-'}</div>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <button type="button" onClick={() => handleEditDiscountRow(d)} className="text-blue-400 hover:text-blue-300"><Edit className="w-3.5 h-3.5" /></button>
+                          <button type="button" onClick={() => handleDeleteDiscountRow(d.id)} className="text-red-400 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  </>
                 )}
                 <div className="grid grid-cols-3 gap-2 items-end">
                   <div>
@@ -4615,7 +4781,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       {/* MODAL RIWAYAT PEMBAYARAN */}
       {showHistoryModal && selectedBookingForHistory && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-2xl p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-2xl p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowHistoryModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
@@ -4627,7 +4793,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               Jamaah: <strong className={styles.textTitle}>{selectedBookingForHistory.jamaahName}</strong> • Kode: <span className="font-mono text-emerald-500">{selectedBookingForHistory.bookingCode}</span>
             </p>
 
-            <div className={`overflow-x-auto max-h-60 overflow-y-auto mb-4 border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg`}>
+            <div className={`hidden md:block overflow-x-auto max-h-60 overflow-y-auto mb-4 border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg`}>
               <table className="w-full text-left text-xs">
                 <thead className={`${styles.tableHeaderBg} uppercase`}>
                   <tr>
@@ -4744,6 +4910,98 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="md:hidden max-h-60 overflow-y-auto mb-4 space-y-3">
+              {paymentHistory.length === 0 ? (
+                <p className={`p-6 text-center text-xs ${styles.textSub}`}>Belum ada riwayat setoran pembayaran.</p>
+              ) : (
+                paymentHistory.map(pay => (
+                  <div key={pay.id} className={`${styles.innerBg} border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg p-3 text-xs`}>
+                    {editingPaymentId === pay.id && canManagePayments ? (
+                      <div className="space-y-2">
+                        <input
+                          type="date"
+                          min={getBookingMinDate(selectedBookingForHistory?.createdAt)}
+                          className={`w-full ${styles.inputBg} p-1.5 rounded`}
+                          value={paymentEditForm.date}
+                          onChange={e => setPaymentEditForm({ ...paymentEditForm, date: e.target.value })}
+                        />
+                        <div className="flex gap-1">
+                          <select
+                            className={`${styles.inputBg} p-1.5 rounded w-1/2`}
+                            value={paymentEditForm.paymentMethod}
+                            onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentMethod: e.target.value })}
+                          >
+                            <option value="Transfer Bank">Transfer Bank</option>
+                            <option value="Cash / Tunai">Cash / Tunai</option>
+                            <option value="EDC / Kartu">EDC / Kartu</option>
+                          </select>
+                          <input
+                            type="text"
+                            placeholder="Catatan"
+                            className={`${styles.inputBg} p-1.5 rounded w-1/2`}
+                            value={paymentEditForm.notes}
+                            onChange={e => setPaymentEditForm({ ...paymentEditForm, notes: e.target.value })}
+                          />
+                        </div>
+                        <input
+                          type="number"
+                          placeholder="Nominal"
+                          className={`w-full ${styles.inputBg} p-1.5 rounded`}
+                          value={paymentEditForm.amount}
+                          onChange={e => setPaymentEditForm({ ...paymentEditForm, amount: e.target.value })}
+                        />
+                        {paymentEditForm.paymentMethod !== 'Saldo Deposit' && (
+                          <select
+                            className={`${styles.inputBg} p-1.5 rounded w-full`}
+                            value={paymentEditForm.accountId}
+                            onChange={e => setPaymentEditForm({ ...paymentEditForm, accountId: e.target.value })}
+                          >
+                            <option value="">-- Akun Kas/Bank --</option>
+                            {financialAccounts.map(a => (
+                              <option key={a.id} value={a.id}>{a.name}</option>
+                            ))}
+                          </select>
+                        )}
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <button onClick={() => handleSavePaymentEdit(pay.id)} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded">
+                            Simpan
+                          </button>
+                          <button onClick={() => setEditingPaymentId(null)} className={`px-2 py-1 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-200 text-slate-700'} text-[10px] rounded`}>
+                            Batal
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p className={`font-bold ${styles.textTitle}`}>Rp {Number(pay.amount).toLocaleString('id-ID')}</p>
+                        <div className={`mt-1 space-y-0.5 ${styles.textSub}`}>
+                          <p>Tanggal: {formatDateDDMMYYYY(pay.createdAt)}</p>
+                          <p>Metode: {pay.paymentMethod}{pay.accountName ? ` - ${pay.accountName}` : ''}</p>
+                          {pay.notes && <p>Catatan: {pay.notes}</p>}
+                        </div>
+                        {canManagePayments && (
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            <button
+                              onClick={() => {
+                                setEditingPaymentId(pay.id);
+                                setPaymentEditForm({ amount: pay.amount, paymentMethod: pay.paymentMethod, accountId: pay.accountId || '', notes: pay.notes, date: (pay.createdAt || '').slice(0, 10) });
+                              }}
+                              className="text-emerald-500 hover:underline"
+                            >
+                              Edit
+                            </button>
+                            <button onClick={() => handleDeletePayment(pay.id)} className="text-rose-500 hover:underline">
+                              Hapus
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
 
             <div className={`flex justify-between items-center pt-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'} text-xs`}>
@@ -5044,7 +5302,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               Riwayat transaksi setoran masuk untuk pemesanan ini.
             </p>
 
-            <div className={`overflow-x-auto max-h-[60vh] overflow-y-auto mb-4 border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg`}>
+            <div className={`hidden md:block overflow-x-auto max-h-[60vh] overflow-y-auto mb-4 border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg`}>
               <table className="w-full text-left text-xs">
                 <thead className={`${styles.tableHeaderBg} uppercase`}>
                   <tr>
@@ -5170,6 +5428,110 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="md:hidden max-h-[60vh] overflow-y-auto mb-4 space-y-3">
+              {transactions.length === 0 ? (
+                <p className={`p-6 text-center text-xs ${styles.textSub}`}>Belum ada riwayat setoran pembayaran.</p>
+              ) : (
+                transactions.map(tx => {
+                  const singlePay = !tx.isMerged ? tx.docs[0] : null;
+                  const isEditingThis = singlePay && editingGroupPaymentId === singlePay.id;
+                  return (
+                    <div key={tx.key} className={`${styles.innerBg} border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg p-3 text-xs`}>
+                      {isEditingThis && canManagePayments ? (
+                        <div className="space-y-2">
+                          <input
+                            type="date"
+                            min={getBookingMinDate(groupHistoryItems.find(b => b.id === singlePay.bookingId)?.createdAt)}
+                            className={`w-full ${styles.inputBg} p-1.5 rounded`}
+                            value={paymentEditForm.date}
+                            onChange={e => setPaymentEditForm({ ...paymentEditForm, date: e.target.value })}
+                          />
+                          <div className="flex gap-1">
+                            <select
+                              className={`${styles.inputBg} p-1.5 rounded w-1/2`}
+                              value={paymentEditForm.paymentMethod}
+                              onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentMethod: e.target.value })}
+                            >
+                              <option value="Transfer Bank">Transfer Bank</option>
+                              <option value="Cash / Tunai">Cash / Tunai</option>
+                              <option value="EDC / Kartu">EDC / Kartu</option>
+                            </select>
+                            <input
+                              type="text"
+                              placeholder="Catatan"
+                              className={`${styles.inputBg} p-1.5 rounded w-1/2`}
+                              value={paymentEditForm.notes}
+                              onChange={e => setPaymentEditForm({ ...paymentEditForm, notes: e.target.value })}
+                            />
+                          </div>
+                          <input
+                            type="number"
+                            placeholder="Nominal"
+                            className={`w-full ${styles.inputBg} p-1.5 rounded`}
+                            value={paymentEditForm.amount}
+                            onChange={e => setPaymentEditForm({ ...paymentEditForm, amount: e.target.value })}
+                          />
+                          {paymentEditForm.paymentMethod !== 'Saldo Deposit' && (
+                            <select
+                              className={`${styles.inputBg} p-1.5 rounded w-full`}
+                              value={paymentEditForm.accountId}
+                              onChange={e => setPaymentEditForm({ ...paymentEditForm, accountId: e.target.value })}
+                            >
+                              <option value="">-- Akun Kas/Bank --</option>
+                              {financialAccounts.map(a => (
+                                <option key={a.id} value={a.id}>{a.name}</option>
+                              ))}
+                            </select>
+                          )}
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            <button onClick={() => handleSaveGroupPaymentEdit(singlePay)} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded">
+                              Simpan
+                            </button>
+                            <button onClick={() => setEditingGroupPaymentId(null)} className={`px-2 py-1 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-200 text-slate-700'} text-[10px] rounded`}>
+                              Batal
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <p className={`font-bold ${styles.textTitle}`}>Rp {Number(tx.amount).toLocaleString('id-ID')}</p>
+                          <div className={`mt-1 space-y-0.5 ${styles.textSub}`}>
+                            <p>Tanggal: {formatDateDDMMYYYY(tx.createdAt)}</p>
+                            <p>Metode: {tx.paymentMethod}{tx.accountName ? ` - ${tx.accountName}` : ''}</p>
+                            {tx.notes && <p>Catatan: {tx.notes}</p>}
+                          </div>
+                          {canManagePayments && (
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {tx.isMerged ? (
+                                <button onClick={() => handleDeleteMergedGroupPayment(tx.docs)} className="text-rose-500 hover:underline">
+                                  Hapus
+                                </button>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      setEditingGroupPaymentId(singlePay.id);
+                                      setPaymentEditForm({ amount: singlePay.amount, paymentMethod: singlePay.paymentMethod, accountId: singlePay.accountId || '', notes: singlePay.notes, date: (singlePay.createdAt || '').slice(0, 10) });
+                                    }}
+                                    className="text-emerald-500 hover:underline"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button onClick={() => handleDeleteGroupPayment(singlePay)} className="text-rose-500 hover:underline">
+                                    Hapus
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
 
             <div className={`flex justify-end pt-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'} text-xs`}>
@@ -5391,7 +5753,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 </p>
                 <p className="text-[10px] opacity-70 -mt-2">Tiap nominal dianggap total keseluruhan grup ini, otomatis dibagi rata ke seluruh peserta aktif.</p>
                 {(groupEditForm.extraCharges || []).length > 0 && (
-                  <div className="overflow-x-auto">
+                  <>
+                  <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-[11px]">
                       <thead>
                         <tr className="opacity-70 text-left">
@@ -5420,6 +5783,22 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                       </tbody>
                     </table>
                   </div>
+                  <div className="md:hidden space-y-2">
+                    {groupEditForm.extraCharges.map((c, idx) => (
+                      <div key={c.id} className={`${styles.innerBg} border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg p-2.5 text-[11px]`}>
+                        <p className="font-bold">{idx + 1}. {c.name}</p>
+                        <div className="mt-1 space-y-0.5 opacity-80">
+                          <p>Jumlah: Rp {Number(c.amount || 0).toLocaleString('id-ID')}</p>
+                          <p>Keterangan: {c.notes || '-'}</p>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <button type="button" onClick={() => handleEditGroupChargeRow(c)} className="text-blue-400 hover:text-blue-300"><Edit className="w-3.5 h-3.5" /></button>
+                          <button type="button" onClick={() => handleDeleteGroupChargeRow(c.id)} className="text-red-400 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  </>
                 )}
                 <div className="grid grid-cols-3 gap-2 items-end">
                   <div>
@@ -5466,7 +5845,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 </p>
                 <p className="text-[10px] opacity-70 -mt-2">Tiap nominal dianggap total keseluruhan grup ini, otomatis dibagi rata ke seluruh peserta aktif.</p>
                 {(groupEditForm.extraDiscounts || []).length > 0 && (
-                  <div className="overflow-x-auto">
+                  <>
+                  <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-[11px]">
                       <thead>
                         <tr className="opacity-70 text-left">
@@ -5495,6 +5875,22 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                       </tbody>
                     </table>
                   </div>
+                  <div className="md:hidden space-y-2">
+                    {groupEditForm.extraDiscounts.map((d, idx) => (
+                      <div key={d.id} className={`${styles.innerBg} border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg p-2.5 text-[11px]`}>
+                        <p className="font-bold">{idx + 1}. {d.name}</p>
+                        <div className="mt-1 space-y-0.5 opacity-80">
+                          <p className="text-orange-500">Jumlah: - Rp {Number(d.amount || 0).toLocaleString('id-ID')}</p>
+                          <p>Keterangan: {d.notes || '-'}</p>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <button type="button" onClick={() => handleEditGroupDiscountRow(d)} className="text-blue-400 hover:text-blue-300"><Edit className="w-3.5 h-3.5" /></button>
+                          <button type="button" onClick={() => handleDeleteGroupDiscountRow(d.id)} className="text-red-400 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  </>
                 )}
                 <div className="grid grid-cols-3 gap-2 items-end">
                   <div>
@@ -5832,7 +6228,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                   </div>
                 </div>
 
-                <div className={`border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg overflow-hidden`}>
+                <div className={`hidden md:block border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg overflow-hidden`}>
                   <table className="w-full text-left text-xs">
                     <thead className={`${styles.tableHeaderBg} uppercase`}>
                       <tr>
@@ -5863,6 +6259,30 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                       )}
                     </tbody>
                   </table>
+                </div>
+                <div className="md:hidden space-y-3">
+                  {roomingBookingsForPackage.length === 0 ? (
+                    <p className={`p-6 text-center text-xs ${styles.textSub}`}>Belum ada jamaah aktif di paket ini.</p>
+                  ) : (
+                    roomingBookingsForPackage.map(b => (
+                      <div key={b.id} className={`${styles.innerBg} border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg p-3 text-xs`}>
+                        <p className={`font-bold ${styles.textTitle}`}>{b.jamaahName}</p>
+                        <div className={`mt-1 space-y-0.5 ${styles.textSub}`}>
+                          <p>Tipe Kamar: {b.roomType}</p>
+                        </div>
+                        <div className="mt-2">
+                          <label className="block mb-1 font-medium">No. Kamar</label>
+                          <input
+                            type="text"
+                            defaultValue={b.roomLabel || ''}
+                            placeholder="Cth: Q1"
+                            onBlur={(e) => handleSaveRoomLabel(b.id, e.target.value)}
+                            className={`w-24 ${styles.inputBg} rounded-lg p-1.5 text-xs`}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </>
             )}
