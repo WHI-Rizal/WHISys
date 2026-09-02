@@ -78,6 +78,14 @@ export default function DashboardPage() {
   // (yang cuma relevan buat desktop) biar kelakuannya independen.
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // Easter egg iseng-iseng: klik logo pesawat di sidebar/topbar bikin
+  // ikonnya "terbang" sebentar terus balik lagi. Murni kosmetik doang.
+  const [planeFlying, setPlaneFlying] = useState(false);
+  const flyThePlane = () => {
+    if (planeFlying) return;
+    setPlaneFlying(true);
+  };
+
   // Load saved theme & preferensi sidebar dari LocalStorage saat pertama kali dimuat
   useEffect(() => {
     const savedTheme = localStorage.getItem('whisys_theme');
@@ -326,8 +334,12 @@ export default function DashboardPage() {
           <Menu className="w-5 h-5" />
         </button>
         <div className="flex items-center gap-2">
-          <div className={`p-1.5 ${currentTheme.accentBg} rounded-lg text-white shrink-0`}>
-            <Plane className="w-4 h-4" />
+          <div
+            className={`p-1.5 ${currentTheme.accentBg} rounded-lg text-white shrink-0 whisys-plane-trigger`}
+            onClick={flyThePlane}
+            title="Klik dulu deh, hehe"
+          >
+            <Plane className={`w-4 h-4 ${planeFlying ? 'whisys-plane-flying' : ''}`} onAnimationEnd={() => setPlaneFlying(false)} />
           </div>
           <span className={`font-bold text-sm ${currentTheme.accentText}`}>WHISys</span>
         </div>
@@ -372,8 +384,12 @@ export default function DashboardPage() {
 
         <div className="overflow-y-auto">
           <div className={`flex items-center gap-3 px-3 py-4 mb-6 border-b ${currentTheme.border} ${sidebarCollapsed ? 'md:justify-center md:px-0' : ''}`}>
-            <div className={`p-2 ${currentTheme.accentBg} rounded-lg text-white shrink-0`}>
-              <Plane className="w-6 h-6" />
+            <div
+              className={`p-2 ${currentTheme.accentBg} rounded-lg text-white shrink-0 whisys-plane-trigger`}
+              onClick={flyThePlane}
+              title="Klik dulu deh, hehe"
+            >
+              <Plane className={`w-6 h-6 ${planeFlying ? 'whisys-plane-flying' : ''}`} onAnimationEnd={() => setPlaneFlying(false)} />
             </div>
             <div className={sidebarCollapsed ? 'md:hidden' : ''}>
               <h1 className={`font-bold text-lg ${currentTheme.accentText} leading-none`}>Wisata Halal Internasional</h1>
