@@ -316,7 +316,7 @@ export default function JamaahModule({ theme = 'dark' }) {
       </div>
 
       <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className={`${styles.tableHeaderBg} uppercase tracking-wider border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <tr>
@@ -390,11 +390,69 @@ export default function JamaahModule({ theme = 'dark' }) {
             </tbody>
           </table>
         </div>
+
+        <div className="md:hidden space-y-3 p-3">
+          {loading ? (
+            <div className={`p-8 text-center ${styles.textSub}`}>Memuat data jamaah...</div>
+          ) : filteredList.length === 0 ? (
+            <div className={`p-8 text-center ${styles.textSub}`}>Belum ada data jamaah.</div>
+          ) : (
+            filteredList.map((item) => {
+              const isExpiringSoon = item.passportExpiry && new Date(item.passportExpiry) < new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+              return (
+                <div key={item.id} className={`${styles.innerBg} border rounded-xl p-4 space-y-2`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className={`font-semibold ${styles.textTitle}`}>{item.fullName}</p>
+                      <p className="font-mono font-bold text-emerald-500 text-[11px]">{item.customerCode || 'CST002001'}</p>
+                    </div>
+                  </div>
+                  <div className={`text-[11px] ${styles.textSub} space-y-1`}>
+                    <div>NIK: <span className="font-mono">{item.nik || '-'}</span></div>
+                    <div>
+                      Gender:{' '}
+                      <span className={`inline-block ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] font-bold`}>
+                        {item.gender === 'L' ? 'Laki-Laki' : 'Perempuan'}
+                      </span>
+                    </div>
+                    <div>Kontak: {item.phone || '-'}</div>
+                    <div>
+                      Paspor: <span className="font-semibold text-emerald-500 font-mono">{item.passportNumber || 'Belum Ada'}</span>
+                    </div>
+                    {item.passportExpiry && (
+                      <div className={`flex items-center gap-1 ${isExpiringSoon ? 'text-amber-500 font-bold' : ''}`}>
+                        {isExpiringSoon && <AlertCircle className="w-3 h-3" />}
+                        Exp: {formatDateDDMMYYYY(item.passportExpiry)}
+                      </div>
+                    )}
+                    <div>Alamat: {item.address || '-'}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <button
+                      onClick={() => handleOpenEdit(item)}
+                      className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                      title="Edit Data Jamaah"
+                    >
+                      <Edit className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(item)}
+                      className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                      title="Hapus Jamaah"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
       {showModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
@@ -521,7 +579,7 @@ export default function JamaahModule({ theme = 'dark' }) {
       </div>
 
       <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className={`${styles.tableHeaderBg} uppercase tracking-wider border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <tr>
@@ -564,11 +622,43 @@ export default function JamaahModule({ theme = 'dark' }) {
             </tbody>
           </table>
         </div>
+
+        <div className="md:hidden space-y-3 p-3">
+          {tcLoading ? (
+            <div className={`p-8 text-center ${styles.textSub}`}>Memuat data TC/Sales...</div>
+          ) : tcList.length === 0 ? (
+            <div className={`p-8 text-center ${styles.textSub}`}>Belum ada data TC/Sales.</div>
+          ) : (
+            tcList.map(tc => (
+              <div key={tc.id} className={`${styles.innerBg} border rounded-xl p-4 space-y-2`}>
+                <p className={`font-semibold ${styles.textTitle}`}>{tc.name}</p>
+                <div className={`text-[11px] ${styles.textSub} space-y-1`}>
+                  <div>Kontak: {tc.phone || '-'}</div>
+                  <div>Catatan: {tc.notes || '-'}</div>
+                  <div>
+                    Status:{' '}
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${tc.active !== false ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-500/10 text-slate-400'}`}>
+                      {tc.active !== false ? 'Aktif' : 'Nonaktif'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <button onClick={() => handleOpenEditTc(tc)} className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg`} title="Edit">
+                    <Edit className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => handleDeleteTc(tc)} className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg`} title="Hapus">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
       {showTcModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowTcModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
