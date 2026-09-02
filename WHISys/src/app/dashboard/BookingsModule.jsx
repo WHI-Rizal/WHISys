@@ -955,31 +955,27 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   // Ada 1 opsi tambahan khusus Peserta 1: "__same_as_orderer__" — biar staff
   // nggak perlu pilih/ketik ulang data yang sama kalau Pemesan-nya juga ikut
   // berangkat sebagai Peserta 1. Kalau Pemesannya udah ada di Data Master
-  // Jamaah, langsung disamain jamaahId-nya. Kalau Pemesannya masih "Tambah
-  // Pemesan Baru" (belum tersimpan/belum punya id), isian formnya ikut
-  // disalin ke form "Tambah Jamaah Baru" Peserta 1 (bukan link hidup, cuma
-  // salinan sekali pas dipilih).
+  // Jamaah, disimpan sebagai penanda "__same_as_orderer__" (BUKAN disalin
+  // jadi entry jamaah baru yang terpisah) — pas submit, Peserta 1 bakal
+  // nempel langsung ke id Pemesan yang sama (baik yang udah ada di Data
+  // Master Jamaah, maupun yang baru aja dibuat dari "Tambah Pemesan Baru").
+  // Awalnya sempat salah bikin salinan data baru (lihat handleSubmit versi
+  // lama) — akibatnya kalau Pemesannya "Tambah Baru", Peserta 1 ikut bikin
+  // 1 dokumen jamaah terpisah lagi dari data yang sama persis, jadi dobel
+  // di Data Master Jamaah. Sekarang cukup 1 dokumen jamaah buat 2 peran itu.
   const handlePesertaJamaahIdChange = (idx, value) => {
     if (value === '__same_as_orderer__') {
       if (!formData.ordererId) {
         alert("Pilih Pemesan-nya dulu di atas sebelum pakai opsi \"Sama dengan Pemesan\".");
         return;
       }
-      if (formData.ordererId === '__new__') {
-        if (!newOrdererForm.fullName.trim()) {
-          alert("Isi dulu Nama Lengkap Pemesan Baru di atas sebelum pakai opsi \"Sama dengan Pemesan\".");
-          return;
-        }
-        setFormData(prev => {
-          const updated = [...prev.pesertaList];
-          updated[idx] = { ...updated[idx], jamaahId: '__new__', newJamaah: { ...newOrdererForm } };
-          return { ...prev, pesertaList: updated };
-        });
+      if (formData.ordererId === '__new__' && !newOrdererForm.fullName.trim()) {
+        alert("Isi dulu Nama Lengkap Pemesan Baru di atas sebelum pakai opsi \"Sama dengan Pemesan\".");
         return;
       }
       setFormData(prev => {
         const updated = [...prev.pesertaList];
-        updated[idx] = { ...updated[idx], jamaahId: prev.ordererId };
+        updated[idx] = { ...updated[idx], jamaahId: '__same_as_orderer__', newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '' } };
         return { ...prev, pesertaList: updated };
       });
       return;
@@ -3056,6 +3052,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         alert(`Isi nama lengkap Peserta ${i + 1} (Jamaah Baru) terlebih dahulu.`);
         return;
       }
+      if (entry.jamaahId === '__same_as_orderer__' && !formData.ordererId) {
+        alert(`Peserta ${i + 1} pakai opsi "Sama dengan Pemesan", tapi Pemesan-nya belum dipilih/diisi.`);
+        return;
+      }
     }
 
     try {
@@ -3102,7 +3102,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // dari Data Master Jamaah, atau eksplisit dibuatkan data barunya.
       const paxList = [];
       for (const entry of pesertaEntries) {
-        if (entry.jamaahId === '__new__') {
+        if (entry.jamaahId === '__same_as_orderer__') {
+          // Peserta ini "Sama dengan Pemesan" — pakai id Pemesan yang udah
+          // diresolusi di atas (baik yang existing maupun yang baru aja
+          // dibuat), BUKAN bikin dokumen jamaah baru lagi. Ini yang mencegah
+          // data dobel di Data Master Jamaah.
+          if (!selectedOrderer) {
+            throw new Error('Data Pemesan belum lengkap untuk dipakai sebagai Peserta (opsi "Sama dengan Pemesan").');
+          }
+          paxList.push({ jamaahId: selectedOrderer.id, jamaahName: selectedOrderer.fullName, passportNumber: selectedOrderer.passportNumber || '-' });
+        } else if (entry.jamaahId === '__new__') {
           const newCode = generateNextCustomerCode(workingJamaahList);
           const newJamaahRef = await addDoc(collection(db, 'jamaah'), {
             customerCode: newCode,
