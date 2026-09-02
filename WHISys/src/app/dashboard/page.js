@@ -20,7 +20,9 @@ import {
   ShieldCheck,
   MessageSquareHeart,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Menu,
+  X
 } from 'lucide-react';
 import { auth, db } from '../../lib/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -67,7 +69,14 @@ export default function DashboardPage() {
 
   // Sidebar bisa di-collapse jadi rail ikon doang, biar area konten utama
   // (tabel-tabel yang lebar kayak Booking & Manifest) dapet ruang lebih luas.
+  // Ini khusus buat layar desktop/tablet (md ke atas).
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Di HP, sidebar-nya nggak "collapse jadi rail" kayak desktop — dia
+  // disembunyiin total sebagai drawer yang meluncur dari kiri, dibuka lewat
+  // tombol hamburger di topbar mobile. Beda state dari sidebarCollapsed
+  // (yang cuma relevan buat desktop) biar kelakuannya independen.
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Load saved theme & preferensi sidebar dari LocalStorage saat pertama kali dimuat
   useEffect(() => {
@@ -172,6 +181,9 @@ export default function DashboardPage() {
   const changeMenu = (menuKey) => {
     setActiveMenu(menuKey);
     window.location.hash = menuKey;
+    // Abis pilih menu di HP, drawer-nya otomatis ketutup lagi — biar nggak
+    // nutupin konten yang baru dibuka.
+    setMobileMenuOpen(false);
   };
 
   useEffect(() => {
@@ -293,35 +305,84 @@ export default function DashboardPage() {
   return (
     <div className={`flex h-screen ${currentTheme.bg} font-sans transition-colors duration-300`}>
 
-      {/* 1. SIDEBAR NAVIGASI ERP — bisa di-collapse jadi rail ikon doang lewat
-          tombol panah di pojok kanan atas sidebar, biar konten utama (tabel
-          lebar kayak Booking & Manifest) dapet ruang lebih luas. */}
-      <aside className={`relative ${sidebarCollapsed ? 'w-[68px]' : 'w-64'} ${currentTheme.sidebar} border-r flex flex-col justify-between p-4 shrink-0 transition-all duration-300`}>
+      {/* BACKDROP — cuma muncul di HP (md:hidden) pas drawer sidebar lagi
+          dibuka. Klik di luar sidebar = nutup drawer-nya lagi. */}
+      {mobileMenuOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-30 md:hidden"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* TOPBAR MOBILE — cuma tampil di layar kecil (md:hidden), gantiin
+          sidebar yang di HP disembunyiin total. Isinya tombol hamburger buat
+          buka drawer, plus logo ringkas. */}
+      <div className={`md:hidden fixed top-0 left-0 right-0 z-20 ${currentTheme.sidebar} border-b flex items-center justify-between px-4 py-3`}>
+        <button
+          onClick={() => setMobileMenuOpen(true)}
+          className={`p-1.5 rounded-lg ${currentTheme.subText} hover:${currentTheme.accentText} hover:bg-emerald-500/10 transition-colors`}
+          title="Buka Menu"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+        <div className="flex items-center gap-2">
+          <div className={`p-1.5 ${currentTheme.accentBg} rounded-lg text-white shrink-0`}>
+            <Plane className="w-4 h-4" />
+          </div>
+          <span className={`font-bold text-sm ${currentTheme.accentText}`}>WHISys</span>
+        </div>
+        <button
+          onClick={toggleTheme}
+          className={`p-1.5 rounded-lg ${currentTheme.subText} hover:${currentTheme.accentText} hover:bg-emerald-500/10 transition-colors`}
+          title="Ganti Tema"
+        >
+          {theme === 'dark' ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-indigo-600" />}
+        </button>
+      </div>
+
+      {/* 1. SIDEBAR NAVIGASI ERP — di desktop/tablet (md ke atas) bisa
+          di-collapse jadi rail ikon doang lewat tombol panah di pojok kanan
+          atas sidebar, biar konten utama (tabel lebar kayak Booking &
+          Manifest) dapet ruang lebih luas. Di HP, sidebar ini jadi drawer
+          yang meluncur dari kiri (posisi fixed, di luar layar kalau ketutup),
+          dibuka lewat tombol hamburger di topbar mobile di atas. */}
+      <aside className={`
+        fixed inset-y-0 left-0 z-40 w-64 transform transition-transform duration-300
+        ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
+        md:relative md:translate-x-0 md:z-0
+        ${sidebarCollapsed ? 'md:w-[68px]' : 'md:w-64'}
+        ${currentTheme.sidebar} border-r flex flex-col justify-between p-4 shrink-0 md:transition-all
+      `}>
+        {/* Tombol tutup drawer — cuma keliatan di HP */}
+        <button
+          onClick={() => setMobileMenuOpen(false)}
+          className={`md:hidden absolute right-3 top-3 w-7 h-7 rounded-full border ${currentTheme.border} ${currentTheme.sidebar} flex items-center justify-center ${currentTheme.subText}`}
+          title="Tutup Menu"
+        >
+          <X className="w-4 h-4" />
+        </button>
+        {/* Tombol collapse rail — cuma keliatan di desktop/tablet */}
         <button
           onClick={toggleSidebar}
-          className={`absolute -right-3 top-8 z-10 w-6 h-6 rounded-full border ${currentTheme.border} ${currentTheme.sidebar} flex items-center justify-center ${currentTheme.subText} hover:${currentTheme.accentText} transition-colors shadow-sm`}
+          className={`hidden md:flex absolute -right-3 top-8 z-10 w-6 h-6 rounded-full border ${currentTheme.border} ${currentTheme.sidebar} items-center justify-center ${currentTheme.subText} hover:${currentTheme.accentText} transition-colors shadow-sm`}
           title={sidebarCollapsed ? 'Buka Sidebar' : 'Tutup Sidebar'}
         >
           {sidebarCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
         </button>
 
-        <div>
-          <div className={`flex items-center gap-3 px-3 py-4 mb-6 border-b ${currentTheme.border} ${sidebarCollapsed ? 'justify-center px-0' : ''}`}>
+        <div className="overflow-y-auto">
+          <div className={`flex items-center gap-3 px-3 py-4 mb-6 border-b ${currentTheme.border} ${sidebarCollapsed ? 'md:justify-center md:px-0' : ''}`}>
             <div className={`p-2 ${currentTheme.accentBg} rounded-lg text-white shrink-0`}>
               <Plane className="w-6 h-6" />
             </div>
-            {!sidebarCollapsed && (
-              <div>
-                <h1 className={`font-bold text-lg ${currentTheme.accentText} leading-none`}>Wisata Halal Internasional</h1>
-                <span className={`text-xs ${currentTheme.subText}`}>ERP SYSTEM</span>
-              </div>
-            )}
+            <div className={sidebarCollapsed ? 'md:hidden' : ''}>
+              <h1 className={`font-bold text-lg ${currentTheme.accentText} leading-none`}>Wisata Halal Internasional</h1>
+              <span className={`text-xs ${currentTheme.subText}`}>ERP SYSTEM</span>
+            </div>
           </div>
 
           <nav className="space-y-1">
-            {!sidebarCollapsed && (
-              <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Core ERP System</p>
-            )}
+            <p className={`px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 ${sidebarCollapsed ? 'md:hidden' : ''}`}>Core ERP System</p>
 
             <SidebarItem
               icon={LayoutDashboard}
@@ -363,9 +424,7 @@ export default function DashboardPage() {
               onClick={() => changeMenu('bookings')}
             />
 
-            {!sidebarCollapsed && (
-              <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Operasional Travel</p>
-            )}
+            <p className={`px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2 ${sidebarCollapsed ? 'md:hidden' : ''}`}>Operasional Travel</p>
 
             {canAccessFinance && (
               <SidebarItem
@@ -409,9 +468,7 @@ export default function DashboardPage() {
               onClick={() => changeMenu('agents')}
             />
 
-            {!sidebarCollapsed && (
-              <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2">Smart Assistant & Config</p>
-            )}
+            <p className={`px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-5 mb-2 ${sidebarCollapsed ? 'md:hidden' : ''}`}>Smart Assistant & Config</p>
 
             <SidebarItem
               icon={Sparkles}
@@ -435,19 +492,17 @@ export default function DashboardPage() {
           </nav>
         </div>
 
-        <div className={`border-t ${currentTheme.border} pt-4 flex ${sidebarCollapsed ? 'flex-col items-center gap-2' : 'items-center justify-between px-2'}`}>
-          <div className={`flex items-center gap-3 overflow-hidden ${sidebarCollapsed ? 'justify-center' : ''}`}>
+        <div className={`border-t ${currentTheme.border} pt-4 flex items-center justify-between px-2 ${sidebarCollapsed ? 'md:flex-col md:items-center md:gap-2 md:px-0' : ''}`}>
+          <div className={`flex items-center gap-3 overflow-hidden ${sidebarCollapsed ? 'md:justify-center' : ''}`}>
             <div className={`w-8 h-8 rounded-full ${currentTheme.accentText} bg-emerald-500/10 flex items-center justify-center font-bold text-xs uppercase shrink-0`} title={userProfile?.fullName || userProfile?.email}>
               {userProfile?.role?.[0] || 'A'}
             </div>
-            {!sidebarCollapsed && (
-              <div className="truncate">
-                <p className={`text-sm font-medium ${currentTheme.headingText} truncate`}>{userProfile?.fullName || userProfile?.email}</p>
-                <span className={`inline-flex items-center gap-1 text-[10px] ${currentTheme.accentText} font-semibold uppercase bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20`}>
-                  <ShieldCheck className="w-3 h-3" /> {userProfile?.role || 'Admin'}
-                </span>
-              </div>
-            )}
+            <div className={`truncate ${sidebarCollapsed ? 'md:hidden' : ''}`}>
+              <p className={`text-sm font-medium ${currentTheme.headingText} truncate`}>{userProfile?.fullName || userProfile?.email}</p>
+              <span className={`inline-flex items-center gap-1 text-[10px] ${currentTheme.accentText} font-semibold uppercase bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20`}>
+                <ShieldCheck className="w-3 h-3" /> {userProfile?.role || 'Admin'}
+              </span>
+            </div>
           </div>
           <button
             onClick={handleLogout}
@@ -459,20 +514,24 @@ export default function DashboardPage() {
         </div>
       </aside>
 
-      {/* 2. AREA KONTEN UTAMA */}
-      <main className="flex-1 overflow-y-auto p-8">
+      {/* 2. AREA KONTEN UTAMA — padding-top ekstra di HP (pt-20) buat ngasih
+          ruang ke topbar mobile yang posisinya fixed di atas, nggak perlu di
+          desktop (md:pt-8) karena topbar mobile-nya emang disembunyiin. */}
+      <main className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-20 pb-4 sm:p-6 md:p-8 w-full min-w-0">
 
         {/* HEADER BAR */}
-        <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+        <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 md:mb-8">
           <div>
-            <h2 className={`text-2xl font-bold ${currentTheme.headingText}`}>WHISys ERP Executive Board</h2>
-            <p className={`${currentTheme.subText} text-sm`}>Sistem terpadu operasional Umrah, Haji, & Wisata Halal.</p>
+            <h2 className={`text-xl md:text-2xl font-bold ${currentTheme.headingText}`}>WHISys ERP Executive Board</h2>
+            <p className={`${currentTheme.subText} text-xs md:text-sm`}>Sistem terpadu operasional Umrah, Haji, & Wisata Halal.</p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            {/* Toggle tema ini disembunyiin di HP (md:flex) — di layar kecil
+                udah ada tombol yang sama di topbar mobile, nggak perlu dobel. */}
             <button
               onClick={toggleTheme}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all text-xs font-semibold ${
+              className={`hidden md:flex items-center gap-2 px-3 py-2 rounded-xl border transition-all text-xs font-semibold ${
                 theme === 'dark'
                   ? 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-800'
                   : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300 shadow-sm'
@@ -494,7 +553,7 @@ export default function DashboardPage() {
 
             <button
               onClick={() => changeMenu('jamaah')}
-              className={`flex items-center gap-2 ${currentTheme.accentBg} text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg`}
+              className={`flex items-center justify-center gap-2 ${currentTheme.accentBg} text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg w-full sm:w-auto`}
             >
               <Plus className="w-4 h-4" /> Register Jamaah Baru
             </button>
@@ -698,18 +757,24 @@ export default function DashboardPage() {
 }
 
 function SidebarItem({ icon: Icon, label, active, activeClass, subTextClass, collapsed, onClick }) {
+  // "collapsed" (rail ikon doang, tanpa teks label) itu konsep KHUSUS
+  // desktop/tablet (md ke atas) — di HP, sidebar-nya jadi drawer full-width
+  // yang selalu nampilin label penuh, apapun status collapsed-nya di
+  // desktop. Makanya class "sembunyiin label"-nya dikasih prefix md: biar
+  // cuma ngefek di layar gede, dan labelnya tetap DI-RENDER (bukan
+  // dihilangin dari DOM) supaya bisa dikontrol lewat CSS per breakpoint.
   return (
     <button
       onClick={onClick}
       title={collapsed ? label : undefined}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${collapsed ? 'justify-center px-0' : ''} ${
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${collapsed ? 'md:justify-center md:px-0' : ''} ${
         active
           ? `${activeClass} shadow-md`
           : `${subTextClass} hover:bg-emerald-500/10 hover:text-emerald-500`
       }`}
     >
       <Icon className="w-4 h-4 shrink-0" />
-      {!collapsed && label}
+      <span className={collapsed ? 'md:hidden' : ''}>{label}</span>
     </button>
   );
 }
