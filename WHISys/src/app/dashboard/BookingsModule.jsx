@@ -462,7 +462,11 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     setLoading(true);
     try {
       const pkgSnap = await getDocs(collection(db, 'packages'));
-      setPackagesList(pkgSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      // "_destination_categories_config" itu dokumen konfigurasi daftar
+      // Destinasi/Kota Tujuan (dikelola dari PackagesModule.jsx), bukan
+      // paket beneran — disaring keluar biar nggak muncul jadi opsi paket
+      // kosong di dropdown "Pilih Paket Travel".
+      setPackagesList(pkgSnap.docs.filter(d => d.id !== '_destination_categories_config').map(d => ({ id: d.id, ...d.data() })));
 
       const jmhSnap = await getDocs(collection(db, 'jamaah'));
       setJamaahList(jmhSnap.docs.map(d => ({ id: d.id, ...d.data() })));
