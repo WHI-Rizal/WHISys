@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
-import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown } from 'lucide-react';
+import { collection, addDoc, getDocs, doc, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
+import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 
 // Helper Format Tanggal dd/mm/yyyy
@@ -24,6 +24,27 @@ const formatMonthYear = (dateString) => {
   if (isNaN(date.getTime())) return '';
   return date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
 };
+
+// Daftar default Destinasi/Kota Tujuan (paket Wisata Halal & LA Only) —
+// dibuat jadi kategori baku (bisa ditambah/diedit lewat "Kelola Kategori")
+// biar penulisannya seragam, nggak ada lagi yang nulis "Japan" vs "Jepang".
+const DESTINATION_CATEGORIES = [
+  'Korea Selatan',
+  'Jepang',
+  'Turki',
+  'Dubai (UAE)',
+  'Malaysia',
+  'Thailand',
+  'Lainnya'
+];
+
+// ID dokumen konfigurasi daftar Destinasi yang bisa diedit user — disamarkan
+// sebagai salah satu dokumen di collection 'packages' sendiri (bukan
+// collection terpisah), persis pola yang sama kayak Kategori Vendor di
+// FinanceModule.jsx — biar hak akses tulisnya otomatis ikut aturan Firestore
+// Rules yang udah ada buat kelola katalog paket (Super Admin & Operational),
+// tanpa perlu minta perubahan rules baru.
+const DESTINATION_CATEGORY_CONFIG_ID = '_destination_categories_config';
 
 export default function PackagesModule({ theme = 'dark', userRole = '' }) {
   const isDark = theme === 'dark';
@@ -53,11 +74,21 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPeriod, setSelectedPeriod] = useState('');
   const [selectedDestination, setSelectedDestination] = useState('');
+  const [selectedDestinationCity, setSelectedDestinationCity] = useState('');
   const [selectedAirline, setSelectedAirline] = useState('');
   const [sortBy, setSortBy] = useState('');
 
   const [showModal, setShowModal] = useState(false);
   const [editingPackageId, setEditingPackageId] = useState(null);
+
+  // Kategori Destinasi/Kota Tujuan sekarang bisa ditambah/diedit sendiri
+  // lewat tombol "Kelola Kategori" — pola & alasannya sama persis kayak
+  // Kelola Kategori Vendor di FinanceModule.jsx.
+  const [destinationCategories, setDestinationCategories] = useState(DESTINATION_CATEGORIES);
+  const [showDestinationCategoryModal, setShowDestinationCategoryModal] = useState(false);
+  const [destinationCategoryDraft, setDestinationCategoryDraft] = useState([]);
+  const [newDestinationCategoryText, setNewDestinationCategoryText] = useState('');
+  const [savingDestinationCategories, setSavingDestinationCategories] = useState(false);
 
   // State Modal Itinerary
   const [showItineraryModal, setShowItineraryModal] = useState(false);
@@ -74,7 +105,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
     airline: 'Saudi Arabian Airlines',
     hotelMakkah: 'Pullman Zamzam',
     hotelMadinah: 'Front Taiba',
-    destinationCity: 'Korea Selatan (Seoul & Nami)',
+    destinationCity: DESTINATION_CATEGORIES[0],
     hotelTour: 'Hotel Bintang 4 / Setaraf',
     laScope: 'Bus, Mutawwif, Handling, Visas',
     quotaTotal: 45,
@@ -88,7 +119,12 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
     setLoading(true);
     try {
       const pkgSnap = await getDocs(collection(db, 'packages'));
-      const pkgs = pkgSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const pkgDocs = pkgSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const destinationConfigDoc = pkgDocs.find(p => p.id === DESTINATION_CATEGORY_CONFIG_ID);
+      const pkgs = pkgDocs.filter(p => p.id !== DESTINATION_CATEGORY_CONFIG_ID);
+      if (destinationConfigDoc && Array.isArray(destinationConfigDoc.categories) && destinationConfigDoc.categories.length > 0) {
+        setDestinationCategories(destinationConfigDoc.categories);
+      }
 
       const bkSnap = await getDocs(collection(db, 'bookings'));
       const bks = bkSnap.docs.map(d => d.data());
@@ -140,7 +176,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
       airline: 'Saudi Arabian Airlines',
       hotelMakkah: 'Pullman Zamzam',
       hotelMadinah: 'Front Taiba',
-      destinationCity: 'Korea Selatan / Jepang',
+      destinationCity: destinationCategories[0],
       hotelTour: 'Hotel Bintang 4 / Setaraf',
       laScope: 'Transport, Hotel, Handling LA',
       quotaTotal: 45,
@@ -219,6 +255,88 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
     } catch (err) {
       alert("Gagal menghapus paket: " + err.message);
     }
+  };
+
+  // ============ Kelola Kategori Destinasi/Kota Tujuan (Tambah/Edit/Hapus) ============
+
+  const openDestinationCategoryModal = () => {
+    if (!canManagePackages) {
+      alert("Cuma Super Admin & Operational yang boleh kelola kategori destinasi.");
+      return;
+    }
+    setDestinationCategoryDraft(destinationCategories.map((c, i) => ({ key: `existing-${i}`, original: c, value: c })));
+    setNewDestinationCategoryText('');
+    setShowDestinationCategoryModal(true);
+  };
+
+  const handleAddDestinationCategoryDraft = () => {
+    const text = newDestinationCategoryText.trim();
+    if (!text) return;
+    const isDuplicate = destinationCategoryDraft.some(c => c.value.trim().toLowerCase() === text.toLowerCase());
+    if (isDuplicate) {
+      alert(`Destinasi "${text}" udah ada di daftar.`);
+      return;
+    }
+    setDestinationCategoryDraft(prev => [...prev, { key: `new-${Date.now()}`, original: null, value: text }]);
+    setNewDestinationCategoryText('');
+  };
+
+  const handleRenameDestinationCategoryDraft = (key, value) => {
+    setDestinationCategoryDraft(prev => prev.map(c => c.key === key ? { ...c, value } : c));
+  };
+
+  const handleRemoveDestinationCategoryDraft = (key) => {
+    const target = destinationCategoryDraft.find(c => c.key === key);
+    if (!target) return;
+    if (target.original) {
+      const usedCount = packagesList.filter(p => p.destinationCity === target.original).length;
+      if (usedCount > 0) {
+        if (!confirm(`Destinasi "${target.original}" masih dipakai oleh ${usedCount} paket. Kalau dihapus dari daftar, paket-paket itu tetap tersimpan datanya (nggak ikut kehapus/kereset), cuma nggak muncul lagi di pilihan dropdown. Tetap hapus dari daftar?`)) return;
+      }
+    }
+    setDestinationCategoryDraft(prev => prev.filter(c => c.key !== key));
+  };
+
+  const handleSaveDestinationCategories = async () => {
+    const finalValues = destinationCategoryDraft.map(c => c.value.trim()).filter(Boolean);
+    if (finalValues.length === 0) {
+      alert("Minimal harus ada 1 destinasi.");
+      return;
+    }
+    const lowerSet = new Set();
+    for (const v of finalValues) {
+      const lower = v.toLowerCase();
+      if (lowerSet.has(lower)) {
+        alert(`Ada destinasi yang namanya sama: "${v}". Gabungkan atau ganti dulu salah satunya.`);
+        return;
+      }
+      lowerSet.add(lower);
+    }
+
+    setSavingDestinationCategories(true);
+    try {
+      // Rename: destinasi lama yang namanya diubah (bukan yang baru ditambah)
+      // ikut disesuaikan ke semua paket yang masih pakai nama lama itu, biar
+      // data paket existing tetap konsisten sama daftar destinasi terbaru.
+      const renames = destinationCategoryDraft.filter(c => c.original && c.value.trim() && c.value.trim() !== c.original);
+      for (const r of renames) {
+        const affected = packagesList.filter(p => p.destinationCity === r.original);
+        await Promise.all(affected.map(p => updateDoc(doc(db, 'packages', p.id), { destinationCity: r.value.trim() })));
+      }
+
+      await setDoc(doc(db, 'packages', DESTINATION_CATEGORY_CONFIG_ID), {
+        isCategoryConfig: true,
+        categories: finalValues,
+        updatedAt: new Date().toISOString()
+      });
+
+      setDestinationCategories(finalValues);
+      setShowDestinationCategoryModal(false);
+      await fetchData();
+    } catch (err) {
+      alert("Gagal menyimpan daftar destinasi: " + err.message);
+    }
+    setSavingDestinationCategories(false);
   };
 
   // ============ ITINERARY PAKET ============
@@ -431,9 +549,10 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
     const pkgPeriod = formatMonthYear(pkg.departureDate);
     const matchesPeriod = !selectedPeriod || pkgPeriod === selectedPeriod;
     const matchesDestination = !selectedDestination || pkg.type === selectedDestination;
+    const matchesDestinationCity = !selectedDestinationCity || pkg.destinationCity === selectedDestinationCity;
     const matchesAirline = !selectedAirline || pkg.airline === selectedAirline;
 
-    return matchesSearch && matchesPeriod && matchesDestination && matchesAirline;
+    return matchesSearch && matchesPeriod && matchesDestination && matchesDestinationCity && matchesAirline;
   });
 
   // Logika Sort — dipisah dari filter biar urutan aslinya (createdAt) tetap
@@ -465,6 +584,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
     setSearchTerm('');
     setSelectedPeriod('');
     setSelectedDestination('');
+    setSelectedDestinationCity('');
     setSelectedAirline('');
     setSortBy('');
   };
@@ -498,14 +618,14 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
           <span className={`text-xs font-bold ${styles.textTitle} flex items-center gap-1.5`}>
             <Filter className="w-4 h-4 text-emerald-500" /> Filter Data Keberangkatan
           </span>
-          {(searchTerm || selectedPeriod || selectedDestination || selectedAirline || sortBy) && (
+          {(searchTerm || selectedPeriod || selectedDestination || selectedDestinationCity || selectedAirline || sortBy) && (
             <button onClick={resetFilters} className="text-[11px] text-rose-500 hover:underline flex items-center gap-1">
               <RefreshCw className="w-3 h-3" /> Reset Filter
             </button>
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
             <input
@@ -544,6 +664,20 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
               <option value="Haji Khusus / Furoda">Haji Khusus / Furoda</option>
               <option value="Wisata Halal Internasional">Wisata Halal Internasional</option>
               <option value="Land Arrangement (LA) Only">Land Arrangement (LA) Only</option>
+            </select>
+          </div>
+
+          <div className="relative">
+            <Globe className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+            <select
+              value={selectedDestinationCity}
+              onChange={(e) => setSelectedDestinationCity(e.target.value)}
+              className={`w-full ${styles.inputBg} pl-9 pr-3 py-2 rounded-lg text-xs focus:outline-none focus:border-emerald-500`}
+            >
+              <option value="">-- Semua Destinasi/Kota --</option>
+              {destinationCategories.map((dest, idx) => (
+                <option key={idx} value={dest}>{dest}</option>
+              ))}
             </select>
           </div>
 
@@ -877,13 +1011,28 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
               {isTourOrLA ? (
                 <div className={`grid grid-cols-2 gap-4 ${styles.innerBg} p-3 rounded-xl border`}>
                   <div>
-                    <label className="block mb-1 font-medium text-emerald-500">Destinasi / Kota Tujuan</label>
-                    <input
-                      type="text" placeholder="Contoh: Korea Selatan (Seoul & Nami)"
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block font-medium text-emerald-500">Destinasi / Kota Tujuan</label>
+                      <button
+                        type="button"
+                        onClick={openDestinationCategoryModal}
+                        className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1"
+                      >
+                        <Settings className="w-3 h-3" /> Kelola
+                      </button>
+                    </div>
+                    <select
                       className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                       value={formData.destinationCity}
                       onChange={e => setFormData({ ...formData, destinationCity: e.target.value })}
-                    />
+                    >
+                      {formData.destinationCity && !destinationCategories.includes(formData.destinationCity) && (
+                        <option value={formData.destinationCity}>{formData.destinationCity} (nilai lama)</option>
+                      )}
+                      {destinationCategories.map(dest => (
+                        <option key={dest} value={dest}>{dest}</option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block mb-1 font-medium text-emerald-500">
@@ -990,6 +1139,79 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL KELOLA KATEGORI DESTINASI/KOTA TUJUAN */}
+      {showDestinationCategoryModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowDestinationCategoryModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <Globe className="w-5 h-5 text-emerald-500" /> Kelola Kategori Destinasi
+            </h3>
+            <p className={`text-[11px] ${styles.textSub} mb-4`}>
+              Ubah nama destinasi yang udah ada, hapus yang nggak kepake, atau tambah destinasi baru. Perubahan ini langsung kepakai di dropdown Destinasi/Kota Tujuan dan filter pencarian.
+            </p>
+
+            <div className="space-y-2 mb-4">
+              {destinationCategoryDraft.map((c) => (
+                <div key={c.key} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
+                    value={c.value}
+                    onChange={e => handleRenameDestinationCategoryDraft(c.key, e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveDestinationCategoryDraft(c.key)}
+                    className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors shrink-0"
+                    title="Hapus destinasi ini"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              {destinationCategoryDraft.length === 0 && (
+                <p className={`text-xs ${styles.textSub}`}>Belum ada destinasi. Tambahkan minimal 1 di bawah.</p>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 mb-5">
+              <input
+                type="text"
+                placeholder="Nama destinasi baru, cth: Uzbekistan"
+                className={`w-full ${styles.inputBg} rounded-lg p-2.5 text-xs`}
+                value={newDestinationCategoryText}
+                onChange={e => setNewDestinationCategoryText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddDestinationCategoryDraft(); } }}
+              />
+              <button
+                type="button"
+                onClick={handleAddDestinationCategoryDraft}
+                className="flex items-center gap-1 px-3 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-medium shrink-0"
+              >
+                <Plus className="w-4 h-4" /> Tambah
+              </button>
+            </div>
+
+            <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <button type="button" onClick={() => setShowDestinationCategoryModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg text-xs`}>
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveDestinationCategories}
+                disabled={savingDestinationCategories}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded-lg text-xs font-medium"
+              >
+                {savingDestinationCategories ? 'Menyimpan...' : 'Simpan Destinasi'}
+              </button>
+            </div>
           </div>
         </div>
       )}
