@@ -470,7 +470,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
       {/* OVERLAY MODAL MAXIMIZED FULLSCREEN CHAT */}
       {isChatMaximized && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-4 md:p-8 flex items-center justify-center animate-in fade-in duration-200">
-          <div className={`w-full max-w-5xl h-[90vh] ${styles.cardBg} rounded-2xl border shadow-2xl flex flex-col justify-between p-6 relative`}>
+          <div className={`w-full max-w-5xl h-[90vh] overflow-y-auto ${styles.cardBg} rounded-2xl border shadow-2xl flex flex-col justify-between p-6 relative`}>
             
             {/* HEADER FULLSCREEN CHAT */}
             <div className={`flex items-center justify-between border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} pb-4 mb-4`}>
