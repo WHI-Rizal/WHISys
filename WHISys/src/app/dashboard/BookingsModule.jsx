@@ -947,8 +947,39 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     });
   };
 
-  // Ganti pilihan jamaah (existing / __new__) utk satu slot Daftar Peserta
+  // Ganti pilihan jamaah (existing / __new__) utk satu slot Daftar Peserta.
+  // Ada 1 opsi tambahan khusus Peserta 1: "__same_as_orderer__" — biar staff
+  // nggak perlu pilih/ketik ulang data yang sama kalau Pemesan-nya juga ikut
+  // berangkat sebagai Peserta 1. Kalau Pemesannya udah ada di Data Master
+  // Jamaah, langsung disamain jamaahId-nya. Kalau Pemesannya masih "Tambah
+  // Pemesan Baru" (belum tersimpan/belum punya id), isian formnya ikut
+  // disalin ke form "Tambah Jamaah Baru" Peserta 1 (bukan link hidup, cuma
+  // salinan sekali pas dipilih).
   const handlePesertaJamaahIdChange = (idx, value) => {
+    if (value === '__same_as_orderer__') {
+      if (!formData.ordererId) {
+        alert("Pilih Pemesan-nya dulu di atas sebelum pakai opsi \"Sama dengan Pemesan\".");
+        return;
+      }
+      if (formData.ordererId === '__new__') {
+        if (!newOrdererForm.fullName.trim()) {
+          alert("Isi dulu Nama Lengkap Pemesan Baru di atas sebelum pakai opsi \"Sama dengan Pemesan\".");
+          return;
+        }
+        setFormData(prev => {
+          const updated = [...prev.pesertaList];
+          updated[idx] = { ...updated[idx], jamaahId: '__new__', newJamaah: { ...newOrdererForm } };
+          return { ...prev, pesertaList: updated };
+        });
+        return;
+      }
+      setFormData(prev => {
+        const updated = [...prev.pesertaList];
+        updated[idx] = { ...updated[idx], jamaahId: prev.ordererId };
+        return { ...prev, pesertaList: updated };
+      });
+      return;
+    }
     setFormData(prev => {
       const updated = [...prev.pesertaList];
       updated[idx] = { ...updated[idx], jamaahId: value };
@@ -4316,6 +4347,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                       onChange={e => handlePesertaJamaahIdChange(idx, e.target.value)}
                     >
                       <option value="">-- Pilih Data Master Jamaah --</option>
+                      {idx === 0 && (
+                        <option value="__same_as_orderer__">🔁 Sama dengan Pemesan</option>
+                      )}
                       <option value="__new__">➕ Tambah Jamaah Baru (Belum Terdaftar)</option>
                       {jamaahList.map(j => (
                         <option key={j.id} value={j.id}>
