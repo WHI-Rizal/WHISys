@@ -74,7 +74,10 @@ export default function FeedbackModule({ theme = 'dark' }) {
       setFeedbackList(fbSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       const pkgSnap = await getDocs(collection(db, 'packages'));
-      setPackagesList(pkgSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      // "_destination_categories_config" itu dokumen konfigurasi daftar
+      // Destinasi/Kota Tujuan (dikelola dari PackagesModule.jsx), bukan
+      // paket beneran — disaring keluar biar nggak dianggap paket kosong.
+      setPackagesList(pkgSnap.docs.filter(d => d.id !== '_destination_categories_config').map(d => ({ id: d.id, ...d.data() })));
 
       const jmhSnap = await getDocs(collection(db, 'jamaah'));
       setJamaahList(jmhSnap.docs.map(d => ({ id: d.id, ...d.data() })));
