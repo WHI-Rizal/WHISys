@@ -60,7 +60,10 @@ export default function EquipmentModule({ theme = 'dark' }) {
   const fetchPackages = async () => {
     const snap = await getDocs(collection(db, 'packages'));
     setPackagesList(
-      snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      // "_destination_categories_config" itu dokumen konfigurasi daftar
+      // Destinasi/Kota Tujuan (dikelola dari PackagesModule.jsx), bukan
+      // paket beneran — disaring keluar biar nggak dianggap paket kosong.
+      snap.docs.filter(d => d.id !== '_destination_categories_config').map(d => ({ id: d.id, ...d.data() }))
         .sort((a, b) => new Date(a.departureDate || 0) - new Date(b.departureDate || 0))
     );
   };
