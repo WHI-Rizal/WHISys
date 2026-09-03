@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, getDoc, setDoc, deleteDoc, doc, updateDoc, query, where, increment } from 'firebase/firestore';
-import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock, Download, Pencil, Plus, Settings } from 'lucide-react';
+import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock, Download, Pencil, Plus, Settings, FileBarChart, ChevronDown, ChevronRight } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import DateFieldID from '@/components/DateFieldID';
@@ -269,6 +269,18 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState(null);
   const [activeTab, setActiveTab] = useState('income');
+
+  // Tab "Laporan" — HUB laporan-laporan finansial yang bakal terus nambah ke
+  // depannya. reportsSubTab nentuin sub-laporan mana yang lagi ditampilkan
+  // di dalam tab ini (dipisah dari activeTab biar nambah laporan baru nggak
+  // ganggu tab-tab lain yang udah ada).
+  const [reportsSubTab, setReportsSubTab] = useState('closing_tc');
+
+  // Sub-laporan "Closing TC & Komisi" — filter periode (format "YYYY-MM",
+  // sinkron sama getPeriodKey) dan state accordion baris TC mana yang lagi
+  // dibuka breakdown-nya.
+  const [closingTcPeriod, setClosingTcPeriod] = useState(getPeriodKey(todayISODate()));
+  const [expandedClosingTcIds, setExpandedClosingTcIds] = useState([]);
 
   // Modal "Riwayat Mutasi" per akun Kas/Bank — mirip rekening koran, buat
   // rekonsiliasi manual sama mutasi bank asli.
@@ -1451,6 +1463,92 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     ? operationalExpenses
     : operationalExpenses.filter(op => getPeriodKey(op.expenseDate || op.createdAt) === plPeriod);
 
+  // ================= Laporan > Closing TC & Komisi =================
+  // Cuma booking yang closing-nya lewat TC (closingSourceType === 'tc' dan
+  // closingSourceId keisi) yang dihitung — closing dari Partner atau yang
+  // sumbernya kosong nggak masuk laporan ini. Difilter dari bookingsList
+  // berdasarkan createdAt yang jatuh di periode (bulan) yang dipilih.
+  const closingTcBookingsInPeriod = bookingsList.filter(bk => {
+    if (bk.closingSourceType !== 'tc' || !bk.closingSourceId) return false;
+    return getPeriodKey(bk.createdAt) === closingTcPeriod;
+  });
+
+  // Rekap per TC (key = closingSourceId) berisi total closingan/pax + rincian
+  // per Kategori Destinasi (dari packagesList.destinationCity, fallback
+  // 'Lainnya' kalau paketnya udah nggak ketemu).
+  const closingTcSummary = (() => {
+    const byTc = {};
+    closingTcBookingsInPeriod.forEach(bk => {
+      const tcId = bk.closingSourceId;
+      const tcName = bk.closingSourceName || '(Tanpa Nama)';
+      const pkg = packagesList.find(p => p.id === bk.packageId);
+      const destCategory = pkg?.destinationCity || 'Lainnya';
+      const amount = Number(bk.totalAmount) || 0;
+
+      if (!byTc[tcId]) {
+        byTc[tcId] = { tcId, tcName, totalClosing: 0, totalPax: 0, byDestination: {} };
+      }
+      byTc[tcId].totalClosing += amount;
+      byTc[tcId].totalPax += 1;
+
+      if (!byTc[tcId].byDestination[destCategory]) {
+        byTc[tcId].byDestination[destCategory] = { category: destCategory, closing: 0, pax: 0 };
+      }
+      byTc[tcId].byDestination[destCategory].closing += amount;
+      byTc[tcId].byDestination[destCategory].pax += 1;
+    });
+
+    return Object.values(byTc)
+      .map(tc => ({
+        ...tc,
+        byDestination: Object.values(tc.byDestination).sort((a, b) => b.closing - a.closing)
+      }))
+      .sort((a, b) => b.totalClosing - a.totalClosing);
+  })();
+
+  const closingTcGrandTotal = closingTcSummary.reduce((acc, tc) => ({
+    totalClosing: acc.totalClosing + tc.totalClosing,
+    totalPax: acc.totalPax + tc.totalPax
+  }), { totalClosing: 0, totalPax: 0 });
+
+  const toggleClosingTcExpand = (tcId) => {
+    setExpandedClosingTcIds(prev => prev.includes(tcId) ? prev.filter(id => id !== tcId) : [...prev, tcId]);
+  };
+
+  // Escape 1 field CSV: dibungkus tanda kutip dua kalau isinya ada koma,
+  // kutip dua, atau baris baru — kutip dua di dalamnya di-double-kan.
+  const csvEscapeField = (value) => {
+    const str = String(value ?? '');
+    if (/[",\n]/.test(str)) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const handleDownloadClosingTcCSV = () => {
+    const rows = [['Nama TC', 'Kategori Destinasi', 'Jumlah Closingan', 'Jumlah Pax']];
+    closingTcSummary.forEach(tc => {
+      tc.byDestination.forEach(dest => {
+        rows.push([tc.tcName, dest.category, dest.closing, dest.pax]);
+      });
+    });
+    rows.push(['TOTAL', '', closingTcGrandTotal.totalClosing, closingTcGrandTotal.totalPax]);
+
+    // BOM di depan biar Excel baca UTF-8 dengan benar (nama TC/destinasi
+    // yang pakai karakter non-ASCII nggak jadi karakter aneh pas dibuka).
+    const csvContent = '﻿' + rows.map(row => row.map(csvEscapeField).join(',')).join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Laporan-Closing-TC-${closingTcPeriod}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+  // ================ /Laporan > Closing TC & Komisi ================
+
   const plOmset = incomeInPeriod.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
 
   // Rekap PPN Besaran Tertentu (1,1%) — dihitung dari set setoran yang sama persis dengan Omset di atas,
@@ -1743,6 +1841,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           }`}
         >
           <Building2 className="w-3.5 h-3.5" /> Data Vendor ({vendorsList.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('reports')}
+          className={`px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+            activeTab === 'reports' ? `${styles.tabActive} text-indigo-500 border` : `${styles.textSub} hover:${styles.textTitle}`
+          }`}
+        >
+          <FileBarChart className="w-3.5 h-3.5" /> Laporan
         </button>
       </div>
 
@@ -2675,6 +2781,191 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {activeTab === 'reports' && (
+        <div className="space-y-4">
+          {/* Sub-tab strip Laporan — tambah sibling baru di sini kalau ada
+              laporan baru lagi ke depannya, misal:
+              { key: 'komisi_partner', label: 'Komisi Partner' } */}
+          <div className={`flex gap-2 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} pb-2`}>
+            <button
+              onClick={() => setReportsSubTab('closing_tc')}
+              className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${
+                reportsSubTab === 'closing_tc' ? `${styles.tabActive} text-indigo-500 border` : `${styles.textSub} hover:${styles.textTitle}`
+              }`}
+            >
+              Closing TC
+            </button>
+            {/* — sub-tab laporan berikutnya nyusul di sini — */}
+          </div>
+
+          {reportsSubTab === 'closing_tc' && (
+            <div className="space-y-4">
+              <div className={`${styles.cardBg} border rounded-xl overflow-hidden p-4`}>
+                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
+                  <div>
+                    <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2`}>
+                      <FileBarChart className="w-4 h-4 text-indigo-500" /> Laporan Closing TC & Komisi
+                    </h4>
+                    <p className={`text-xs ${styles.textSub} mt-1`}>
+                      Rekap jumlah closingan (omset) dan jumlah pax per Travel Consultant, dipecah per kategori destinasi — {formatPeriodLabel(closingTcPeriod)}.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="month"
+                      className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
+                      value={closingTcPeriod}
+                      onChange={e => setClosingTcPeriod(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleDownloadClosingTcCSV}
+                      className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Download CSV
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className={`${styles.innerBg} border p-4 rounded-xl`}>
+                    <p className={`text-xs ${styles.textSub} mb-1`}>Total Closingan Semua TC</p>
+                    <h3 className="text-xl font-bold text-emerald-500">
+                      Rp {closingTcGrandTotal.totalClosing.toLocaleString('id-ID')}
+                    </h3>
+                  </div>
+                  <div className={`${styles.innerBg} border p-4 rounded-xl`}>
+                    <p className={`text-xs ${styles.textSub} mb-1`}>Total Pax Semua TC</p>
+                    <h3 className={`text-xl font-bold ${styles.textTitle}`}>
+                      {closingTcGrandTotal.totalPax.toLocaleString('id-ID')}
+                    </h3>
+                  </div>
+                </div>
+              </div>
+
+              <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                      <tr>
+                        <th className="p-4 w-8"></th>
+                        <th className="p-4">Nama TC</th>
+                        <th className="p-4 text-right">Total Closingan</th>
+                        <th className="p-4 text-right">Total Pax</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                      {closingTcSummary.length === 0 ? (
+                        <tr>
+                          <td colSpan="4" className={`p-8 text-center ${styles.textSub}`}>Belum ada closingan dari TC di periode ini.</td>
+                        </tr>
+                      ) : (
+                        closingTcSummary.map(tc => {
+                          const isExpanded = expandedClosingTcIds.includes(tc.tcId);
+                          return (
+                            <React.Fragment key={tc.tcId}>
+                              <tr className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                                <td className="p-4">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleClosingTcExpand(tc.tcId)}
+                                    className={`p-1 rounded ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`}
+                                    title={isExpanded ? 'Sembunyikan rincian' : 'Lihat rincian per destinasi'}
+                                  >
+                                    {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                                  </button>
+                                </td>
+                                <td className={`p-4 font-semibold ${styles.textTitle}`}>{tc.tcName}</td>
+                                <td className="p-4 text-right font-bold text-emerald-500">
+                                  Rp {tc.totalClosing.toLocaleString('id-ID')}
+                                </td>
+                                <td className={`p-4 text-right ${styles.textTitle}`}>{tc.totalPax}</td>
+                              </tr>
+                              {isExpanded && (
+                                <tr>
+                                  <td colSpan="4" className="p-0">
+                                    <div className={`${styles.innerBg} border-y m-3 rounded-lg overflow-hidden`}>
+                                      <table className="w-full text-left text-[11px]">
+                                        <thead className={`${styles.tableHeaderBg} uppercase`}>
+                                          <tr>
+                                            <th className="p-3">Kategori Destinasi</th>
+                                            <th className="p-3 text-right">Jumlah Closingan (Rp)</th>
+                                            <th className="p-3 text-right">Jumlah Pax</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                                          {tc.byDestination.map(dest => (
+                                            <tr key={dest.category}>
+                                              <td className={`p-3 ${styles.textTitle}`}>{dest.category}</td>
+                                              <td className="p-3 text-right text-emerald-500">Rp {dest.closing.toLocaleString('id-ID')}</td>
+                                              <td className={`p-3 text-right ${styles.textSub}`}>{dest.pax}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="md:hidden space-y-3 p-3">
+                  {closingTcSummary.length === 0 ? (
+                    <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada closingan dari TC di periode ini.</p>
+                  ) : (
+                    closingTcSummary.map(tc => {
+                      const isExpanded = expandedClosingTcIds.includes(tc.tcId);
+                      return (
+                        <div key={tc.tcId} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
+                          <div className="flex items-center justify-between">
+                            <div className={`font-semibold ${styles.textTitle}`}>{tc.tcName}</div>
+                            <button
+                              type="button"
+                              onClick={() => toggleClosingTcExpand(tc.tcId)}
+                              className={`p-1 rounded ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`}
+                              title={isExpanded ? 'Sembunyikan rincian' : 'Lihat rincian per destinasi'}
+                            >
+                              {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                            </button>
+                          </div>
+                          <div>
+                            <span className="text-[10px] opacity-60 uppercase">Total Closingan</span>
+                            <div className="font-bold text-emerald-500">Rp {tc.totalClosing.toLocaleString('id-ID')}</div>
+                          </div>
+                          <div>
+                            <span className="text-[10px] opacity-60 uppercase">Total Pax</span>
+                            <div className={styles.textTitle}>{tc.totalPax}</div>
+                          </div>
+                          {isExpanded && (
+                            <div className={`${styles.cardBg} border rounded-lg p-2 space-y-2 mt-2`}>
+                              {tc.byDestination.map(dest => (
+                                <div key={dest.category} className="flex justify-between items-center text-[11px]">
+                                  <span className={styles.textTitle}>{dest.category}</span>
+                                  <span className="text-right">
+                                    <span className="block text-emerald-500">Rp {dest.closing.toLocaleString('id-ID')}</span>
+                                    <span className={styles.textSub}>{dest.pax} pax</span>
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
