@@ -205,6 +205,68 @@ const formatPeriodLabel = (periodKey) => {
   return `${MONTH_NAMES_ID[Number(month) - 1]} ${year}`;
 };
 
+// Format tanggal jadi "22 September 2026" — dipakai buat label rentang
+// tanggal custom (mis. Laporan Closing TC, biar HR bisa atur cutoff payroll
+// sendiri, nggak kepatok tanggal 1-akhir bulan kalender).
+const formatDateLabelID = (dateStr) => {
+  if (!dateStr) return '-';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return `${d.getDate()} ${MONTH_NAMES_ID[d.getMonth()]} ${d.getFullYear()}`;
+};
+
+const formatDateRangeLabel = (start, end) => {
+  if (!start && !end) return 'Semua Periode';
+  if (start && end) return `${formatDateLabelID(start)} – ${formatDateLabelID(end)}`;
+  if (start) return `Mulai ${formatDateLabelID(start)}`;
+  return `Sampai ${formatDateLabelID(end)}`;
+};
+
+// Ambil cuma bagian tanggal (YYYY-MM-DD) dari sebuah dateString/ISO string,
+// berdasarkan komponen tanggal LOKAL (bukan UTC) — konsisten sama
+// formatDateDDMMYYYY & getPeriodKey di atas, biar nggak ada pergeseran
+// tanggal gara-gara beda timezone pas dibandingin sama input <input type="date">.
+const toLocalDateOnlyString = (dateInput) => {
+  if (!dateInput) return null;
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+// Default rentang tanggal Laporan Closing TC = siklus cutoff payroll HRD
+// (tanggal 22 - 21 bulan berikutnya), otomatis ngikutin tanggal hari ini:
+// - Kalau hari ini udah tanggal 22 ke atas, berarti lagi masuk siklus BARU
+//   yang baru mulai (22 bulan ini - 21 bulan depan).
+// - Kalau belum, berarti masih di siklus yang dimulai bulan lalu
+//   (22 bulan lalu - 21 bulan ini).
+// Tetap bisa diubah bebas lewat 2 input tanggal di UI kalau HR butuh
+// rentang lain di luar pola 22-21 ini.
+const getDefaultPayrollCutoffRange = () => {
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = today.getMonth(); // 0-indexed
+  const d = today.getDate();
+  const pad = (n) => String(n).padStart(2, '0');
+
+  let startY, startM, endY, endM;
+  if (d >= 22) {
+    startY = y; startM = m;
+    endM = (m + 1) % 12;
+    endY = m === 11 ? y + 1 : y;
+  } else {
+    endY = y; endM = m;
+    startM = (m + 11) % 12;
+    startY = m === 0 ? y - 1 : y;
+  }
+  return {
+    start: `${startY}-${pad(startM + 1)}-22`,
+    end: `${endY}-${pad(endM + 1)}-21`
+  };
+};
+
 export default function FinanceModule({ onSelectBooking, theme = 'dark', currentUser = null }) {
   const isDark = theme === 'dark';
 
@@ -276,10 +338,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // ganggu tab-tab lain yang udah ada).
   const [reportsSubTab, setReportsSubTab] = useState('closing_tc');
 
-  // Sub-laporan "Closing TC & Komisi" — filter periode (format "YYYY-MM",
-  // sinkron sama getPeriodKey) dan state accordion baris TC mana yang lagi
-  // dibuka breakdown-nya.
-  const [closingTcPeriod, setClosingTcPeriod] = useState(getPeriodKey(todayISODate()));
+  // Sub-laporan "Closing TC & Komisi" — filter RENTANG TANGGAL bebas
+  // (bukan cuma per bulan kalender) berdasarkan tanggal transaksi booking,
+  // defaultnya otomatis ngikutin siklus cutoff payroll HRD (tanggal 22 - 21
+  // bulan berikutnya), tapi tetap bisa diubah manual ke rentang tanggal
+  // apapun lewat 2 input tanggal di UI. Plus state accordion baris TC mana
+  // yang lagi dibuka breakdown-nya.
+  const [closingTcStartDate, setClosingTcStartDate] = useState(() => getDefaultPayrollCutoffRange().start);
+  const [closingTcEndDate, setClosingTcEndDate] = useState(() => getDefaultPayrollCutoffRange().end);
   const [expandedClosingTcIds, setExpandedClosingTcIds] = useState([]);
 
   // Modal "Riwayat Mutasi" per akun Kas/Bank — mirip rekening koran, buat
@@ -1467,10 +1533,17 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // Cuma booking yang closing-nya lewat TC (closingSourceType === 'tc' dan
   // closingSourceId keisi) yang dihitung — closing dari Partner atau yang
   // sumbernya kosong nggak masuk laporan ini. Difilter dari bookingsList
-  // berdasarkan createdAt yang jatuh di periode (bulan) yang dipilih.
+  // berdasarkan tanggal transaksi (createdAt) yang jatuh di RENTANG TANGGAL
+  // (closingTcStartDate s/d closingTcEndDate, inklusif keduanya) yang
+  // dipilih — bukan lagi per bulan kalender, biar HRD bisa atur cutoff
+  // payroll-nya sendiri (mis. tanggal 22 - 21 bulan berikutnya).
   const closingTcBookingsInPeriod = bookingsList.filter(bk => {
     if (bk.closingSourceType !== 'tc' || !bk.closingSourceId) return false;
-    return getPeriodKey(bk.createdAt) === closingTcPeriod;
+    const txDate = toLocalDateOnlyString(bk.createdAt);
+    if (!txDate) return false;
+    if (closingTcStartDate && txDate < closingTcStartDate) return false;
+    if (closingTcEndDate && txDate > closingTcEndDate) return false;
+    return true;
   });
 
   // Rekap per TC (key = closingSourceId) berisi total closingan/pax + rincian
@@ -1541,7 +1614,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `Laporan-Closing-TC-${closingTcPeriod}.csv`;
+    link.download = `Laporan-Closing-TC-${closingTcStartDate || 'awal'}_${closingTcEndDate || 'akhir'}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -2345,7 +2418,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 reportsSubTab === 'profit_loss' ? `${styles.tabActive} text-indigo-500 border` : `${styles.textSub} hover:${styles.textTitle}`
               }`}
             >
-              Laba Rugi
+              Laporan Keuangan (P&L)
             </button>
             <button
               onClick={() => setReportsSubTab('accounts')}
@@ -2364,19 +2437,44 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
                   <div>
                     <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2`}>
-                      <FileBarChart className="w-4 h-4 text-indigo-500" /> Laporan Closing TC
+                      <FileBarChart className="w-4 h-4 text-indigo-500" /> Laporan Closing TC & Komisi
                     </h4>
                     <p className={`text-xs ${styles.textSub} mt-1`}>
-                      Rekap jumlah closingan (omset) dan jumlah pax per Travel Consultant, dipecah per kategori destinasi — {formatPeriodLabel(closingTcPeriod)}.
+                      Rekap jumlah closingan (omset) dan jumlah pax per Travel Consultant, dipecah per kategori destinasi — {formatDateRangeLabel(closingTcStartDate, closingTcEndDate)}.
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="month"
-                      className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
-                      value={closingTcPeriod}
-                      onChange={e => setClosingTcPeriod(e.target.value)}
-                    />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="date"
+                        title="Dari Tanggal Transaksi"
+                        className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
+                        value={closingTcStartDate}
+                        max={closingTcEndDate || undefined}
+                        onChange={e => setClosingTcStartDate(e.target.value)}
+                      />
+                      <span className={`text-xs ${styles.textSub}`}>s/d</span>
+                      <input
+                        type="date"
+                        title="Sampai Tanggal Transaksi"
+                        className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
+                        value={closingTcEndDate}
+                        min={closingTcStartDate || undefined}
+                        onChange={e => setClosingTcEndDate(e.target.value)}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const def = getDefaultPayrollCutoffRange();
+                        setClosingTcStartDate(def.start);
+                        setClosingTcEndDate(def.end);
+                      }}
+                      className={`text-[10px] ${styles.textSub} hover:underline whitespace-nowrap`}
+                      title="Kembali ke rentang cutoff payroll berjalan (tanggal 22 - 21)"
+                    >
+                      Reset ke Cutoff 22-21
+                    </button>
                     <button
                       type="button"
                       onClick={handleDownloadClosingTcCSV}
