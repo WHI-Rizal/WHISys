@@ -382,7 +382,7 @@ export default function DashboardPage() {
           {sidebarCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
         </button>
 
-        <div className="overflow-y-auto">
+        <div className="overflow-y-auto hide-scrollbar">
           <div className={`flex items-center gap-3 px-3 py-4 mb-6 border-b ${currentTheme.border} ${sidebarCollapsed ? 'md:justify-center md:px-0' : ''}`}>
             <div
               className={`p-2 ${currentTheme.accentBg} rounded-lg text-white shrink-0 whisys-plane-trigger`}
