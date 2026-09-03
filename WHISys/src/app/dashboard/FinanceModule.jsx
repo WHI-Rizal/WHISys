@@ -2458,7 +2458,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                         <FileBarChart className="w-4 h-4 text-indigo-500" /> Laporan Closing TC & Komisi
                       </h4>
                       <p className={`text-xs ${styles.textSub} mt-1`}>
-                        Rekap jumlah closingan (omset) dan jumlah pax per Travel Consultant, dipecah per kategori destinasi — {formatDateRangeLabel(closingTcStartDate, closingTcEndDate)}.
+                        Rekap jumlah closingan (omset) dan jumlah pax per Travel Consultant, dipecah per kategori destinasi.
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
