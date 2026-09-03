@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import { auth } from '../../lib/firebase';
+import { auth, db } from '../../lib/firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 import { Plane, Lock, Mail, AlertCircle } from 'lucide-react';
+import { logActivity } from '../../lib/activityLog';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -17,7 +19,26 @@ export default function LoginPage() {
     setError('');
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+
+      // Catat ke Riwayat Aktivitas Sistem — best-effort, nggak boleh sampai
+      // nge-block proses login kalau gagal (mis. dokumen user belum ada).
+      try {
+        const userDocSnap = await getDoc(doc(db, 'users', cred.user.uid));
+        const userData = userDocSnap.exists() ? userDocSnap.data() : {};
+        await logActivity({
+          userId: cred.user.uid,
+          userName: userData.fullName || cred.user.email,
+          userRole: userData.role || 'Belum Diatur',
+          action: 'login',
+          module: 'Autentikasi',
+          targetLabel: userData.fullName || cred.user.email,
+          details: 'Berhasil masuk ke sistem.'
+        });
+      } catch (logErr) {
+        console.error('Gagal mencatat log login:', logErr);
+      }
+
       window.location.href = '/dashboard';
     } catch (err) {
       setError("Gagal masuk: Periksa kembali email dan password Anda.");
