@@ -516,7 +516,15 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
                   Belum ada data user tersimpan di koleksi Firestore.
                 </div>
               ) : (
-                usersList.map((user) => (
+                // Urutkan berdasarkan role (Super Admin di atas, lalu Finance,
+                // Operational, Sales, terakhir role lain di luar 4 itu) —
+                // dalam role yang sama, urutan asli dari Firestore dipertahankan.
+                [...usersList].sort((a, b) => {
+                  const roleOrder = { 'Super Admin': 0, 'admin': 0, 'Finance': 1, 'Operational': 2, 'Sales': 3 };
+                  const orderA = roleOrder[a.role] ?? 4;
+                  const orderB = roleOrder[b.role] ?? 4;
+                  return orderA - orderB;
+                }).map((user) => (
                   <div key={user.id} className={`p-4 rounded-xl border ${styles.innerBg} flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3`}>
                     <div className="flex items-center gap-3">
                       <div className={`p-2.5 rounded-xl font-bold text-xs uppercase ${
