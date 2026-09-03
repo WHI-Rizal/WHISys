@@ -4295,6 +4295,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 <th className="p-4">Kode</th>
                 <th className="p-4">Paket Wisata</th>
                 <th className="p-4">Pemesan</th>
+                <th className="p-4">Closingan</th>
                 <th className="p-4">Keberangkatan</th>
                 <th className="p-4">Jumlah Pax</th>
                 <th className="p-4">Waktu Transaksi</th>
@@ -4307,9 +4308,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             </thead>
             <tbody className={`divide-y ${styles.tableRowBorder}`}>
               {loading ? (
-                <tr><td colSpan="11" className={`p-8 text-center ${styles.textSub}`}>Memuat data manifest...</td></tr>
+                <tr><td colSpan="12" className={`p-8 text-center ${styles.textSub}`}>Memuat data manifest...</td></tr>
               ) : groupedBookingSummary.length === 0 ? (
-                <tr><td colSpan="11" className={`p-8 text-center ${styles.textSub}`}>Belum ada data booking.</td></tr>
+                <tr><td colSpan="12" className={`p-8 text-center ${styles.textSub}`}>Belum ada data booking.</td></tr>
               ) : (
                 groupedBookingSummary.map((group) => (
                   <tr
@@ -4320,6 +4321,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                     <td className="p-4 font-mono text-emerald-500 font-semibold whitespace-nowrap">{group.code}</td>
                     <td className={`p-4 ${styles.textTitle}`}>{group.primary.packageName || '-'}</td>
                     <td className={`p-4 ${styles.textTitle}`}>{group.primary.ordererName || '-'}</td>
+                    <td className={`p-4 ${styles.textSub}`}>{group.primary.closingSourceName || '-'}</td>
                     <td className={`p-4 ${styles.textSub}`}>{formatDateDDMMYYYY(group.primary.departureDate)}</td>
                     <td className={`p-4 ${styles.textTitle}`}>{group.paxCount} Pax</td>
                     <td className={`p-4 ${styles.textSub}`}>{formatDateTimeID(group.earliestCreatedAt)}</td>
@@ -4393,6 +4395,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
                   <div className={`mt-2 space-y-1 ${styles.textSub}`}>
                     <div><span className="font-medium">Pemesan:</span> {group.primary.ordererName || '-'}</div>
+                    <div><span className="font-medium">Closingan:</span> {group.primary.closingSourceName || '-'}</div>
                     <div><span className="font-medium">Keberangkatan:</span> {formatDateDDMMYYYY(group.primary.departureDate)}</div>
                     <div><span className="font-medium">Jumlah Pax:</span> {group.paxCount} Pax</div>
                     <div><span className="font-medium">Waktu Transaksi:</span> {formatDateTimeID(group.earliestCreatedAt)}</div>
