@@ -42,8 +42,19 @@ const resolvePaymentCreatedAt = (dateStr) => {
 // 3. Pembayaran Komisi ke Mitra (partner_commission_payments) — mirip
 //    Riwayat Bayar Vendor, ngurangin saldo Kas/Bank & nyatet ke
 //    account_mutations biar tetap konsisten sama rekap mutasi bank.
-export default function AgentsModule({ theme = 'dark' }) {
+export default function AgentsModule({ theme = 'dark', userRole = '' }) {
   const isDark = theme === 'dark';
+
+  // Menu Mitra & Agen sengaja tetap bisa DIBUKA & DILIHAT sama semua role
+  // yang login (Sales/Operational sering perlu ngecek data mitra/komisi
+  // juga). Tapi nulis datanya (tambah/edit/hapus mitra, hubungkan/lepas
+  // booking ke mitra, catat/hapus pembayaran komisi) cuma boleh Finance &
+  // Super Admin — sama persis kayak Firestore Rules-nya (isFinanceOrAdmin).
+  // Tanpa pengecekan ini, role lain bisa aja mencet tombolnya tapi ujung-
+  // ujungnya cuma ketimpuk error "Missing or insufficient permissions" dari
+  // Firestore, jadi mending tombolnya disembunyikan dari awal.
+  const roleLower = (userRole || '').toLowerCase();
+  const canManagePartners = roleLower.includes('super') || roleLower === 'admin' || roleLower === 'finance';
 
   const styles = {
     cardBg: isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm',
@@ -155,6 +166,10 @@ export default function AgentsModule({ theme = 'dark' }) {
   };
 
   const handleOpenAddPartner = () => {
+    if (!canManagePartners) {
+      alert("Cuma Finance & Super Admin yang boleh menambah data Mitra/Agen.");
+      return;
+    }
     setEditingPartnerId(null);
     setPartnerForm({ name: '', type: 'Mitra', contactPerson: '', phone: '', commissionType: 'percent', commissionValue: '', notes: '', active: true });
     setCustomTypeInput('');
@@ -162,6 +177,10 @@ export default function AgentsModule({ theme = 'dark' }) {
   };
 
   const handleOpenEditPartner = (p) => {
+    if (!canManagePartners) {
+      alert("Cuma Finance & Super Admin yang boleh mengedit data Mitra/Agen.");
+      return;
+    }
     setEditingPartnerId(p.id);
     setPartnerForm({
       name: p.name || '', type: p.type || 'Mitra', contactPerson: p.contactPerson || '',
@@ -174,6 +193,10 @@ export default function AgentsModule({ theme = 'dark' }) {
 
   const handlePartnerSubmit = async (e) => {
     e.preventDefault();
+    if (!canManagePartners) {
+      alert("Cuma Finance & Super Admin yang boleh menyimpan data Mitra/Agen.");
+      return;
+    }
     if (!partnerForm.name.trim()) { alert('Nama mitra/agen wajib diisi.'); return; }
     if (partnerForm.type === '__new__' && !customTypeInput.trim()) {
       alert('Isi nama jenis mitra yang baru dulu.');
@@ -210,6 +233,10 @@ export default function AgentsModule({ theme = 'dark' }) {
   };
 
   const handleDeletePartner = async (p) => {
+    if (!canManagePartners) {
+      alert("Cuma Finance & Super Admin yang boleh menghapus data Mitra/Agen.");
+      return;
+    }
     const { outstanding } = getPartnerSummary(p.id);
     if (outstanding !== 0) {
       alert(`Mitra "${p.name}" masih punya sisa komisi ${outstanding > 0 ? 'belum dibayar' : 'lebih bayar'} sebesar Rp ${Math.abs(outstanding).toLocaleString('id-ID')}. Beresin dulu sebelum dihapus.`);
@@ -278,6 +305,10 @@ export default function AgentsModule({ theme = 'dark' }) {
   };
 
   const handleOpenLinkModal = () => {
+    if (!canManagePartners) {
+      alert("Cuma Finance & Super Admin yang boleh menghubungkan booking ke Mitra/Agen.");
+      return;
+    }
     if (partnersList.length === 0) {
       alert('Tambah dulu data mitra/agen di tab "Data Mitra & Agen".');
       return;
@@ -298,6 +329,10 @@ export default function AgentsModule({ theme = 'dark' }) {
 
   const handleLinkSubmit = async (e) => {
     e.preventDefault();
+    if (!canManagePartners) {
+      alert("Cuma Finance & Super Admin yang boleh menghubungkan booking ke Mitra/Agen.");
+      return;
+    }
     const partner = partnersList.find(p => p.id === linkForm.partnerId);
     const group = availableGroups.find(g => g.code === linkForm.groupCode);
     if (!partner) { alert('Pilih mitra/agen dulu.'); return; }
@@ -329,6 +364,10 @@ export default function AgentsModule({ theme = 'dark' }) {
   };
 
   const handleUnlinkBooking = async (pb) => {
+    if (!canManagePartners) {
+      alert("Cuma Finance & Super Admin yang boleh memutuskan hubungan booking ke Mitra/Agen.");
+      return;
+    }
     const label = pb.paxCount > 1 ? `${pb.jamaahName} dkk (${pb.paxCount} pax)` : pb.jamaahName;
     if (!confirm(`Putuskan hubungan pemesanan ${pb.groupBookingCode} (${label}) dari mitra "${pb.partnerName}"? Komisi Rp ${Number(pb.commissionAmount).toLocaleString('id-ID')} dari pemesanan ini nggak akan dihitung lagi.`)) return;
     try {
@@ -354,6 +393,10 @@ export default function AgentsModule({ theme = 'dark' }) {
   const [processingPaymentId, setProcessingPaymentId] = useState(null);
 
   const handleOpenPayModal = () => {
+    if (!canManagePartners) {
+      alert("Cuma Finance & Super Admin yang boleh mencatat pembayaran komisi Mitra/Agen.");
+      return;
+    }
     if (partnersList.length === 0) {
       alert('Tambah dulu data mitra/agen di tab "Data Mitra & Agen".');
       return;
@@ -364,6 +407,10 @@ export default function AgentsModule({ theme = 'dark' }) {
 
   const handlePaySubmit = async (e) => {
     e.preventDefault();
+    if (!canManagePartners) {
+      alert("Cuma Finance & Super Admin yang boleh mencatat pembayaran komisi Mitra/Agen.");
+      return;
+    }
     if (processingPaymentId) return; // udah ada request lagi jalan, cegah dobel klik
     const partner = partnersList.find(p => p.id === payForm.partnerId);
     if (!partner) { alert('Pilih mitra/agen dulu.'); return; }
@@ -420,6 +467,10 @@ export default function AgentsModule({ theme = 'dark' }) {
   };
 
   const handleDeletePayment = async (pay) => {
+    if (!canManagePartners) {
+      alert("Cuma Finance & Super Admin yang boleh menghapus riwayat pembayaran komisi Mitra/Agen.");
+      return;
+    }
     if (processingPaymentId) return; // udah ada request lagi jalan, cegah dobel klik
     if (!confirm(`Hapus riwayat pembayaran komisi Rp ${Number(pay.amount).toLocaleString('id-ID')} ke "${pay.partnerName}"? Saldo Kas/Bank akan dikembalikan.`)) return;
     setProcessingPaymentId(pay.id);
@@ -495,14 +546,16 @@ export default function AgentsModule({ theme = 'dark' }) {
         {/* ============ TAB DATA MITRA & AGEN ============ */}
         {activeTab === 'partners' && (
           <div>
-            <div className="flex justify-end mb-3">
-              <button
-                onClick={handleOpenAddPartner}
-                className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-medium transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" /> Tambah Mitra/Agen
-              </button>
-            </div>
+            {canManagePartners && (
+              <div className="flex justify-end mb-3">
+                <button
+                  onClick={handleOpenAddPartner}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-medium transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Tambah Mitra/Agen
+                </button>
+              </div>
+            )}
             <div className={`${styles.innerBg} border rounded-xl overflow-hidden`}>
               <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-left text-xs">
@@ -538,20 +591,26 @@ export default function AgentsModule({ theme = 'dark' }) {
                             </td>
                             <td className="p-4">
                               <div className="flex items-center justify-center gap-1.5">
-                                <button
-                                  onClick={() => handleOpenEditPartner(p)}
-                                  className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
-                                  title="Edit Mitra"
-                                >
-                                  <Edit className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => handleDeletePartner(p)}
-                                  className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                                  title="Hapus Mitra"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
+                                {canManagePartners ? (
+                                  <>
+                                    <button
+                                      onClick={() => handleOpenEditPartner(p)}
+                                      className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                                      title="Edit Mitra"
+                                    >
+                                      <Edit className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeletePartner(p)}
+                                      className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                                      title="Hapus Mitra"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className={`text-[10px] ${styles.textSub}`}>-</span>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -590,22 +649,24 @@ export default function AgentsModule({ theme = 'dark' }) {
                           )}
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        <button
-                          onClick={() => handleOpenEditPartner(p)}
-                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
-                          title="Edit Mitra"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeletePartner(p)}
-                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                          title="Hapus Mitra"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                      {canManagePartners && (
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <button
+                            onClick={() => handleOpenEditPartner(p)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                            title="Edit Mitra"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeletePartner(p)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                            title="Hapus Mitra"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
@@ -628,12 +689,14 @@ export default function AgentsModule({ theme = 'dark' }) {
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
-              <button
-                onClick={handleOpenLinkModal}
-                className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-medium transition-colors"
-              >
-                <Link2 className="w-3.5 h-3.5" /> Hubungkan Pemesanan ke Mitra
-              </button>
+              {canManagePartners && (
+                <button
+                  onClick={handleOpenLinkModal}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-medium transition-colors"
+                >
+                  <Link2 className="w-3.5 h-3.5" /> Hubungkan Pemesanan ke Mitra
+                </button>
+              )}
             </div>
 
             {/* Ringkasan komisi mitra terpilih — pindah dari tabel Data Mitra
@@ -695,13 +758,17 @@ export default function AgentsModule({ theme = 'dark' }) {
                             </span>
                           </td>
                           <td className="p-4 text-center">
-                            <button
-                              onClick={() => handleUnlinkBooking(pb)}
-                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                              title="Putuskan Hubungan"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {canManagePartners ? (
+                              <button
+                                onClick={() => handleUnlinkBooking(pb)}
+                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                                title="Putuskan Hubungan"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <span className={`text-[10px] ${styles.textSub}`}>-</span>
+                            )}
                           </td>
                         </tr>
                       ))
@@ -741,15 +808,17 @@ export default function AgentsModule({ theme = 'dark' }) {
                           </span>
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        <button
-                          onClick={() => handleUnlinkBooking(pb)}
-                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                          title="Putuskan Hubungan"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                      {canManagePartners && (
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <button
+                            onClick={() => handleUnlinkBooking(pb)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                            title="Putuskan Hubungan"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
@@ -761,14 +830,16 @@ export default function AgentsModule({ theme = 'dark' }) {
         {/* ============ TAB PEMBAYARAN KOMISI ============ */}
         {activeTab === 'payments' && (
           <div>
-            <div className="flex justify-end mb-3">
-              <button
-                onClick={handleOpenPayModal}
-                className="flex items-center gap-1.5 px-3 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-medium transition-colors"
-              >
-                <Wallet className="w-3.5 h-3.5" /> Bayar Komisi
-              </button>
-            </div>
+            {canManagePartners && (
+              <div className="flex justify-end mb-3">
+                <button
+                  onClick={handleOpenPayModal}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-medium transition-colors"
+                >
+                  <Wallet className="w-3.5 h-3.5" /> Bayar Komisi
+                </button>
+              </div>
+            )}
             <div className={`${styles.innerBg} border rounded-xl overflow-hidden`}>
               <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-left text-xs">
@@ -795,14 +866,18 @@ export default function AgentsModule({ theme = 'dark' }) {
                           <td className={`p-4 ${styles.textSub}`}>{formatDateDDMMYYYY(pay.createdAt)}</td>
                           <td className="p-4 text-right font-bold text-rose-500">- Rp {Number(pay.amount || 0).toLocaleString('id-ID')}</td>
                           <td className="p-4 text-center">
-                            <button
-                              onClick={() => handleDeletePayment(pay)}
-                              disabled={!!processingPaymentId}
-                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed`}
-                              title="Hapus Riwayat"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {canManagePartners ? (
+                              <button
+                                onClick={() => handleDeletePayment(pay)}
+                                disabled={!!processingPaymentId}
+                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed`}
+                                title="Hapus Riwayat"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <span className={`text-[10px] ${styles.textSub}`}>-</span>
+                            )}
                           </td>
                         </tr>
                       ))
@@ -832,16 +907,18 @@ export default function AgentsModule({ theme = 'dark' }) {
                         <span className="text-xs opacity-60">Nominal</span>
                         <div className="font-bold text-rose-500">- Rp {Number(pay.amount || 0).toLocaleString('id-ID')}</div>
                       </div>
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        <button
-                          onClick={() => handleDeletePayment(pay)}
-                          disabled={!!processingPaymentId}
-                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed`}
-                          title="Hapus Riwayat"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                      {canManagePartners && (
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <button
+                            onClick={() => handleDeletePayment(pay)}
+                            disabled={!!processingPaymentId}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed`}
+                            title="Hapus Riwayat"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
