@@ -2345,7 +2345,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 reportsSubTab === 'profit_loss' ? `${styles.tabActive} text-indigo-500 border` : `${styles.textSub} hover:${styles.textTitle}`
               }`}
             >
-              Laporan Keuangan (P&L)
+              Laba Rugi
             </button>
             <button
               onClick={() => setReportsSubTab('accounts')}
