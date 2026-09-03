@@ -61,72 +61,86 @@ export default function LoginPage() {
         <div className="absolute bottom-10 -right-10 w-56 h-56 bg-rose-500/15 rounded-full blur-3xl"></div>
       </div>
 
-      {/* Sketsa siluet kota — deretan hotel/gedung (ada yang bergaya kubah/menara
-          ala arsitektur Timur Tengah, nyambung sama tema Umrah/Haji/Wisata Halal)
-          plus pesawat yang lagi terbang ninggalin jejak putus-putus. Gaya garis
-          tipis (sketch/outline), warna & opacity rendah biar nggak ganggu kartu
-          login di depannya — murni dekorasi, nggak ada logic apapun di sini. */}
+      {/* Sketsa kota — ilustrasi ORIGINAL gaya garis tangan (bukan hasil jiplak
+          dari gambar referensi berwatermark): gedung/hotel di kejauhan, pagar
+          pembatas jalan layang, lalu jalan raya melengkung di depan dengan bus
+          & mobil yang lewat, plus pesawat terbang ninggalin jejak putus-putus
+          di langit. Semuanya garis tipis (sketch/outline), opacity rendah biar
+          nggak ganggu keterbacaan kartu login — murni dekorasi, tanpa logic. */}
       <svg
-        className="pointer-events-none absolute bottom-0 left-0 w-full h-36 sm:h-48 text-slate-500/40"
-        viewBox="0 0 1000 220"
+        className="pointer-events-none absolute bottom-0 left-0 w-full h-56 sm:h-80 text-slate-500/40"
+        viewBox="0 0 1000 500"
         preserveAspectRatio="xMidYMax slice"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.5"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       >
-        <line x1="0" y1="218" x2="1000" y2="218" />
+        {/* --- Skyline gedung/hotel di kejauhan --- */}
+        <rect x="20" y="130" width="55" height="80" />
+        <rect x="90" y="105" width="42" height="105" />
+        <path d="M90 105 L111 78 L132 105 Z" />
+        <rect x="150" y="145" width="38" height="65" />
+        <rect x="205" y="90" width="48" height="120" />
+        <circle cx="229" cy="76" r="12" />
+        <line x1="229" y1="64" x2="229" y2="48" />
+        <rect x="270" y="120" width="40" height="90" />
+        <rect x="325" y="95" width="34" height="115" />
+        <path d="M325 95 L342 66 L359 95 Z" />
+        <rect x="700" y="60" width="50" height="150" />
+        <path d="M700 60 L725 25 L750 60 Z" />
+        <rect x="765" y="95" width="60" height="115" />
+        <line x1="765" y1="125" x2="825" y2="125" />
+        <line x1="765" y1="155" x2="825" y2="155" />
+        <rect x="835" y="130" width="42" height="80" />
+        <rect x="885" y="105" width="46" height="105" />
+        <circle cx="908" cy="90" r="13" />
+        <rect x="940" y="140" width="40" height="70" />
 
-        <rect x="10" y="120" width="70" height="98" />
-        <line x1="10" y1="150" x2="80" y2="150" />
-        <line x1="10" y1="180" x2="80" y2="180" />
+        {/* pohon-pohon kecil di sela gedung */}
+        <path d="M355 210 q10 -30 22 0 q10 -22 20 0" />
+        <path d="M655 210 q10 -28 20 0 q9 -20 18 0" />
+        <path d="M760 210 q9 -22 17 0" />
 
-        <rect x="95" y="90" width="55" height="128" />
-        <path d="M95 90 L122.5 55 L150 90 Z" />
+        {/* --- Pagar pembatas jalan layang --- */}
+        <line x1="0" y1="222" x2="1000" y2="212" />
+        <line x1="20" y1="222" x2="20" y2="240" />
+        <line x1="140" y1="222" x2="140" y2="240" />
+        <line x1="260" y1="221" x2="260" y2="239" />
+        <line x1="380" y1="220" x2="380" y2="238" />
+        <line x1="500" y1="219" x2="500" y2="237" />
+        <line x1="620" y1="217" x2="620" y2="235" />
+        <line x1="740" y1="216" x2="740" y2="234" />
+        <line x1="860" y1="214" x2="860" y2="232" />
+        <line x1="980" y1="213" x2="980" y2="231" />
 
-        <rect x="165" y="150" width="45" height="68" />
+        {/* --- Jalan raya melengkung dengan marka putus-putus --- */}
+        <path d="M0 500 C 220 320 520 240 1000 230" />
+        <path d="M0 430 C 260 300 560 250 1000 275" strokeDasharray="14 12" />
+        <path d="M0 500 C 300 380 640 330 1000 345" />
 
-        <rect x="225" y="70" width="60" height="148" />
-        <circle cx="255" cy="55" r="15" />
-        <line x1="255" y1="40" x2="255" y2="20" />
-        <path d="M248 22 L255 8 L262 22 Z" />
-        <line x1="225" y1="110" x2="285" y2="110" />
-        <line x1="225" y1="150" x2="285" y2="150" />
+        {/* --- Bus --- */}
+        <g transform="translate(430,300) rotate(-6)">
+          <rect x="0" y="0" width="150" height="70" rx="10" />
+          <line x1="0" y1="26" x2="150" y2="26" />
+          <line x1="34" y1="26" x2="34" y2="70" />
+          <line x1="68" y1="26" x2="68" y2="70" />
+          <line x1="102" y1="26" x2="102" y2="70" />
+          <circle cx="32" cy="72" r="12" />
+          <circle cx="118" cy="72" r="12" />
+        </g>
 
-        <rect x="300" y="110" width="50" height="108" />
-
-        <rect x="365" y="60" width="40" height="158" />
-        <path d="M365 60 L385 20 L405 60 Z" />
-        <line x1="365" y1="100" x2="405" y2="100" />
-        <line x1="365" y1="140" x2="405" y2="140" />
-        <line x1="365" y1="180" x2="405" y2="180" />
-
-        <rect x="420" y="130" width="65" height="88" />
-
-        <rect x="500" y="95" width="55" height="123" />
-        <circle cx="527" cy="80" r="13" />
-        <line x1="500" y1="130" x2="555" y2="130" />
-        <line x1="500" y1="165" x2="555" y2="165" />
-
-        <rect x="570" y="145" width="48" height="73" />
-
-        <rect x="630" y="100" width="58" height="118" />
-        <line x1="630" y1="135" x2="688" y2="135" />
-        <line x1="630" y1="170" x2="688" y2="170" />
-
-        <rect x="700" y="75" width="42" height="143" />
-        <path d="M700 75 L721 40 L742 75 Z" />
-
-        <rect x="755" y="135" width="60" height="83" />
-
-        <rect x="830" y="90" width="55" height="128" />
-        <circle cx="857" cy="75" r="14" />
-        <line x1="857" y1="61" x2="857" y2="45" />
-
-        <rect x="900" y="150" width="45" height="68" />
-
-        <rect x="955" y="115" width="40" height="103" />
-        <line x1="955" y1="150" x2="995" y2="150" />
-        <line x1="955" y1="185" x2="995" y2="185" />
+        {/* --- Mobil --- */}
+        <g transform="translate(150,410) rotate(-4)">
+          <path d="M0 34 Q6 6 40 4 L90 4 Q106 6 112 34 Z" />
+          <line x1="0" y1="34" x2="112" y2="34" />
+          <line x1="40" y1="4" x2="46" y2="26" />
+          <line x1="46" y1="26" x2="80" y2="26" />
+          <line x1="80" y1="26" x2="86" y2="4" />
+          <circle cx="26" cy="38" r="10" />
+          <circle cx="86" cy="38" r="10" />
+        </g>
       </svg>
 
       {/* Jejak terbang pesawat — nyambungin ke ikon pesawat yang jadi logo WHISys. */}
