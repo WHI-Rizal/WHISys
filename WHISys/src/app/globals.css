@@ -35,3 +35,16 @@ body {
 .whisys-plane-flying {
   animation: whisys-plane-fly 1.15s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
+
+/* Sembunyikan scrollbar (murni visual) — dipakai di area yang scroll-nya
+   udah jelas dari konteks (sidebar navigasi), biar nggak ada batang abu-abu
+   tebal yang keliatan pas dibuka di laptop/desktop. Fungsi scroll (mouse
+   wheel, trackpad, drag, keyboard, sentuh di HP) tetap jalan normal —
+   ini cuma nyembunyiin indikator visualnya doang, bukan disable overflow. */
+.hide-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE / Edge lama */
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Edge baru (berbasis Chromium) */
+}
