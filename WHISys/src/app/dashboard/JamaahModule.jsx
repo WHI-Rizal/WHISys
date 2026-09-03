@@ -5,6 +5,7 @@ import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { Users, Plus, Search, Edit, Trash2, X, AlertCircle, UserCheck } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
+import { logActivity } from '../../lib/activityLog';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -16,7 +17,7 @@ const formatDateDDMMYYYY = (dateString) => {
   return `${day}/${month}/${year}`;
 };
 
-export default function JamaahModule({ theme = 'dark' }) {
+export default function JamaahModule({ theme = 'dark', currentUser = null, userRole = '' }) {
   const isDark = theme === 'dark';
 
   const styles = {
@@ -99,8 +100,26 @@ export default function JamaahModule({ theme = 'dark' }) {
       const payload = { name: tcForm.name.trim(), phone: tcForm.phone || '', notes: tcForm.notes || '', active: !!tcForm.active };
       if (editingTcId) {
         await updateDoc(doc(db, 'tc_sales', editingTcId), payload);
+        logActivity({
+          userId: currentUser?.uid,
+          userName: currentUser?.fullName || currentUser?.email,
+          userRole: currentUser?.role,
+          action: 'update',
+          module: 'Data Master Jamaah',
+          targetLabel: payload.name,
+          details: 'Mengubah data TC/Sales',
+        });
       } else {
         await addDoc(collection(db, 'tc_sales'), { ...payload, createdAt: new Date().toISOString() });
+        logActivity({
+          userId: currentUser?.uid,
+          userName: currentUser?.fullName || currentUser?.email,
+          userRole: currentUser?.role,
+          action: 'create',
+          module: 'Data Master Jamaah',
+          targetLabel: payload.name,
+          details: 'Menambahkan TC/Sales baru',
+        });
       }
       setShowTcModal(false);
       fetchTcData();
@@ -116,6 +135,15 @@ export default function JamaahModule({ theme = 'dark' }) {
     if (!confirm(msg)) return;
     try {
       await deleteDoc(doc(db, 'tc_sales', tc.id));
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Data Master Jamaah',
+        targetLabel: tc.name,
+        details: 'Menghapus data TC/Sales',
+      });
       fetchTcData();
     } catch (err) {
       alert('Gagal menghapus data TC/Sales: ' + err.message);
@@ -233,6 +261,15 @@ export default function JamaahModule({ theme = 'dark' }) {
       if (!confirm('Apakah Anda yakin ingin menghapus data jamaah ini?')) return;
 
       await deleteDoc(doc(db, 'jamaah', id));
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Data Master Jamaah',
+        targetLabel: name,
+        details: 'Menghapus data jamaah',
+      });
       fetchJamaah();
     } catch (err) {
       alert('Gagal menghapus jamaah: ' + err.message);
@@ -247,10 +284,28 @@ export default function JamaahModule({ theme = 'dark' }) {
           ...formData,
           updatedAt: new Date().toISOString(),
         });
+        logActivity({
+          userId: currentUser?.uid,
+          userName: currentUser?.fullName || currentUser?.email,
+          userRole: currentUser?.role,
+          action: 'update',
+          module: 'Data Master Jamaah',
+          targetLabel: formData.fullName,
+          details: 'Mengubah data jamaah',
+        });
       } else {
         await addDoc(collection(db, 'jamaah'), {
           ...formData,
           createdAt: new Date().toISOString(),
+        });
+        logActivity({
+          userId: currentUser?.uid,
+          userName: currentUser?.fullName || currentUser?.email,
+          userRole: currentUser?.role,
+          action: 'create',
+          module: 'Data Master Jamaah',
+          targetLabel: formData.fullName,
+          details: 'Registrasi jamaah baru',
         });
       }
       setShowModal(false);
