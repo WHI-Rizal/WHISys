@@ -5,15 +5,16 @@ import { db, auth } from '@/lib/firebase';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, getDocs, deleteDoc } from 'firebase/firestore';
-import { 
-  Building2, 
-  Key, 
-  Users, 
-  Sliders, 
-  Save, 
-  Check, 
-  CreditCard, 
-  Bot, 
+import { logActivity } from '../../lib/activityLog';
+import {
+  Building2,
+  Key,
+  Users,
+  Sliders,
+  Save,
+  Check,
+  CreditCard,
+  Bot,
   Smartphone,
   Moon,
   Database,
@@ -24,7 +25,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 
-export default function SettingsModule({ theme = 'dark' }) {
+export default function SettingsModule({ theme = 'dark', currentUser = null }) {
   const isDark = theme === 'dark';
 
   const styles = {
@@ -213,7 +214,17 @@ export default function SettingsModule({ theme = 'dark' }) {
       });
 
       alert(`Berhasil menambahkan staf baru:\nNama: ${newUserForm.fullName}\nEmail: ${newUserForm.email}\nRole: ${newUserForm.role}`);
-      
+
+      logActivity({
+        userId: currentUser?.uid || auth.currentUser?.uid,
+        userName: currentUser?.fullName || auth.currentUser?.email,
+        userRole: currentUser?.role || '-',
+        action: 'create',
+        module: 'Pengaturan - User',
+        targetLabel: newUserForm.fullName,
+        details: `Menambahkan staf baru "${newUserForm.fullName}" (${newUserForm.email}) dengan role ${newUserForm.role}.`
+      });
+
       // Reset Form & Reload Data
       setNewUserForm({ fullName: '', email: '', password: '', role: 'Operational' });
       setShowModal(false);
@@ -231,6 +242,17 @@ export default function SettingsModule({ theme = 'dark' }) {
     if (!confirm(`Apakah Anda yakin ingin menghapus data user ${userEmail}?`)) return;
     try {
       await deleteDoc(doc(db, 'users', userId));
+
+      logActivity({
+        userId: currentUser?.uid || auth.currentUser?.uid,
+        userName: currentUser?.fullName || auth.currentUser?.email,
+        userRole: currentUser?.role || '-',
+        action: 'delete',
+        module: 'Pengaturan - User',
+        targetLabel: userEmail,
+        details: `Menghapus akun staf "${userEmail}" dari sistem.`
+      });
+
       fetchUsersAndRole();
     } catch (err) {
       alert("Gagal menghapus user: " + err.message);
