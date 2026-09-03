@@ -7,6 +7,7 @@ import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import DateFieldID from '@/components/DateFieldID';
+import { logActivity } from '../../lib/activityLog';
 
 const DEFAULT_COMPANY_PROFILE = {
   name: 'PT. WISATA HALAL INTERNASIONAL',
@@ -203,7 +204,7 @@ const formatPeriodLabel = (periodKey) => {
   return `${MONTH_NAMES_ID[Number(month) - 1]} ${year}`;
 };
 
-export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
+export default function FinanceModule({ onSelectBooking, theme = 'dark', currentUser = null }) {
   const isDark = theme === 'dark';
 
   const styles = {
@@ -515,6 +516,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
       };
       if (editingAccountId) {
         await updateDoc(doc(db, 'financial_accounts', editingAccountId), payload);
+        logActivity({
+          userId: currentUser?.uid,
+          userName: currentUser?.fullName || currentUser?.email,
+          userRole: currentUser?.role,
+          action: 'update',
+          module: 'Akun Keuangan',
+          targetLabel: payload.name,
+          details: `Mengubah data akun Kas/Bank "${payload.name}"`
+        });
       } else {
         const openingBalanceVal = Number(accountForm.openingBalance || 0);
         await addDoc(collection(db, 'financial_accounts'), {
@@ -522,6 +532,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
           openingBalance: openingBalanceVal,
           balance: openingBalanceVal,
           createdAt: new Date().toISOString()
+        });
+        logActivity({
+          userId: currentUser?.uid,
+          userName: currentUser?.fullName || currentUser?.email,
+          userRole: currentUser?.role,
+          action: 'create',
+          module: 'Akun Keuangan',
+          targetLabel: payload.name,
+          details: `Menambahkan akun Kas/Bank baru "${payload.name}"`
         });
       }
       setShowAccountModal(false);
@@ -566,6 +585,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         if (!confirm(`Hapus akun "${acc.name}"?`)) return;
       }
       await deleteDoc(doc(db, 'financial_accounts', acc.id));
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Akun Keuangan',
+        targetLabel: acc.name,
+        details: `Menghapus akun Kas/Bank "${acc.name}"`
+      });
       fetchData();
     } catch (err) {
       alert("Gagal menghapus akun: " + err.message);
@@ -586,12 +614,30 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
           name: vendorMasterForm.name.trim(),
           category: vendorMasterForm.category
         });
+        logActivity({
+          userId: currentUser?.uid,
+          userName: currentUser?.fullName || currentUser?.email,
+          userRole: currentUser?.role,
+          action: 'update',
+          module: 'Vendor',
+          targetLabel: vendorMasterForm.name.trim(),
+          details: `Mengubah data vendor "${vendorMasterForm.name.trim()}" (kategori: ${vendorMasterForm.category})`
+        });
       } else {
         await addDoc(collection(db, 'vendors'), {
           name: vendorMasterForm.name.trim(),
           category: vendorMasterForm.category,
           depositBalance: 0,
           createdAt: new Date().toISOString()
+        });
+        logActivity({
+          userId: currentUser?.uid,
+          userName: currentUser?.fullName || currentUser?.email,
+          userRole: currentUser?.role,
+          action: 'create',
+          module: 'Vendor',
+          targetLabel: vendorMasterForm.name.trim(),
+          details: `Menambahkan vendor baru "${vendorMasterForm.name.trim()}" (kategori: ${vendorMasterForm.category})`
         });
       }
       setShowVendorMasterModal(false);
@@ -628,6 +674,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         if (!confirm(`Hapus vendor "${v.name}"?`)) return;
       }
       await deleteDoc(doc(db, 'vendors', v.id));
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Vendor',
+        targetLabel: v.name,
+        details: `Menghapus vendor "${v.name}"`
+      });
       fetchData();
     } catch (err) {
       alert("Gagal menghapus vendor: " + err.message);
@@ -801,6 +856,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         '',
         new Date().toISOString()
       );
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'update',
+        module: 'Vendor',
+        targetLabel: adjustingVendor.name,
+        details: `Menyesuaikan saldo deposit vendor "${adjustingVendor.name}" sebesar Rp ${deltaVal.toLocaleString('id-ID')} (${vendorAdjustForm.notes || '-'})`
+      });
       setShowVendorDepositAdjustModal(false);
       setAdjustingVendor(null);
       setVendorAdjustForm({ amount: '', notes: 'Saldo awal (migrasi data lama)' });
@@ -942,6 +1006,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         // baris mutasinya ikut hilang dari riwayat (bukan nambah baris "koreksi").
         await removeAccountMutationBySource(vp.accountId, vp.id, Number(vp.amount) || 0);
       }
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Pembayaran Vendor',
+        targetLabel: vp.vendorName || vp.category,
+        details: `Menghapus catatan pembayaran vendor "${vp.vendorName || '-'}" (${vp.category || '-'}) senilai Rp ${Number(vp.amount || 0).toLocaleString('id-ID')}`
+      });
       fetchData();
     } catch (err) {
       alert("Gagal menghapus pembayaran vendor: " + err.message);
@@ -953,6 +1026,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
     try {
       await deleteDoc(doc(db, 'expenses_operational', op.id));
       if (op.accountId) await removeAccountMutationBySource(op.accountId, op.id, Number(op.amount) || 0);
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Pengeluaran Operasional',
+        targetLabel: op.category,
+        details: `Menghapus catatan biaya operasional "${op.category || '-'}" senilai Rp ${Number(op.amount || 0).toLocaleString('id-ID')}`
+      });
       fetchData();
     } catch (err) {
       alert("Gagal menghapus biaya operasional: " + err.message);
@@ -1218,6 +1300,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         });
       }
 
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'create',
+        module: 'Pembayaran Vendor',
+        targetLabel: selectedVendor.name,
+        details: `Mencatat pembayaran vendor "${selectedVendor.name}" (${vendorForm.category}) senilai Rp ${vendorAmountVal.toLocaleString('id-ID')} untuk paket "${selectedPkg.name}"`
+      });
       setShowVendorModal(false);
       setVendorForm({ packageId: '', vendorId: '', vendorName: '', category: vendorCategories[0], payMethod: 'Kas/Bank', amount: '', accountId: '', notes: 'DP Booking Seat', paymentDate: todayISODate() });
       fetchData();
@@ -1253,6 +1344,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark' }) {
         sourceDocId: opRef.id
       });
 
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'create',
+        module: 'Pengeluaran Operasional',
+        targetLabel: operationalForm.category,
+        details: `Mencatat biaya operasional "${operationalForm.category}" senilai Rp ${opAmountVal.toLocaleString('id-ID')}`
+      });
       setShowOperationalModal(false);
       setOperationalForm({ category: OPERATIONAL_CATEGORIES[0], amount: '', accountId: '', notes: '', expenseDate: todayISODate() });
       fetchData();
