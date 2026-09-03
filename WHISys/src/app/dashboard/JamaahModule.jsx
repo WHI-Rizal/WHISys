@@ -6,6 +6,7 @@ import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where } 
 import { Users, Plus, Search, Edit, Trash2, X, AlertCircle, UserCheck } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 import { logActivity } from '../../lib/activityLog';
+import { getNextCustomerCode as getNextCustomerCodeAtomic } from '../../lib/customerCode';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -41,6 +42,7 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [isSavingJamaah, setIsSavingJamaah] = useState(false);
 
   const [formData, setFormData] = useState({
     customerCode: '',
@@ -165,28 +167,17 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
     fetchJamaah();
   }, []);
 
-  // FUNGSI RUNNING NUMBER UNIK (AUTO INCREMENT DIMULAI DARI CST002001)
-  const getNextCustomerCode = () => {
-    let maxNum = 2000; // Base start di angka 2000
-
-    jamaahList.forEach((j) => {
-      if (j.customerCode && j.customerCode.startsWith('CST')) {
-        const numPart = parseInt(j.customerCode.replace('CST', ''), 10);
-        if (!isNaN(numPart) && numPart > maxNum) {
-          maxNum = numPart;
-        }
-      }
-    });
-
-    const nextNum = maxNum + 1;
-    const padded = String(nextNum).padStart(6, '0');
-    return `CST${padded}`;
-  };
-
+  // Kode unik customer (CSTxxxxxx) sekarang dijamin unik & atomik lewat
+  // helper terpusat di lib/customerCode.js (transaksi Firestore atas
+  // counters/jamaah_customer_code) — nggak lagi dihitung dari state lokal
+  // jamaahList (rawan dobel kalau ada 2 registrasi bersamaan). Preview di
+  // form registrasi baru sengaja dikosongkan dan cuma diisi beneran pas
+  // handleSubmit, biar nggak ada "preview basi" yang keburu diambil orang
+  // lain sebelum sempat disimpan.
   const handleOpenAdd = () => {
     setEditingId(null);
     setFormData({
-      customerCode: getNextCustomerCode(),
+      customerCode: '',
       fullName: '',
       nik: '',
       gender: 'L',
@@ -198,10 +189,11 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
     setShowModal(true);
   };
 
-  const handleOpenEdit = (item) => {
+  const handleOpenEdit = async (item) => {
     setEditingId(item.id);
+    const customerCode = item.customerCode || (await getNextCustomerCodeAtomic());
     setFormData({
-      customerCode: item.customerCode || getNextCustomerCode(),
+      customerCode,
       fullName: item.fullName || '',
       nik: item.nik || '',
       gender: item.gender || 'L',
@@ -278,6 +270,8 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSavingJamaah) return;
+    setIsSavingJamaah(true);
     try {
       if (editingId) {
         await updateDoc(doc(db, 'jamaah', editingId), {
@@ -294,8 +288,13 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
           details: 'Mengubah data jamaah',
         });
       } else {
+        // Selalu generate kode customer yang fresh & atomik pas beneran
+        // nyimpen — nggak boleh percaya nilai formData.customerCode (kosong
+        // atau hasil preview lama) supaya race condition dobel kode kecegah.
+        const customerCode = await getNextCustomerCodeAtomic();
         await addDoc(collection(db, 'jamaah'), {
           ...formData,
+          customerCode,
           createdAt: new Date().toISOString(),
         });
         logActivity({
@@ -312,6 +311,8 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
       fetchJamaah();
     } catch (err) {
       alert('Gagal menyimpan jamaah: ' + err.message);
+    } finally {
+      setIsSavingJamaah(false);
     }
   };
 
@@ -520,7 +521,8 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
                 <div>
                   <label className="block mb-1 font-medium">Kode Unik Customer</label>
                   <input
-                    type="text" readOnly required
+                    type="text" readOnly
+                    placeholder="(otomatis saat disimpan)"
                     className={`w-full ${styles.inputBg} rounded-lg p-2.5 font-mono font-bold text-emerald-500 opacity-80 cursor-not-allowed`}
                     value={formData.customerCode}
                   />
@@ -605,8 +607,8 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
                 <button type="button" onClick={() => setShowModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
-                <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
-                  {editingId ? 'Simpan Perubahan' : 'Simpan Jamaah'}
+                <button type="submit" disabled={isSavingJamaah} className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium disabled:opacity-60 disabled:cursor-not-allowed">
+                  {isSavingJamaah ? 'Menyimpan...' : (editingId ? 'Simpan Perubahan' : 'Simpan Jamaah')}
                 </button>
               </div>
             </form>
