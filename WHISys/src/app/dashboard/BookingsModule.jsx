@@ -5,7 +5,7 @@ import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where, increment } from 'firebase/firestore';
 import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus } from 'lucide-react';
 import { logActivity } from '../../lib/activityLog';
-import { calculatePPN } from '../../lib/ppn';
+import { calculatePPN, addPPN } from '../../lib/ppn';
 import { getNextCustomerCode } from '../../lib/customerCode';
 
 // Firestore where(..., 'in', [...]) cuma dukung maks 30 nilai sekaligus —
@@ -1472,6 +1472,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       let newPrice = Number(newPkg.priceQuad || newPkg.priceMain || 0);
       if (rescheduleForm.roomType === 'Triple') newPrice = Number(newPkg.priceTriple || newPrice);
       if (rescheduleForm.roomType === 'Double') newPrice = Number(newPkg.priceDouble || newPrice);
+      newPrice = addPPN(newPrice).total; // + PPN 1,1% di atas harga paket tujuan reschedule
 
       const carryOverAmount = Number(oldBooking.totalPaid || 0);
       const newBookingCode = `BK-${Date.now().toString().slice(-6)}`;
@@ -1956,6 +1957,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       let price = Number(pkg.priceQuad || pkg.priceMain || 0);
       if (addPaxForm.roomType === 'Triple') price = Number(pkg.priceTriple || price);
       if (addPaxForm.roomType === 'Double') price = Number(pkg.priceDouble || price);
+      price = addPPN(price).total; // + PPN 1,1% di atas harga paket
 
       const existingIndexes = groupEditTarget.items.map(b => Number(b.groupPaxIndex) || 0);
       const newIndex = (existingIndexes.length > 0 ? Math.max(...existingIndexes) : groupEditTarget.items.length) + 1;
@@ -2095,7 +2097,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         const paxDiscounts = discountsList.map((d, idx) => ({ id: d.id, name: d.name, notes: d.notes || '', amount: discountSharesPerItem[idx][i] || 0 }));
         const chargeTotal = paxCharges.reduce((acc, c) => acc + c.amount, 0);
         const discountTotal = paxDiscounts.reduce((acc, d) => acc + d.amount, 0);
-        return { paxCharges, paxDiscounts, totalAmount: price + chargeTotal - discountTotal };
+        const paxDpp = price + chargeTotal - discountTotal;
+        return { paxCharges, paxDiscounts, totalAmount: addPPN(paxDpp).total }; // + PPN 1,1%
       });
 
       // Update field2 yang emang shared ke SEMUA booking aktif di grup ini —
@@ -2267,6 +2270,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       let newPrice = Number(newPkg.priceQuad || newPkg.priceMain || 0);
       if (groupRescheduleForm.roomType === 'Triple') newPrice = Number(newPkg.priceTriple || newPrice);
       if (groupRescheduleForm.roomType === 'Double') newPrice = Number(newPkg.priceDouble || newPrice);
+      newPrice = addPPN(newPrice).total; // + PPN 1,1% di atas harga paket tujuan reschedule
 
       const newGroupBookingCode = `GRP-${Date.now().toString().slice(-6)}`;
       const nowIso = new Date().toISOString();
@@ -2728,8 +2732,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     const hasExtras = chargesList.length > 0 || discountsList.length > 0;
     const basePackagePrice = totalAmount - chargesTotal + discountsTotal;
     // PPN Besaran Tertentu Biro Perjalanan Wisata (PMK 71/2022): 1,1% dari
-    // Harga Jual (= totalAmount, nilai akhir yang ditagihkan). Sudah TERMASUK
-    // di harga jual — jadi ini murni breakdown info, bukan tambahan tagihan.
+    // DPP (harga paket + biaya tambahan, SEBELUM pajak), DITAMBAHKAN ke atas
+    // DPP itu jadi totalAmount (= nilai akhir yang ditagihkan). Breakdown di
+    // bawah ini dihitung mundur dari totalAmount buat ditampilkan di invoice.
     const { dpp: ppnDpp, ppn: ppnAmount } = calculatePPN(totalAmount);
     const chargeRowsHtml = chargesList.map(c => `
           <tr>
@@ -2836,7 +2841,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             <td style="text-align: right; white-space: nowrap;">Rp ${ppnDpp.toLocaleString('id-ID')}</td>
           </tr>
           <tr style="font-size: 10px; color: #94a3b8;">
-            <td>PPN (1,1%) — sudah termasuk di harga di atas:</td>
+            <td>PPN (1,1%) — sudah termasuk di Total Tagihan:</td>
             <td style="text-align: right; white-space: nowrap;">Rp ${ppnAmount.toLocaleString('id-ID')}</td>
           </tr>
           <tr style="background-color: #f1f5f9; border-top: 1px solid #e2e8f0;">
@@ -2991,8 +2996,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     const hasExtras = chargesList.length > 0 || discountsList.length > 0;
     const basePackagePrice = totalAmount - chargesTotal + discountsTotal;
     // PPN Besaran Tertentu Biro Perjalanan Wisata (PMK 71/2022): 1,1% dari
-    // Harga Jual (= totalAmount, nilai akhir yang ditagihkan). Sudah TERMASUK
-    // di harga jual — jadi ini murni breakdown info, bukan tambahan tagihan.
+    // DPP (harga paket + biaya tambahan, SEBELUM pajak), DITAMBAHKAN ke atas
+    // DPP itu jadi totalAmount (= nilai akhir yang ditagihkan). Breakdown di
+    // bawah ini dihitung mundur dari totalAmount buat ditampilkan di invoice.
     const { dpp: ppnDpp, ppn: ppnAmount } = calculatePPN(totalAmount);
     const chargeRowsHtml = chargesList.map(c => `
           <tr>
@@ -3359,7 +3365,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         // Edit selalu 1 booking/pax (paxCount dipaksa 1 di handleOpenEditModal),
         // jadi daftar biaya/diskonnya langsung dipakai apa adanya (nggak
         // perlu dibagi rata splitFlatAmount — itu cuma buat registrasi rombongan baru).
-        const editedTotalAmount = price + chargesTotalInput - discountsTotalInput;
+        const editedTotalAmount = addPPN(price + chargesTotalInput - discountsTotalInput).total; // + PPN 1,1%
 
         await updateDoc(doc(db, 'bookings', editingBookingId), {
           packageId: selectedPkg.id,
@@ -3439,7 +3445,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         if (paxCount === 1) {
           // ===== REGISTRASI 1 PAX (alur normal, tidak berubah) =====
           const bookingCode = `BK-${Date.now().toString().slice(-6)}`;
-          const singleTotalAmount = price + chargesTotalInput - discountsTotalInput;
+          const singleTotalAmount = addPPN(price + chargesTotalInput - discountsTotalInput).total; // + PPN 1,1%
 
           const newBookingRef = await addDoc(collection(db, 'bookings'), {
             bookingCode,
@@ -3536,7 +3542,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             const paxDiscounts = formDiscounts.map((d, idx) => ({ id: d.id, name: d.name, notes: d.notes || '', amount: discountSharesPerItem[idx][i] || 0 }));
             const paxChargeTotal = paxCharges.reduce((acc, c) => acc + c.amount, 0);
             const paxDiscountTotal = paxDiscounts.reduce((acc, d) => acc + d.amount, 0);
-            const paxTotalAmount = price + paxChargeTotal - paxDiscountTotal;
+            const paxTotalAmount = addPPN(price + paxChargeTotal - paxDiscountTotal).total; // + PPN 1,1%
 
             const newBookingRef = await addDoc(collection(db, 'bookings'), {
               bookingCode,
@@ -4771,7 +4777,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 if (formData.roomType === 'Double') unitPrice = Number(pkgPreview.priceDouble || unitPrice);
                 const packageTotalPreview = unitPrice * (formData.paxCount || 1);
                 const extraNet = (formData.extraCharges || []).reduce((acc, c) => acc + (Number(c.amount) || 0), 0) - (formData.extraDiscounts || []).reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
-                const grandTotalPreview = packageTotalPreview + extraNet;
+                const grandDppPreview = packageTotalPreview + extraNet;
+                const { ppn: ppnPreview, total: grandTotalPreview } = addPPN(grandDppPreview);
                 return (
                   <div className="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl text-[11px] space-y-1">
                     <div className="flex justify-between items-center">
@@ -4786,19 +4793,14 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                         <span className="font-semibold text-emerald-500">{extraNet >= 0 ? '+ ' : '- '}Rp {Math.abs(extraNet).toLocaleString('id-ID')}</span>
                       </div>
                     )}
+                    <div className="flex justify-between items-center opacity-80">
+                      <span className="text-emerald-500">PPN (1,1%)</span>
+                      <span className="font-semibold text-emerald-500">+ Rp {ppnPreview.toLocaleString('id-ID')}</span>
+                    </div>
                     <div className="flex justify-between items-center pt-1 border-t border-emerald-500/20">
-                      <span className="font-bold text-emerald-500">Total Harga Keseluruhan Pemesanan</span>
+                      <span className="font-bold text-emerald-500">Total Tagihan (sudah + PPN)</span>
                       <span className="font-bold text-emerald-500">Rp {grandTotalPreview.toLocaleString('id-ID')}</span>
                     </div>
-                    {(() => {
-                      const { ppn } = calculatePPN(grandTotalPreview);
-                      return (
-                        <div className="flex justify-between items-center opacity-60 text-[10px]">
-                          <span className="text-emerald-500">termasuk PPN (1,1%)</span>
-                          <span className="text-emerald-500">Rp {ppn.toLocaleString('id-ID')}</span>
-                        </div>
-                      );
-                    })()}
                   </div>
                 );
               })()}
