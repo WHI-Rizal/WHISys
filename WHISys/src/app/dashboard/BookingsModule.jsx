@@ -5,6 +5,7 @@ import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where, increment } from 'firebase/firestore';
 import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus } from 'lucide-react';
 import { logActivity } from '../../lib/activityLog';
+import { calculatePPN } from '../../lib/ppn';
 
 // Firestore where(..., 'in', [...]) cuma dukung maks 30 nilai sekaligus —
 // buat query yang array-nya bisa aja lebih dari itu (grup rombongan gede),
@@ -2734,6 +2735,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     const discountsTotal = discountsList.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
     const hasExtras = chargesList.length > 0 || discountsList.length > 0;
     const basePackagePrice = totalAmount - chargesTotal + discountsTotal;
+    // PPN Besaran Tertentu Biro Perjalanan Wisata (PMK 71/2022): 1,1% dari
+    // Harga Jual (= totalAmount, nilai akhir yang ditagihkan). Sudah TERMASUK
+    // di harga jual — jadi ini murni breakdown info, bukan tambahan tagihan.
+    const { dpp: ppnDpp, ppn: ppnAmount } = calculatePPN(totalAmount);
     const chargeRowsHtml = chargesList.map(c => `
           <tr>
             <td>${c.name || 'Biaya Tambahan'}${c.notes ? ` <span style="font-weight: 400; font-style: italic; color: #64748b;">(${c.notes})</span>` : ''}:</td>
@@ -2834,6 +2839,14 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             <td style="font-weight: bold;">Total Harga Keseluruhan Pemesanan:</td>
             <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
           </tr>` : ''}
+          <tr style="font-size: 10px; color: #94a3b8;">
+            <td>DPP:</td>
+            <td style="text-align: right; white-space: nowrap;">Rp ${ppnDpp.toLocaleString('id-ID')}</td>
+          </tr>
+          <tr style="font-size: 10px; color: #94a3b8;">
+            <td>PPN (1,1%) — sudah termasuk di harga di atas:</td>
+            <td style="text-align: right; white-space: nowrap;">Rp ${ppnAmount.toLocaleString('id-ID')}</td>
+          </tr>
           <tr style="background-color: #f1f5f9; border-top: 1px solid #e2e8f0;">
             <td colspan="2" style="font-weight: bold; font-size: 11px; color: #047857; text-transform: uppercase;">
               Rincian Setoran Pembayaran Diterima:
@@ -2985,6 +2998,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     const discountsTotal = discountsList.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
     const hasExtras = chargesList.length > 0 || discountsList.length > 0;
     const basePackagePrice = totalAmount - chargesTotal + discountsTotal;
+    // PPN Besaran Tertentu Biro Perjalanan Wisata (PMK 71/2022): 1,1% dari
+    // Harga Jual (= totalAmount, nilai akhir yang ditagihkan). Sudah TERMASUK
+    // di harga jual — jadi ini murni breakdown info, bukan tambahan tagihan.
+    const { dpp: ppnDpp, ppn: ppnAmount } = calculatePPN(totalAmount);
     const chargeRowsHtml = chargesList.map(c => `
           <tr>
             <td>${c.name || 'Biaya Tambahan'}${c.notes ? ` <span style="font-weight: 400; font-style: italic; color: #64748b;">(${c.notes})</span>` : ''}:</td>
@@ -4707,6 +4724,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                       <span className="font-bold text-emerald-500">Total Harga Keseluruhan Pemesanan</span>
                       <span className="font-bold text-emerald-500">Rp {grandTotalPreview.toLocaleString('id-ID')}</span>
                     </div>
+                    {(() => {
+                      const { ppn } = calculatePPN(grandTotalPreview);
+                      return (
+                        <div className="flex justify-between items-center opacity-60 text-[10px]">
+                          <span className="text-emerald-500">termasuk PPN (1,1%)</span>
+                          <span className="text-emerald-500">Rp {ppn.toLocaleString('id-ID')}</span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })()}
@@ -5230,11 +5256,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               )}
             </div>
 
-            <div className={`flex justify-between items-center pt-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'} text-xs`}>
-              <span className={styles.textSub}>Total Tagihan: <strong className={styles.textTitle}>Rp {Number(selectedBookingForHistory.totalAmount).toLocaleString('id-ID')}</strong></span>
-              <button onClick={() => setShowHistoryModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
-                Tutup
-              </button>
+            <div className={`flex flex-col gap-1 pt-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'} text-xs`}>
+              <div className="flex justify-between items-center">
+                <span className={styles.textSub}>Total Tagihan: <strong className={styles.textTitle}>Rp {Number(selectedBookingForHistory.totalAmount).toLocaleString('id-ID')}</strong></span>
+                <button onClick={() => setShowHistoryModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Tutup
+                </button>
+              </div>
+              <span className={`${styles.textSub} text-[10px] opacity-70`}>
+                *Sudah termasuk PPN (1,1%): Rp {calculatePPN(Number(selectedBookingForHistory.totalAmount) || 0).ppn.toLocaleString('id-ID')}
+              </span>
             </div>
           </div>
         </div>
