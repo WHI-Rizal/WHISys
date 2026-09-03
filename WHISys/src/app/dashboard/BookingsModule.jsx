@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where, increment } from 'firebase/firestore';
 import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus } from 'lucide-react';
+import { logActivity } from '../../lib/activityLog';
 
 // Firestore where(..., 'in', [...]) cuma dukung maks 30 nilai sekaligus —
 // buat query yang array-nya bisa aja lebih dari itu (grup rombongan gede),
@@ -185,7 +186,7 @@ const REQUIRED_DOCUMENTS = [
   { key: 'ticket', label: 'Tiket Pesawat (Penerbitan Issued)' }
 ];
 
-export default function BookingsModule({ targetBookingId, theme = 'dark', userRole = '' }) {
+export default function BookingsModule({ targetBookingId, theme = 'dark', userRole = '', currentUser = null }) {
   // Sinkron sama Firestore Rules: cuma Finance & Super Admin yang boleh edit/hapus
   // riwayat setoran yang udah tercatat. Semua staf tetap boleh lihat & catat DP baru.
   const roleLower = (userRole || '').toLowerCase();
@@ -703,6 +704,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       await syncBookingTotalPaid(selectedBookingForHistory.id, selectedBookingForHistory.totalAmount);
       await fetchPaymentHistory(selectedBookingForHistory.id);
       fetchData();
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Pembayaran',
+        targetLabel: selectedBookingForHistory?.jamaahName || selectedBookingForHistory?.bookingCode,
+        details: `Menghapus catatan pembayaran senilai Rp ${(Number(oldPay?.amount) || 0).toLocaleString('id-ID')} untuk booking ${selectedBookingForHistory?.bookingCode || '-'}.`
+      });
     } catch (err) {
       alert("Gagal menghapus pembayaran: " + err.message);
     }
@@ -753,6 +763,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       await syncBookingTotalPaid(selectedBookingForHistory.id, selectedBookingForHistory.totalAmount);
       await fetchPaymentHistory(selectedBookingForHistory.id);
       fetchData();
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'update',
+        module: 'Pembayaran',
+        targetLabel: selectedBookingForHistory?.jamaahName || selectedBookingForHistory?.bookingCode,
+        details: `Mengedit catatan pembayaran booking ${selectedBookingForHistory?.bookingCode || '-'} menjadi Rp ${Number(paymentEditForm.amount).toLocaleString('id-ID')}.`
+      });
     } catch (err) {
       alert("Gagal memperbarui pembayaran: " + err.message);
     }
@@ -1131,6 +1150,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       }
 
       fetchData();
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Booking',
+        targetLabel: item.jamaahName || item.bookingCode,
+        details: `Menghapus booking ${item.bookingCode} an. ${item.jamaahName || '-'}.`
+      });
     } catch (err) {
       alert("Gagal menghapus booking: " + err.message);
     }
@@ -1412,6 +1440,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       setShowActionModal(false);
       fetchData();
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'update',
+        module: 'Booking',
+        targetLabel: selectedBookingForAction.jamaahName || selectedBookingForAction.bookingCode,
+        details: `Membatalkan booking ${selectedBookingForAction.bookingCode} an. ${selectedBookingForAction.jamaahName || '-'} (refund Rp ${refundAmountVal.toLocaleString('id-ID')}).`
+      });
     } catch (err) {
       alert("Gagal memproses pembatalan: " + err.message);
     }
@@ -1511,6 +1548,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       setShowActionModal(false);
       fetchData();
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'update',
+        module: 'Booking',
+        targetLabel: oldBooking.jamaahName || oldBooking.bookingCode,
+        details: `Reschedule booking ${oldBooking.bookingCode} an. ${oldBooking.jamaahName || '-'} ke paket ${newPkg.name} (booking baru ${newBookingCode}).`
+      });
     } catch (err) {
       alert("Gagal memproses reschedule: " + err.message);
     }
@@ -1633,6 +1679,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       setShowGroupPaymentModal(false);
       setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', accountId: '', notes: 'Setoran Tambahan', date: todayDateStr() });
       fetchData();
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'create',
+        module: 'Pembayaran',
+        targetLabel: groupPaymentTarget.code,
+        details: `Mencatat setoran grup ${groupPaymentTarget.code} senilai Rp ${amount.toLocaleString('id-ID')} untuk ${paxCount} peserta.`
+      });
     } catch (err) {
       alert("Gagal mencatat setoran grup: " + err.message);
     }
@@ -1690,6 +1745,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       if (bookingItem) await syncBookingTotalPaid(bookingItem.id, bookingItem.totalAmount);
       await fetchGroupHistoryPayments(groupHistoryItems);
       fetchData();
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Pembayaran',
+        targetLabel: bookingItem?.jamaahName || bookingItem?.bookingCode,
+        details: `Menghapus catatan pembayaran grup senilai Rp ${(Number(pay.amount) || 0).toLocaleString('id-ID')} untuk booking ${bookingItem?.bookingCode || '-'}.`
+      });
     } catch (err) {
       alert("Gagal menghapus pembayaran: " + err.message);
     }
@@ -1729,6 +1793,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       if (bookingItem) await syncBookingTotalPaid(bookingItem.id, bookingItem.totalAmount);
       await fetchGroupHistoryPayments(groupHistoryItems);
       fetchData();
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'update',
+        module: 'Pembayaran',
+        targetLabel: bookingItem?.jamaahName || bookingItem?.bookingCode,
+        details: `Mengedit catatan pembayaran grup booking ${bookingItem?.bookingCode || '-'} menjadi Rp ${Number(paymentEditForm.amount).toLocaleString('id-ID')}.`
+      });
     } catch (err) {
       alert("Gagal memperbarui pembayaran: " + err.message);
     }
@@ -1785,6 +1858,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       await fetchGroupHistoryPayments(groupHistoryItems);
       fetchData();
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Pembayaran',
+        targetLabel: docs[0]?.bookingCode,
+        details: `Menghapus transaksi setoran grup senilai Rp ${totalAmount.toLocaleString('id-ID')} (${docs.length} catatan pembagian peserta).`
+      });
     } catch (err) {
       alert("Gagal menghapus transaksi setoran: " + err.message);
     }
@@ -2127,6 +2209,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       setShowGroupEditModal(false);
       fetchData();
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'update',
+        module: 'Booking',
+        targetLabel: groupEditTarget.code,
+        details: `Mengedit booking grup ${groupEditTarget.code} (paket ${newPkg.name}, ${activeItems.length} peserta aktif).`
+      });
     } catch (err) {
       alert("Gagal mengedit booking grup: " + err.message);
     }
@@ -2263,6 +2354,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // balik ke tampilan ringkasan, bukan nyoba nampilin grup lama yang kosong.
       setActiveGroupCode(null);
       fetchData();
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'update',
+        module: 'Booking',
+        targetLabel: groupRescheduleTarget.code,
+        details: `Reschedule booking grup ${groupRescheduleTarget.code} ke paket ${newPkg.name} (grup baru ${newGroupBookingCode}, ${sortedActive.length} peserta).`
+      });
     } catch (err) {
       alert("Gagal memproses reschedule grup: " + err.message);
     }
@@ -2368,6 +2468,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       setShowGroupCancelModal(false);
       fetchData();
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'update',
+        module: 'Booking',
+        targetLabel: groupCancelTarget.code,
+        details: `Membatalkan booking grup ${groupCancelTarget.code} (${sortedActive.length} peserta, refund total Rp ${totalRefund.toLocaleString('id-ID')}).`
+      });
     } catch (err) {
       alert("Gagal memproses pembatalan grup: " + err.message);
     }
@@ -2467,6 +2576,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       setActiveGroupCode(null);
       fetchData();
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Booking',
+        targetLabel: group.code,
+        details: `Menghapus SELURUH booking grup ${group.code} (${allItems.length} peserta).`
+      });
     } catch (err) {
       alert("Gagal menghapus booking grup: " + err.message);
     }
@@ -3280,6 +3398,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
         await syncBookingTotalPaid(editingBookingId, editedTotalAmount);
 
+        logActivity({
+          userId: currentUser?.uid,
+          userName: currentUser?.fullName || currentUser?.email,
+          userRole: currentUser?.role,
+          action: 'update',
+          module: 'Booking',
+          targetLabel: selectedJamaah.fullName || currentBooking?.bookingCode,
+          details: `Mengedit booking ${currentBooking?.bookingCode || '-'} an. ${selectedJamaah.fullName || '-'}, paket ${selectedPkg.name}.`
+        });
+
       } else {
         // paxCount diambil dari paxList yang sudah diresolusi di atas (Daftar
         // Peserta) — bukan dari formData.paxCount lagi, biar selalu akurat
@@ -3357,6 +3485,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           }
 
           await updateDoc(doc(db, 'packages', selectedPkg.id), { quotaRemaining: increment(-1) });
+
+          logActivity({
+            userId: currentUser?.uid,
+            userName: currentUser?.fullName || currentUser?.email,
+            userRole: currentUser?.role,
+            action: 'create',
+            module: 'Booking',
+            targetLabel: selectedJamaah.fullName || bookingCode,
+            details: `Membuat booking baru ${bookingCode} untuk ${selectedJamaah.fullName || '-'}, paket ${selectedPkg.name}.`
+          });
 
         } else {
           // ===== REGISTRASI GROUP / MULTI-PAX (jadi 1 manifest, kode grup sama) =====
@@ -3462,6 +3600,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           }
 
           await updateDoc(doc(db, 'packages', selectedPkg.id), { quotaRemaining: increment(-paxCount) });
+
+          logActivity({
+            userId: currentUser?.uid,
+            userName: currentUser?.fullName || currentUser?.email,
+            userRole: currentUser?.role,
+            action: 'create',
+            module: 'Booking',
+            targetLabel: groupBookingCode,
+            details: `Membuat booking grup baru ${groupBookingCode} (${paxCount} peserta), paket ${selectedPkg.name}.`
+          });
         }
       }
 
