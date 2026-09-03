@@ -236,6 +236,18 @@ const toLocalDateOnlyString = (dateInput) => {
   return `${y}-${m}-${day}`;
 };
 
+// Konversi 1 bulan kalender ("YYYY-MM") jadi rentang tanggal awal-akhir
+// bulan itu ("YYYY-MM-01" s/d tanggal terakhir bulan itu) — dipakai buat
+// shortcut "Pilih Bulan" di Laporan Closing TC, biar tetap ada cara cepat
+// milih 1 bulan penuh kayak sebelumnya, di samping opsi rentang tanggal bebas.
+const getMonthBoundaries = (monthKey) => {
+  if (!monthKey) return null;
+  const [y, m] = monthKey.split('-').map(Number);
+  if (!y || !m) return null;
+  const lastDay = new Date(y, m, 0).getDate();
+  return { start: `${monthKey}-01`, end: `${monthKey}-${String(lastDay).padStart(2, '0')}` };
+};
+
 // Default rentang tanggal Laporan Closing TC = siklus cutoff payroll HRD
 // (tanggal 22 - 21 bulan berikutnya), otomatis ngikutin tanggal hari ini:
 // - Kalau hari ini udah tanggal 22 ke atas, berarti lagi masuk siklus BARU
@@ -346,6 +358,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // yang lagi dibuka breakdown-nya.
   const [closingTcStartDate, setClosingTcStartDate] = useState(() => getDefaultPayrollCutoffRange().start);
   const [closingTcEndDate, setClosingTcEndDate] = useState(() => getDefaultPayrollCutoffRange().end);
+  // Shortcut "Pilih Bulan" — nampilin & milih periode per bulan kalender
+  // kayak sebelumnya, murni buat kemudahan (begitu dipilih, langsung
+  // ngeset closingTcStartDate/EndDate ke tanggal 1 - akhir bulan itu).
+  // Rentang tanggal manual di atas tetap jadi sumber kebenaran filternya.
+  const [closingTcQuickMonth, setClosingTcQuickMonth] = useState(() => getPeriodKey(todayISODate()));
   const [expandedClosingTcIds, setExpandedClosingTcIds] = useState([]);
 
   // Modal "Riwayat Mutasi" per akun Kas/Bank — mirip rekening koran, buat
@@ -2434,47 +2451,55 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           {reportsSubTab === 'closing_tc' && (
             <div className="space-y-4">
               <div className={`${styles.cardBg} border rounded-xl overflow-hidden p-4`}>
-                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
-                  <div>
-                    <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2`}>
-                      <FileBarChart className="w-4 h-4 text-indigo-500" /> Laporan Closing TC & Komisi
-                    </h4>
-                    <p className={`text-xs ${styles.textSub} mt-1`}>
-                      Rekap jumlah closingan (omset) dan jumlah pax per Travel Consultant, dipecah per kategori destinasi — {formatDateRangeLabel(closingTcStartDate, closingTcEndDate)}.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="date"
-                        title="Dari Tanggal Transaksi"
-                        className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
-                        value={closingTcStartDate}
-                        max={closingTcEndDate || undefined}
-                        onChange={e => setClosingTcStartDate(e.target.value)}
-                      />
-                      <span className={`text-xs ${styles.textSub}`}>s/d</span>
-                      <input
-                        type="date"
-                        title="Sampai Tanggal Transaksi"
-                        className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
-                        value={closingTcEndDate}
-                        min={closingTcStartDate || undefined}
-                        onChange={e => setClosingTcEndDate(e.target.value)}
-                      />
+                <div className="flex flex-col gap-3 mb-4">
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                    <div>
+                      <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2`}>
+                        <FileBarChart className="w-4 h-4 text-indigo-500" /> Laporan Closing TC & Komisi
+                      </h4>
+                      <p className={`text-xs ${styles.textSub} mt-1`}>
+                        Rekap jumlah closingan (omset) dan jumlah pax per Travel Consultant, dipecah per kategori destinasi — {formatDateRangeLabel(closingTcStartDate, closingTcEndDate)}.
+                      </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const def = getDefaultPayrollCutoffRange();
-                        setClosingTcStartDate(def.start);
-                        setClosingTcEndDate(def.end);
-                      }}
-                      className={`text-[10px] ${styles.textSub} hover:underline whitespace-nowrap`}
-                      title="Kembali ke rentang cutoff payroll berjalan (tanggal 22 - 21)"
-                    >
-                      Reset ke Cutoff 22-21
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="month"
+                        title="Pilih Bulan (cepat)"
+                        className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
+                        value={closingTcQuickMonth}
+                        onChange={e => {
+                          const monthKey = e.target.value;
+                          setClosingTcQuickMonth(monthKey);
+                          const range = getMonthBoundaries(monthKey);
+                          if (range) {
+                            setClosingTcStartDate(range.start);
+                            setClosingTcEndDate(range.end);
+                          }
+                        }}
+                      />
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="date"
+                          title="Dari Tanggal Transaksi"
+                          className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
+                          value={closingTcStartDate}
+                          max={closingTcEndDate || undefined}
+                          onChange={e => setClosingTcStartDate(e.target.value)}
+                        />
+                        <span className={`text-xs ${styles.textSub}`}>s/d</span>
+                        <input
+                          type="date"
+                          title="Sampai Tanggal Transaksi"
+                          className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
+                          value={closingTcEndDate}
+                          min={closingTcStartDate || undefined}
+                          onChange={e => setClosingTcEndDate(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end">
                     <button
                       type="button"
                       onClick={handleDownloadClosingTcCSV}
