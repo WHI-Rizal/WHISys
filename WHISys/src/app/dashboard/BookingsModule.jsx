@@ -936,10 +936,40 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
   // Sesuaikan panjang Daftar Peserta saat Jumlah Pax berubah: nambah -> tambah
   // slot kosong di akhir, ngurangin -> potong dari akhir, minimal tetap 1.
+  //
+  // Field-nya sengaja dibiarin bisa KOSONG sementara pas lagi diketik ulang
+  // (khususnya kerasa banget di HP): kalau langsung di-clamp jadi 1 begitu
+  // dikosongin, angka "1" balik muncul lagi di tengah proses ngetik, jadi TC
+  // harus blok/select-all dulu baru bisa ganti ke misal "3". Clamp ke rentang
+  // 1-20 baru dipaksain pas field-nya di-blur (ninggalin field ini) lewat
+  // handlePaxCountBlur di bawah, bukan di setiap ketikan.
   const handlePaxCountChange = (value) => {
+    if (value === '') {
+      setFormData(prev => ({ ...prev, paxCount: '' }));
+      return;
+    }
     const count = Math.max(1, Math.min(20, Number(value) || 1));
     setFormData(prev => {
       const currentList = prev.pesertaList || [];
+      let newList;
+      if (count > currentList.length) {
+        const additions = Array.from({ length: count - currentList.length }, () => emptyPesertaEntry());
+        newList = [...currentList, ...additions];
+      } else {
+        newList = currentList.slice(0, Math.max(1, count));
+      }
+      return { ...prev, paxCount: count, pesertaList: newList };
+    });
+  };
+
+  // Dipanggil pas field Jumlah Pax kehilangan fokus — jaga-jaga kalau
+  // ditinggal dalam keadaan kosong/nggak valid, balikin ke angka wajar
+  // (minimal 1) sekalian nyamain lagi panjang Daftar Peserta-nya.
+  const handlePaxCountBlur = () => {
+    setFormData(prev => {
+      const count = Math.max(1, Math.min(20, Number(prev.paxCount) || 1));
+      const currentList = prev.pesertaList || [];
+      if (count === Number(prev.paxCount) && currentList.length === count) return prev;
       let newList;
       if (count > currentList.length) {
         const additions = Array.from({ length: count - currentList.length }, () => emptyPesertaEntry());
@@ -4334,6 +4364,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                     className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                     value={formData.paxCount}
                     onChange={e => handlePaxCountChange(e.target.value)}
+                    onBlur={handlePaxCountBlur}
                   />
                   <p className="text-[10px] mt-1 opacity-70">Kalau daftar bareng lebih dari 1 orang (keluarga/rombongan), isi jumlahnya di sini.</p>
                 </div>
