@@ -8,6 +8,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import DateFieldID from '@/components/DateFieldID';
 import { logActivity } from '../../lib/activityLog';
+import { calculatePPN } from '../../lib/ppn';
 
 const DEFAULT_COMPANY_PROFILE = {
   name: 'PT. WISATA HALAL INTERNASIONAL',
@@ -1451,6 +1452,18 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     : operationalExpenses.filter(op => getPeriodKey(op.expenseDate || op.createdAt) === plPeriod);
 
   const plOmset = incomeInPeriod.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+  // Rekap PPN Besaran Tertentu (1,1%) — dihitung dari set setoran yang sama persis dengan Omset di atas,
+  // supaya periodenya selalu selaras. Setiap setoran dianggap "Harga Jual" yang sudah termasuk PPN.
+  const plPpnBreakdown = incomeInPeriod.reduce((acc, curr) => {
+    const { dpp, ppn } = calculatePPN(curr.amount);
+    acc.dpp += dpp;
+    acc.ppn += ppn;
+    return acc;
+  }, { dpp: 0, ppn: 0 });
+  const plTotalDpp = plPpnBreakdown.dpp;
+  const plTotalPpn = plPpnBreakdown.ppn;
+
   const plHpp = vendorInPeriod.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const plLabaKotor = plOmset - plHpp;
   const plOpex = operationalInPeriod.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
@@ -1551,7 +1564,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           ['HPP / Biaya Vendor', `(${plHpp.toLocaleString('id-ID')})`],
           ['Laba Kotor', plLabaKotor.toLocaleString('id-ID')],
           ['Biaya Operasional Kantor', `(${plOpex.toLocaleString('id-ID')})`],
-          ['Laba Bersih', plLabaBersih.toLocaleString('id-ID')]
+          ['Laba Bersih', plLabaBersih.toLocaleString('id-ID')],
+          ['Total PPN Terutang (1,1%, sudah termasuk di harga jual)', plTotalPpn.toLocaleString('id-ID')]
         ],
         styles: { fontSize: 9, cellPadding: 2.5 },
         headStyles: { fillColor: [15, 23, 42] },
@@ -2155,6 +2169,24 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 <p className={`text-[11px] ${styles.textSub}`}>
                   <span className={`font-bold ${styles.textTitle}`}>Biaya Dibayar Dimuka: Rp {totalPrepaidExpense.toLocaleString('id-ID')}</span><br/>
                   Pembayaran vendor yang paketnya belum diklik "Akui Pendapatan" — belum masuk P&L.
+                </p>
+              </div>
+            </div>
+
+            <div className={`mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg border ${isDark ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50'}`}>
+              <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                <span className={`text-[10px] ${styles.textSub} uppercase`}>DPP Total (Periode Ini)</span>
+                <p className="text-sm font-bold text-blue-500 mt-1">Rp {plTotalDpp.toLocaleString('id-ID')}</p>
+              </div>
+              <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                <span className={`text-[10px] ${styles.textSub} uppercase`}>PPN Terutang (1,1%)</span>
+                <p className="text-sm font-bold text-amber-500 mt-1">Rp {plTotalPpn.toLocaleString('id-ID')}</p>
+              </div>
+              <div className="sm:col-span-2 flex items-start gap-2">
+                <Clock className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                <p className={`text-[11px] ${styles.textSub}`}>
+                  <span className={`font-bold ${styles.textTitle}`}>Rekap PPN (Setoran Pajak) — {formatPeriodLabel(plPeriod)}.</span><br/>
+                  Estimasi PPN yang sudah termasuk di setiap harga jual jamaah pada periode ini — perlu disetorkan sesuai skema PPN Besaran Tertentu Biro Perjalanan Wisata (PMK 71/2022).
                 </p>
               </div>
             </div>
