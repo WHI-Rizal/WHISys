@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard,
   Plane,
@@ -22,11 +22,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Menu,
-  X
+  X,
+  History
 } from 'lucide-react';
 import { auth, db } from '../../lib/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { logActivity } from '../../lib/activityLog';
 
 // Module Imports
 import PackagesModule from './PackagesModule';
@@ -38,6 +40,7 @@ import SettingsModule from './SettingsModule';
 import FeedbackModule from './FeedbackModule';
 import EquipmentModule from './EquipmentModule';
 import AgentsModule from './AgentsModule';
+import ActivityLogModule from './ActivityLogModule';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -54,12 +57,24 @@ export default function DashboardPage() {
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Salinan userProfile via ref — dipakai di dalam handleLogout &
+  // handleAutoLogout (fungsi-fungsi yang closure-nya "beku" dari efek
+  // ber-dependency []), biar log aktivitas "logout" tetap kebawa nama/role
+  // user yang lagi login, bukan nilai userProfile basi dari awal mount.
+  const userProfileRef = useRef(null);
+  useEffect(() => {
+    userProfileRef.current = userProfile;
+  }, [userProfile]);
+
   // Sinkron sama matriks akses di Firestore Security Rules: cuma Finance & Super
   // Admin yang boleh buka modul Keuangan. Ini gating tampilan doang (biar nggak
   // nyasar ke modul yang isinya bakal gagal dimuat) — penegaknya tetap Firestore
   // Rules di server, bukan pengecekan ini.
   const currentRole = (userProfile?.role || '').toLowerCase();
   const canAccessFinance = currentRole.includes('super') || currentRole === 'admin' || currentRole === 'finance';
+  // Riwayat Aktivitas Sistem cuma boleh diliat Super Admin — sinkron sama
+  // rules 'activity_logs' (allow read: if isSuperAdmin()).
+  const canAccessActivityLog = currentRole.includes('super');
 
   // Toggle Theme State (2 Mode: 'dark' atau 'light')
   const [theme, setTheme] = useState('dark');
@@ -120,6 +135,21 @@ export default function DashboardPage() {
     const handleAutoLogout = async () => {
       alert("Sesi Anda telah berakhir karena tidak ada aktivitas selama 30 menit. Silakan login kembali demi keamanan.");
       try {
+        // Catat SEBELUM signOut — begitu signOut jalan, isLoggedIn() di
+        // Firestore Rules langsung false, jadi tulisan log sesudahnya bakal
+        // ditolak server.
+        const profile = userProfileRef.current;
+        if (auth.currentUser) {
+          await logActivity({
+            userId: auth.currentUser.uid,
+            userName: profile?.fullName || auth.currentUser.email,
+            userRole: profile?.role || 'Belum Diatur',
+            action: 'logout',
+            module: 'Autentikasi',
+            targetLabel: profile?.fullName || auth.currentUser.email,
+            details: 'Logout otomatis karena tidak ada aktivitas selama 30 menit.'
+          });
+        }
         await signOut(auth);
         window.location.href = '/login';
       } catch (err) {
@@ -292,6 +322,18 @@ export default function DashboardPage() {
 
   const handleLogout = async () => {
     try {
+      // Catat SEBELUM signOut, dengan alasan sama seperti handleAutoLogout.
+      if (auth.currentUser) {
+        await logActivity({
+          userId: auth.currentUser.uid,
+          userName: userProfile?.fullName || auth.currentUser.email,
+          userRole: userProfile?.role || 'Belum Diatur',
+          action: 'logout',
+          module: 'Autentikasi',
+          targetLabel: userProfile?.fullName || auth.currentUser.email,
+          details: 'Logout manual dari sistem.'
+        });
+      }
       await signOut(auth);
       window.location.href = '/login';
     } catch (err) {
@@ -515,6 +557,19 @@ export default function DashboardPage() {
               collapsed={sidebarCollapsed}
               onClick={() => changeMenu('settings')}
             />
+
+            {canAccessActivityLog && (
+              <SidebarItem
+                icon={History}
+                label="Log Aktivitas Sistem"
+                menuKey="activity-log"
+                active={activeMenu === 'activity-log'}
+                activeClass={currentTheme.activeMenu}
+                subTextClass={currentTheme.subText}
+                collapsed={sidebarCollapsed}
+                onClick={() => changeMenu('activity-log')}
+              />
+            )}
           </nav>
         </div>
 
@@ -710,14 +765,14 @@ export default function DashboardPage() {
         )}
 
         {/* MODUL PAKET TRAVEL & LA */}
-        {activeMenu === 'packages' && <PackagesModule theme={theme} userRole={userProfile?.role} />}
+        {activeMenu === 'packages' && <PackagesModule theme={theme} userRole={userProfile?.role} currentUser={userProfile} />}
 
         {/* MODUL MASTER DATA JAMAAH */}
-        {activeMenu === 'jamaah' && <JamaahModule theme={theme} />}
+        {activeMenu === 'jamaah' && <JamaahModule theme={theme} userRole={userProfile?.role} currentUser={userProfile} />}
 
         {/* MODUL BOOKING & MANIFEST */}
         {activeMenu === 'bookings' && (
-          <BookingsModule targetBookingId={selectedBookingForModal} theme={theme} userRole={userProfile?.role} />
+          <BookingsModule targetBookingId={selectedBookingForModal} theme={theme} userRole={userProfile?.role} currentUser={userProfile} />
         )}
 
         {/* MODUL KEUANGAN & PELUNASAN — dibatasi Finance & Super Admin, sinkron sama Firestore Rules */}
@@ -733,6 +788,7 @@ export default function DashboardPage() {
         {activeMenu === 'finance' && canAccessFinance && (
           <FinanceModule
             theme={theme}
+            currentUser={userProfile}
             onSelectBooking={(bookingId) => {
               setSelectedBookingForModal(bookingId);
               changeMenu('bookings');
@@ -753,7 +809,21 @@ export default function DashboardPage() {
         {activeMenu === 'agents' && <AgentsModule theme={theme} />}
 
         {/* MODUL PENGATURAN SISTEM */}
-        {activeMenu === 'settings' && <SettingsModule theme={theme} />}
+        {activeMenu === 'settings' && <SettingsModule theme={theme} currentUser={userProfile} />}
+
+        {/* MODUL LOG AKTIVITAS SISTEM — dibatasi Super Admin, sinkron sama Firestore Rules (activity_logs: allow read: if isSuperAdmin()) */}
+        {activeMenu === 'activity-log' && !canAccessActivityLog && (
+          <div className={`${currentTheme.card} border ${currentTheme.border} rounded-xl p-8 text-center`}>
+            <ShieldCheck className="w-8 h-8 mx-auto mb-3 text-amber-500" />
+            <h3 className={`text-sm font-bold ${currentTheme.headingText} mb-1`}>Akses Terbatas</h3>
+            <p className={`text-xs ${currentTheme.subText}`}>
+              Log Aktivitas Sistem cuma bisa diakses Super Admin.
+            </p>
+          </div>
+        )}
+        {activeMenu === 'activity-log' && canAccessActivityLog && (
+          <ActivityLogModule theme={theme} />
+        )}
 
         {/* FALLBACK VIEW UNTUK MODUL LAIN */}
         {activeMenu !== 'dashboard' &&
@@ -765,7 +835,8 @@ export default function DashboardPage() {
          activeMenu !== 'feedback' &&
          activeMenu !== 'equipment' &&
          activeMenu !== 'agents' &&
-         activeMenu !== 'settings' && (
+         activeMenu !== 'settings' &&
+         activeMenu !== 'activity-log' && (
           <div className={`${currentTheme.card} border rounded-xl p-12 text-center`}>
             <div className={`p-4 ${theme === 'dark' ? 'bg-white/5' : 'bg-slate-100'} ${currentTheme.subText} w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center`}>
               <Plane className="w-8 h-8" />
