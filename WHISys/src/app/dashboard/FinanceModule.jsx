@@ -1819,22 +1819,6 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           Biaya Operasional Kantor ({operationalExpenses.length})
         </button>
         <button
-          onClick={() => setActiveTab('profit_loss')}
-          className={`px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
-            activeTab === 'profit_loss' ? `${styles.tabActive} text-amber-500 border` : `${styles.textSub} hover:${styles.textTitle}`
-          }`}
-        >
-          <TrendingUp className="w-3.5 h-3.5" /> Laporan Keuangan (P&L)
-        </button>
-        <button
-          onClick={() => setActiveTab('accounts')}
-          className={`px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
-            activeTab === 'accounts' ? `${styles.tabActive} text-blue-500 border` : `${styles.textSub} hover:${styles.textTitle}`
-          }`}
-        >
-          <Wallet className="w-3.5 h-3.5" /> Kas & Bank ({financialAccounts.length})
-        </button>
-        <button
           onClick={() => setActiveTab('vendors_master')}
           className={`px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
             activeTab === 'vendors_master' ? `${styles.tabActive} text-rose-500 border` : `${styles.textSub} hover:${styles.textTitle}`
@@ -2205,449 +2189,6 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         </div>
       )}
 
-      {activeTab === 'profit_loss' && (
-        <div className="space-y-4">
-          <div className={`${styles.cardBg} border rounded-xl overflow-hidden p-4`}>
-            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
-              <div>
-                <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2`}>
-                  <TrendingUp className="w-4 h-4 text-amber-500" /> Laporan Laba Rugi (P&L) Perusahaan
-                </h4>
-                <p className={`text-xs ${styles.textSub} mt-1`}>
-                  Omset seluruh jamaah dikurangi HPP vendor dan biaya operasional kantor — {formatPeriodLabel(plPeriod)}.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <select
-                  className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
-                  value={plPeriod}
-                  onChange={e => setPlPeriod(e.target.value)}
-                >
-                  <option value="all">Semua Periode</option>
-                  {availablePeriods.map(p => (
-                    <option key={p} value={p}>{formatPeriodLabel(p)}</option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={handleDownloadProfitLossPDF}
-                  disabled={generatingPdf}
-                  className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white px-3 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap"
-                >
-                  <Download className="w-3.5 h-3.5" /> {generatingPdf ? 'Membuat PDF...' : 'Download Laporan (PDF)'}
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-              <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
-                <span className={`text-[10px] ${styles.textSub} uppercase`}>Omset (Pemasukan)</span>
-                <p className="text-sm font-bold text-emerald-500 mt-1">Rp {plOmset.toLocaleString('id-ID')}</p>
-              </div>
-              <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
-                <span className={`text-[10px] ${styles.textSub} uppercase`}>HPP Vendor</span>
-                <p className="text-sm font-bold text-rose-500 mt-1">Rp {plHpp.toLocaleString('id-ID')}</p>
-              </div>
-              <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
-                <span className={`text-[10px] ${styles.textSub} uppercase`}>Laba Kotor</span>
-                <p className={`text-sm font-bold mt-1 ${plLabaKotor >= 0 ? 'text-blue-500' : 'text-amber-500'}`}>Rp {plLabaKotor.toLocaleString('id-ID')}</p>
-              </div>
-              <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
-                <span className={`text-[10px] ${styles.textSub} uppercase`}>Biaya Operasional</span>
-                <p className="text-sm font-bold text-amber-500 mt-1">Rp {plOpex.toLocaleString('id-ID')}</p>
-              </div>
-              <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
-                <span className={`text-[10px] ${styles.textSub} uppercase`}>Laba Bersih</span>
-                <p className={`text-sm font-bold mt-1 ${plLabaBersih >= 0 ? 'text-blue-500' : 'text-amber-500'}`}>Rp {plLabaBersih.toLocaleString('id-ID')}</p>
-              </div>
-            </div>
-
-            <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded-lg border ${isDark ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50'}`}>
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-slate-400 shrink-0" />
-                <p className={`text-[11px] ${styles.textSub}`}>
-                  <span className={`font-bold ${styles.textTitle}`}>Pendapatan Diterima Dimuka: Rp {totalDeferredRevenue.toLocaleString('id-ID')}</span><br/>
-                  Setoran jamaah yang paketnya belum diklik "Akui Pendapatan" — belum masuk P&L.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-slate-400 shrink-0" />
-                <p className={`text-[11px] ${styles.textSub}`}>
-                  <span className={`font-bold ${styles.textTitle}`}>Biaya Dibayar Dimuka: Rp {totalPrepaidExpense.toLocaleString('id-ID')}</span><br/>
-                  Pembayaran vendor yang paketnya belum diklik "Akui Pendapatan" — belum masuk P&L.
-                </p>
-              </div>
-            </div>
-
-            <div className={`mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg border ${isDark ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50'}`}>
-              <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
-                <span className={`text-[10px] ${styles.textSub} uppercase`}>DPP Total (Periode Ini)</span>
-                <p className="text-sm font-bold text-blue-500 mt-1">Rp {plTotalDpp.toLocaleString('id-ID')}</p>
-              </div>
-              <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
-                <span className={`text-[10px] ${styles.textSub} uppercase`}>PPN Terutang (1,1%)</span>
-                <p className="text-sm font-bold text-amber-500 mt-1">Rp {plTotalPpn.toLocaleString('id-ID')}</p>
-              </div>
-              <div className="sm:col-span-2 flex items-start gap-2">
-                <Clock className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-                <p className={`text-[11px] ${styles.textSub}`}>
-                  <span className={`font-bold ${styles.textTitle}`}>Rekap PPN (Setoran Pajak) — {formatPeriodLabel(plPeriod)}.</span><br/>
-                  Estimasi PPN yang sudah termasuk di setiap harga jual jamaah pada periode ini — perlu disetorkan sesuai skema PPN Besaran Tertentu Biro Perjalanan Wisata (PMK 71/2022).
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className={`${styles.cardBg} border rounded-xl overflow-hidden p-4`}>
-            <h4 className={`text-sm font-bold ${styles.textTitle} mb-2 flex items-center gap-2`}>
-              <BarChart3 className="w-4 h-4 text-amber-500" /> Analisis Margin Laba Operasional per Program Paket
-            </h4>
-            <p className={`text-xs ${styles.textSub} mb-4`}>
-              Membandingkan total setoran jamaah yang masuk (Omset Real) terhadap realisasi pembayaran biaya vendor (HPP). Klik <strong>Akui Pendapatan</strong> pada paket yang jasanya sudah terealisasi (mis. jamaah sudah berangkat) biar omset & HPP-nya masuk ke Laporan P&L. Sebelum diklik, nilainya tercatat sebagai Pendapatan/Biaya Dibayar Dimuka.
-            </p>
-
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                  <tr>
-                    <th className="p-4">Nama Program Paket</th>
-                    <th className="p-4 text-right">Pemasukan (Omset)</th>
-                    <th className="p-4 text-right">HPP / Biaya Vendor</th>
-                    <th className="p-4 text-right">Laba / Margin Bersih</th>
-                    <th className="p-4 text-center">Status Margin</th>
-                    <th className="p-4 text-center">Status Pengakuan</th>
-                    <th className="p-4 text-center">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className={`divide-y ${styles.tableRowBorder}`}>
-                  {packagesList.length === 0 ? (
-                    <tr>
-                      <td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada paket perjalanan terdaftar.</td>
-                    </tr>
-                  ) : (
-                    packagesList.map((pkg) => {
-                      const pkgIncome = transactions
-                        .filter(tx => tx.packageId === pkg.id || (!tx.packageId && tx.packageName === pkg.name))
-                        .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-
-                      const pkgVendorCost = vendorPayments
-                        .filter(vp => vp.packageId === pkg.id || (!vp.packageId && vp.packageName === pkg.name))
-                        .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-
-                      const profit = pkgIncome - pkgVendorCost;
-                      const isProfit = profit >= 0;
-
-                      return (
-                        <tr key={pkg.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
-                          <td className={`p-4 font-semibold ${styles.textTitle}`}>
-                            {pkg.name}
-                            <span className={`block text-[10px] ${styles.textSub} font-mono`}>{pkg.code} • Keberangkatan: {formatDateDDMMYYYY(pkg.departureDate)}</span>
-                          </td>
-                          <td className="p-4 text-right font-bold text-emerald-500">
-                            Rp {pkgIncome.toLocaleString('id-ID')}
-                          </td>
-                          <td className="p-4 text-right font-bold text-rose-500">
-                            Rp {pkgVendorCost.toLocaleString('id-ID')}
-                          </td>
-                          <td className={`p-4 text-right font-extrabold ${isProfit ? 'text-blue-500' : 'text-amber-500'}`}>
-                            Rp {profit.toLocaleString('id-ID')}
-                          </td>
-                          <td className="p-4 text-center">
-                            {isProfit ? (
-                              <span className="inline-block px-2.5 py-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-full font-bold text-[10px]">
-                                PROFIT
-                              </span>
-                            ) : (
-                              <span className="inline-block px-2.5 py-1 bg-rose-500/10 text-rose-500 border border-rose-500/20 rounded-full font-bold text-[10px]">
-                                DEFISIT
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-4 text-center">
-                            {pkg.revenueRecognized ? (
-                              <div className="flex flex-col items-center gap-1">
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full font-bold text-[10px]">
-                                  <CheckCircle2 className="w-3 h-3" /> DIAKUI
-                                </span>
-                                <span className="text-[10px] text-slate-400">{formatDateDDMMYYYY(pkg.recognizedAt)}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleUnrecognizeRevenue(pkg)}
-                                  className="text-[10px] text-slate-400 hover:text-rose-500 inline-flex items-center gap-1 underline"
-                                >
-                                  <RotateCcw className="w-3 h-3" /> Batalkan
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex flex-col items-center gap-1">
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-500/10 text-slate-400 border border-slate-500/20 rounded-full font-bold text-[10px]">
-                                  <Clock className="w-3 h-3" /> DITERIMA DIMUKA
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => openRecognizeModal(pkg)}
-                                  className="mt-0.5 px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-[10px] font-medium inline-flex items-center gap-1"
-                                >
-                                  <CheckCircle2 className="w-3 h-3" /> Akui Pendapatan
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                          <td className="p-4 text-center">
-                            <button
-                              onClick={() => {
-                                setSelectedPackageForDetail(pkg);
-                                setShowProfitDetailModal(true);
-                              }}
-                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-amber-500 rounded-lg transition-colors inline-flex items-center gap-1`}
-                              title="Lihat Rincian Laba Rugi Paket Ini"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div className="md:hidden space-y-3">
-              {packagesList.length === 0 ? (
-                <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada paket perjalanan terdaftar.</p>
-              ) : (
-                packagesList.map((pkg) => {
-                  const pkgIncome = transactions
-                    .filter(tx => tx.packageId === pkg.id || (!tx.packageId && tx.packageName === pkg.name))
-                    .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-
-                  const pkgVendorCost = vendorPayments
-                    .filter(vp => vp.packageId === pkg.id || (!vp.packageId && vp.packageName === pkg.name))
-                    .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-
-                  const profit = pkgIncome - pkgVendorCost;
-                  const isProfit = profit >= 0;
-
-                  return (
-                    <div key={pkg.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
-                      <div>
-                        <div className={`font-semibold ${styles.textTitle}`}>{pkg.name}</div>
-                        <span className={`block text-[10px] ${styles.textSub} font-mono`}>{pkg.code} • Keberangkatan: {formatDateDDMMYYYY(pkg.departureDate)}</span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] opacity-60 uppercase">Pemasukan (Omset)</span>
-                        <div className="font-bold text-emerald-500">Rp {pkgIncome.toLocaleString('id-ID')}</div>
-                      </div>
-                      <div>
-                        <span className="text-[10px] opacity-60 uppercase">HPP / Biaya Vendor</span>
-                        <div className="font-bold text-rose-500">Rp {pkgVendorCost.toLocaleString('id-ID')}</div>
-                      </div>
-                      <div>
-                        <span className="text-[10px] opacity-60 uppercase">Laba / Margin Bersih</span>
-                        <div className={`font-extrabold ${isProfit ? 'text-blue-500' : 'text-amber-500'}`}>Rp {profit.toLocaleString('id-ID')}</div>
-                      </div>
-                      <div>
-                        <span className="text-[10px] opacity-60 uppercase">Status Margin</span>
-                        <div>
-                          {isProfit ? (
-                            <span className="inline-block px-2.5 py-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-full font-bold text-[10px]">
-                              PROFIT
-                            </span>
-                          ) : (
-                            <span className="inline-block px-2.5 py-1 bg-rose-500/10 text-rose-500 border border-rose-500/20 rounded-full font-bold text-[10px]">
-                              DEFISIT
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div>
-                        <span className="text-[10px] opacity-60 uppercase">Status Pengakuan</span>
-                        <div>
-                          {pkg.revenueRecognized ? (
-                            <div className="flex flex-col items-start gap-1">
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full font-bold text-[10px]">
-                                <CheckCircle2 className="w-3 h-3" /> DIAKUI
-                              </span>
-                              <span className="text-[10px] text-slate-400">{formatDateDDMMYYYY(pkg.recognizedAt)}</span>
-                              <button
-                                type="button"
-                                onClick={() => handleUnrecognizeRevenue(pkg)}
-                                className="text-[10px] text-slate-400 hover:text-rose-500 inline-flex items-center gap-1 underline"
-                              >
-                                <RotateCcw className="w-3 h-3" /> Batalkan
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex flex-col items-start gap-1">
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-500/10 text-slate-400 border border-slate-500/20 rounded-full font-bold text-[10px]">
-                                <Clock className="w-3 h-3" /> DITERIMA DIMUKA
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => openRecognizeModal(pkg)}
-                                className="mt-0.5 px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-[10px] font-medium inline-flex items-center gap-1"
-                              >
-                                <CheckCircle2 className="w-3 h-3" /> Akui Pendapatan
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        <button
-                          onClick={() => {
-                            setSelectedPackageForDetail(pkg);
-                            setShowProfitDetailModal(true);
-                          }}
-                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-amber-500 rounded-lg transition-colors inline-flex items-center gap-1`}
-                          title="Lihat Rincian Laba Rugi Paket Ini"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'accounts' && (
-        <div className="space-y-4">
-          <div className={`${styles.cardBg} border rounded-xl p-4 flex justify-between items-center`}>
-            <div>
-              <p className={`text-xs font-medium ${styles.textSub}`}>Total Saldo Seluruh Akun</p>
-              <p className={`text-xl font-bold ${styles.textTitle}`}>
-                Rp {financialAccounts.reduce((acc, a) => acc + (Number(a.balance) || 0), 0).toLocaleString('id-ID')}
-              </p>
-            </div>
-            <button
-              onClick={() => {
-                setEditingAccountId(null);
-                setAccountForm({ name: '', type: 'Kas', bankName: BANK_LIST[0], customBankName: '', accountNumber: '', openingBalance: '' });
-                setShowAccountModal(true);
-              }}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
-            >
-              <Wallet className="w-4 h-4" /> + Tambah Akun
-            </button>
-          </div>
-
-          <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                  <tr>
-                    <th className="p-4">Nama Akun</th>
-                    <th className="p-4">Jenis</th>
-                    <th className="p-4">No. Rekening</th>
-                    <th className="p-4 text-right">Saldo Berjalan</th>
-                    <th className="p-4 text-center">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className={`divide-y ${styles.tableRowBorder}`}>
-                  {financialAccounts.length === 0 ? (
-                    <tr>
-                      <td colSpan="5" className={`p-8 text-center ${styles.textSub}`}>Belum ada akun Kas/Bank. Tambahkan dulu biar transaksi setoran/pengeluaran bisa diiket ke akun tertentu.</td>
-                    </tr>
-                  ) : (
-                    financialAccounts.map(acc => (
-                      <tr key={acc.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
-                        <td className={`p-4 font-semibold ${styles.textTitle}`}>{acc.name}</td>
-                        <td className="p-4">
-                          <span className={`${acc.type === 'Bank' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'} border px-2.5 py-1 rounded-full font-medium`}>
-                            {acc.type}
-                          </span>
-                        </td>
-                        <td className={`p-4 ${styles.textSub}`}>{acc.type === 'Bank' ? (acc.accountNumber || '-') : '-'}</td>
-                        <td className={`p-4 text-right font-bold ${styles.textTitle}`}>Rp {Number(acc.balance || 0).toLocaleString('id-ID')}</td>
-                        <td className="p-4 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <button
-                              onClick={() => handleOpenMutations(acc)}
-                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
-                              title="Lihat Riwayat Mutasi"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleEditAccount(acc)}
-                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
-                              title="Edit Akun"
-                            >
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteAccount(acc)}
-                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                              title="Hapus Akun"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div className="md:hidden space-y-3 p-3">
-              {financialAccounts.length === 0 ? (
-                <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada akun Kas/Bank. Tambahkan dulu biar transaksi setoran/pengeluaran bisa diiket ke akun tertentu.</p>
-              ) : (
-                financialAccounts.map(acc => (
-                  <div key={acc.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
-                    <div className={`font-semibold ${styles.textTitle}`}>{acc.name}</div>
-                    <div>
-                      <span className="text-[10px] opacity-60 uppercase">Jenis</span>
-                      <div>
-                        <span className={`${acc.type === 'Bank' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'} border px-2.5 py-1 rounded-full font-medium inline-block`}>
-                          {acc.type}
-                        </span>
-                      </div>
-                    </div>
-                    <div>
-                      <span className="text-[10px] opacity-60 uppercase">No. Rekening</span>
-                      <div className={styles.textSub}>{acc.type === 'Bank' ? (acc.accountNumber || '-') : '-'}</div>
-                    </div>
-                    <div>
-                      <span className="text-[10px] opacity-60 uppercase">Saldo Berjalan</span>
-                      <div className={`font-bold ${styles.textTitle}`}>Rp {Number(acc.balance || 0).toLocaleString('id-ID')}</div>
-                    </div>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <button
-                        onClick={() => handleOpenMutations(acc)}
-                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
-                        title="Lihat Riwayat Mutasi"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleEditAccount(acc)}
-                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
-                        title="Edit Akun"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteAccount(acc)}
-                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                        title="Hapus Akun"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {activeTab === 'vendors_master' && (
         <div className="space-y-4">
           <div className={`${styles.cardBg} border rounded-xl p-4 flex justify-between items-center`}>
@@ -2797,6 +2338,22 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
               }`}
             >
               Closing TC
+            </button>
+            <button
+              onClick={() => setReportsSubTab('profit_loss')}
+              className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${
+                reportsSubTab === 'profit_loss' ? `${styles.tabActive} text-indigo-500 border` : `${styles.textSub} hover:${styles.textTitle}`
+              }`}
+            >
+              Laporan Keuangan (P&L)
+            </button>
+            <button
+              onClick={() => setReportsSubTab('accounts')}
+              className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${
+                reportsSubTab === 'accounts' ? `${styles.tabActive} text-indigo-500 border` : `${styles.textSub} hover:${styles.textTitle}`
+              }`}
+            >
+              Kas & Bank
             </button>
             {/* — sub-tab laporan berikutnya nyusul di sini — */}
           </div>
@@ -2961,6 +2518,449 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                         </div>
                       );
                     })
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {reportsSubTab === 'profit_loss' && (
+            <div className="space-y-4">
+              <div className={`${styles.cardBg} border rounded-xl overflow-hidden p-4`}>
+                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
+                  <div>
+                    <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2`}>
+                      <TrendingUp className="w-4 h-4 text-amber-500" /> Laporan Laba Rugi (P&L) Perusahaan
+                    </h4>
+                    <p className={`text-xs ${styles.textSub} mt-1`}>
+                      Omset seluruh jamaah dikurangi HPP vendor dan biaya operasional kantor — {formatPeriodLabel(plPeriod)}.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
+                      value={plPeriod}
+                      onChange={e => setPlPeriod(e.target.value)}
+                    >
+                      <option value="all">Semua Periode</option>
+                      {availablePeriods.map(p => (
+                        <option key={p} value={p}>{formatPeriodLabel(p)}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleDownloadProfitLossPDF}
+                      disabled={generatingPdf}
+                      className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white px-3 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap"
+                    >
+                      <Download className="w-3.5 h-3.5" /> {generatingPdf ? 'Membuat PDF...' : 'Download Laporan (PDF)'}
+                    </button>
+                  </div>
+                </div>
+    
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+                  <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                    <span className={`text-[10px] ${styles.textSub} uppercase`}>Omset (Pemasukan)</span>
+                    <p className="text-sm font-bold text-emerald-500 mt-1">Rp {plOmset.toLocaleString('id-ID')}</p>
+                  </div>
+                  <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                    <span className={`text-[10px] ${styles.textSub} uppercase`}>HPP Vendor</span>
+                    <p className="text-sm font-bold text-rose-500 mt-1">Rp {plHpp.toLocaleString('id-ID')}</p>
+                  </div>
+                  <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                    <span className={`text-[10px] ${styles.textSub} uppercase`}>Laba Kotor</span>
+                    <p className={`text-sm font-bold mt-1 ${plLabaKotor >= 0 ? 'text-blue-500' : 'text-amber-500'}`}>Rp {plLabaKotor.toLocaleString('id-ID')}</p>
+                  </div>
+                  <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                    <span className={`text-[10px] ${styles.textSub} uppercase`}>Biaya Operasional</span>
+                    <p className="text-sm font-bold text-amber-500 mt-1">Rp {plOpex.toLocaleString('id-ID')}</p>
+                  </div>
+                  <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                    <span className={`text-[10px] ${styles.textSub} uppercase`}>Laba Bersih</span>
+                    <p className={`text-sm font-bold mt-1 ${plLabaBersih >= 0 ? 'text-blue-500' : 'text-amber-500'}`}>Rp {plLabaBersih.toLocaleString('id-ID')}</p>
+                  </div>
+                </div>
+    
+                <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded-lg border ${isDark ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50'}`}>
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+                    <p className={`text-[11px] ${styles.textSub}`}>
+                      <span className={`font-bold ${styles.textTitle}`}>Pendapatan Diterima Dimuka: Rp {totalDeferredRevenue.toLocaleString('id-ID')}</span><br/>
+                      Setoran jamaah yang paketnya belum diklik "Akui Pendapatan" — belum masuk P&L.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+                    <p className={`text-[11px] ${styles.textSub}`}>
+                      <span className={`font-bold ${styles.textTitle}`}>Biaya Dibayar Dimuka: Rp {totalPrepaidExpense.toLocaleString('id-ID')}</span><br/>
+                      Pembayaran vendor yang paketnya belum diklik "Akui Pendapatan" — belum masuk P&L.
+                    </p>
+                  </div>
+                </div>
+    
+                <div className={`mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg border ${isDark ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50'}`}>
+                  <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                    <span className={`text-[10px] ${styles.textSub} uppercase`}>DPP Total (Periode Ini)</span>
+                    <p className="text-sm font-bold text-blue-500 mt-1">Rp {plTotalDpp.toLocaleString('id-ID')}</p>
+                  </div>
+                  <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                    <span className={`text-[10px] ${styles.textSub} uppercase`}>PPN Terutang (1,1%)</span>
+                    <p className="text-sm font-bold text-amber-500 mt-1">Rp {plTotalPpn.toLocaleString('id-ID')}</p>
+                  </div>
+                  <div className="sm:col-span-2 flex items-start gap-2">
+                    <Clock className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                    <p className={`text-[11px] ${styles.textSub}`}>
+                      <span className={`font-bold ${styles.textTitle}`}>Rekap PPN (Setoran Pajak) — {formatPeriodLabel(plPeriod)}.</span><br/>
+                      Estimasi PPN yang sudah termasuk di setiap harga jual jamaah pada periode ini — perlu disetorkan sesuai skema PPN Besaran Tertentu Biro Perjalanan Wisata (PMK 71/2022).
+                    </p>
+                  </div>
+                </div>
+              </div>
+    
+              <div className={`${styles.cardBg} border rounded-xl overflow-hidden p-4`}>
+                <h4 className={`text-sm font-bold ${styles.textTitle} mb-2 flex items-center gap-2`}>
+                  <BarChart3 className="w-4 h-4 text-amber-500" /> Analisis Margin Laba Operasional per Program Paket
+                </h4>
+                <p className={`text-xs ${styles.textSub} mb-4`}>
+                  Membandingkan total setoran jamaah yang masuk (Omset Real) terhadap realisasi pembayaran biaya vendor (HPP). Klik <strong>Akui Pendapatan</strong> pada paket yang jasanya sudah terealisasi (mis. jamaah sudah berangkat) biar omset & HPP-nya masuk ke Laporan P&L. Sebelum diklik, nilainya tercatat sebagai Pendapatan/Biaya Dibayar Dimuka.
+                </p>
+    
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                      <tr>
+                        <th className="p-4">Nama Program Paket</th>
+                        <th className="p-4 text-right">Pemasukan (Omset)</th>
+                        <th className="p-4 text-right">HPP / Biaya Vendor</th>
+                        <th className="p-4 text-right">Laba / Margin Bersih</th>
+                        <th className="p-4 text-center">Status Margin</th>
+                        <th className="p-4 text-center">Status Pengakuan</th>
+                        <th className="p-4 text-center">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                      {packagesList.length === 0 ? (
+                        <tr>
+                          <td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada paket perjalanan terdaftar.</td>
+                        </tr>
+                      ) : (
+                        packagesList.map((pkg) => {
+                          const pkgIncome = transactions
+                            .filter(tx => tx.packageId === pkg.id || (!tx.packageId && tx.packageName === pkg.name))
+                            .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    
+                          const pkgVendorCost = vendorPayments
+                            .filter(vp => vp.packageId === pkg.id || (!vp.packageId && vp.packageName === pkg.name))
+                            .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    
+                          const profit = pkgIncome - pkgVendorCost;
+                          const isProfit = profit >= 0;
+    
+                          return (
+                            <tr key={pkg.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                              <td className={`p-4 font-semibold ${styles.textTitle}`}>
+                                {pkg.name}
+                                <span className={`block text-[10px] ${styles.textSub} font-mono`}>{pkg.code} • Keberangkatan: {formatDateDDMMYYYY(pkg.departureDate)}</span>
+                              </td>
+                              <td className="p-4 text-right font-bold text-emerald-500">
+                                Rp {pkgIncome.toLocaleString('id-ID')}
+                              </td>
+                              <td className="p-4 text-right font-bold text-rose-500">
+                                Rp {pkgVendorCost.toLocaleString('id-ID')}
+                              </td>
+                              <td className={`p-4 text-right font-extrabold ${isProfit ? 'text-blue-500' : 'text-amber-500'}`}>
+                                Rp {profit.toLocaleString('id-ID')}
+                              </td>
+                              <td className="p-4 text-center">
+                                {isProfit ? (
+                                  <span className="inline-block px-2.5 py-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-full font-bold text-[10px]">
+                                    PROFIT
+                                  </span>
+                                ) : (
+                                  <span className="inline-block px-2.5 py-1 bg-rose-500/10 text-rose-500 border border-rose-500/20 rounded-full font-bold text-[10px]">
+                                    DEFISIT
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-4 text-center">
+                                {pkg.revenueRecognized ? (
+                                  <div className="flex flex-col items-center gap-1">
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full font-bold text-[10px]">
+                                      <CheckCircle2 className="w-3 h-3" /> DIAKUI
+                                    </span>
+                                    <span className="text-[10px] text-slate-400">{formatDateDDMMYYYY(pkg.recognizedAt)}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUnrecognizeRevenue(pkg)}
+                                      className="text-[10px] text-slate-400 hover:text-rose-500 inline-flex items-center gap-1 underline"
+                                    >
+                                      <RotateCcw className="w-3 h-3" /> Batalkan
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col items-center gap-1">
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-500/10 text-slate-400 border border-slate-500/20 rounded-full font-bold text-[10px]">
+                                      <Clock className="w-3 h-3" /> DITERIMA DIMUKA
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => openRecognizeModal(pkg)}
+                                      className="mt-0.5 px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-[10px] font-medium inline-flex items-center gap-1"
+                                    >
+                                      <CheckCircle2 className="w-3 h-3" /> Akui Pendapatan
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                              <td className="p-4 text-center">
+                                <button
+                                  onClick={() => {
+                                    setSelectedPackageForDetail(pkg);
+                                    setShowProfitDetailModal(true);
+                                  }}
+                                  className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-amber-500 rounded-lg transition-colors inline-flex items-center gap-1`}
+                                  title="Lihat Rincian Laba Rugi Paket Ini"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="md:hidden space-y-3">
+                  {packagesList.length === 0 ? (
+                    <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada paket perjalanan terdaftar.</p>
+                  ) : (
+                    packagesList.map((pkg) => {
+                      const pkgIncome = transactions
+                        .filter(tx => tx.packageId === pkg.id || (!tx.packageId && tx.packageName === pkg.name))
+                        .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    
+                      const pkgVendorCost = vendorPayments
+                        .filter(vp => vp.packageId === pkg.id || (!vp.packageId && vp.packageName === pkg.name))
+                        .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    
+                      const profit = pkgIncome - pkgVendorCost;
+                      const isProfit = profit >= 0;
+    
+                      return (
+                        <div key={pkg.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
+                          <div>
+                            <div className={`font-semibold ${styles.textTitle}`}>{pkg.name}</div>
+                            <span className={`block text-[10px] ${styles.textSub} font-mono`}>{pkg.code} • Keberangkatan: {formatDateDDMMYYYY(pkg.departureDate)}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] opacity-60 uppercase">Pemasukan (Omset)</span>
+                            <div className="font-bold text-emerald-500">Rp {pkgIncome.toLocaleString('id-ID')}</div>
+                          </div>
+                          <div>
+                            <span className="text-[10px] opacity-60 uppercase">HPP / Biaya Vendor</span>
+                            <div className="font-bold text-rose-500">Rp {pkgVendorCost.toLocaleString('id-ID')}</div>
+                          </div>
+                          <div>
+                            <span className="text-[10px] opacity-60 uppercase">Laba / Margin Bersih</span>
+                            <div className={`font-extrabold ${isProfit ? 'text-blue-500' : 'text-amber-500'}`}>Rp {profit.toLocaleString('id-ID')}</div>
+                          </div>
+                          <div>
+                            <span className="text-[10px] opacity-60 uppercase">Status Margin</span>
+                            <div>
+                              {isProfit ? (
+                                <span className="inline-block px-2.5 py-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-full font-bold text-[10px]">
+                                  PROFIT
+                                </span>
+                              ) : (
+                                <span className="inline-block px-2.5 py-1 bg-rose-500/10 text-rose-500 border border-rose-500/20 rounded-full font-bold text-[10px]">
+                                  DEFISIT
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-[10px] opacity-60 uppercase">Status Pengakuan</span>
+                            <div>
+                              {pkg.revenueRecognized ? (
+                                <div className="flex flex-col items-start gap-1">
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full font-bold text-[10px]">
+                                    <CheckCircle2 className="w-3 h-3" /> DIAKUI
+                                  </span>
+                                  <span className="text-[10px] text-slate-400">{formatDateDDMMYYYY(pkg.recognizedAt)}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUnrecognizeRevenue(pkg)}
+                                    className="text-[10px] text-slate-400 hover:text-rose-500 inline-flex items-center gap-1 underline"
+                                  >
+                                    <RotateCcw className="w-3 h-3" /> Batalkan
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col items-start gap-1">
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-500/10 text-slate-400 border border-slate-500/20 rounded-full font-bold text-[10px]">
+                                    <Clock className="w-3 h-3" /> DITERIMA DIMUKA
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => openRecognizeModal(pkg)}
+                                    className="mt-0.5 px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-[10px] font-medium inline-flex items-center gap-1"
+                                  >
+                                    <CheckCircle2 className="w-3 h-3" /> Akui Pendapatan
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            <button
+                              onClick={() => {
+                                setSelectedPackageForDetail(pkg);
+                                setShowProfitDetailModal(true);
+                              }}
+                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-amber-500 rounded-lg transition-colors inline-flex items-center gap-1`}
+                              title="Lihat Rincian Laba Rugi Paket Ini"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {reportsSubTab === 'accounts' && (
+            <div className="space-y-4">
+              <div className={`${styles.cardBg} border rounded-xl p-4 flex justify-between items-center`}>
+                <div>
+                  <p className={`text-xs font-medium ${styles.textSub}`}>Total Saldo Seluruh Akun</p>
+                  <p className={`text-xl font-bold ${styles.textTitle}`}>
+                    Rp {financialAccounts.reduce((acc, a) => acc + (Number(a.balance) || 0), 0).toLocaleString('id-ID')}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setEditingAccountId(null);
+                    setAccountForm({ name: '', type: 'Kas', bankName: BANK_LIST[0], customBankName: '', accountNumber: '', openingBalance: '' });
+                    setShowAccountModal(true);
+                  }}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
+                >
+                  <Wallet className="w-4 h-4" /> + Tambah Akun
+                </button>
+              </div>
+    
+              <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                      <tr>
+                        <th className="p-4">Nama Akun</th>
+                        <th className="p-4">Jenis</th>
+                        <th className="p-4">No. Rekening</th>
+                        <th className="p-4 text-right">Saldo Berjalan</th>
+                        <th className="p-4 text-center">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                      {financialAccounts.length === 0 ? (
+                        <tr>
+                          <td colSpan="5" className={`p-8 text-center ${styles.textSub}`}>Belum ada akun Kas/Bank. Tambahkan dulu biar transaksi setoran/pengeluaran bisa diiket ke akun tertentu.</td>
+                        </tr>
+                      ) : (
+                        financialAccounts.map(acc => (
+                          <tr key={acc.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                            <td className={`p-4 font-semibold ${styles.textTitle}`}>{acc.name}</td>
+                            <td className="p-4">
+                              <span className={`${acc.type === 'Bank' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'} border px-2.5 py-1 rounded-full font-medium`}>
+                                {acc.type}
+                              </span>
+                            </td>
+                            <td className={`p-4 ${styles.textSub}`}>{acc.type === 'Bank' ? (acc.accountNumber || '-') : '-'}</td>
+                            <td className={`p-4 text-right font-bold ${styles.textTitle}`}>Rp {Number(acc.balance || 0).toLocaleString('id-ID')}</td>
+                            <td className="p-4 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  onClick={() => handleOpenMutations(acc)}
+                                  className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                                  title="Lihat Riwayat Mutasi"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleEditAccount(acc)}
+                                  className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                                  title="Edit Akun"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteAccount(acc)}
+                                  className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                                  title="Hapus Akun"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="md:hidden space-y-3 p-3">
+                  {financialAccounts.length === 0 ? (
+                    <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada akun Kas/Bank. Tambahkan dulu biar transaksi setoran/pengeluaran bisa diiket ke akun tertentu.</p>
+                  ) : (
+                    financialAccounts.map(acc => (
+                      <div key={acc.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
+                        <div className={`font-semibold ${styles.textTitle}`}>{acc.name}</div>
+                        <div>
+                          <span className="text-[10px] opacity-60 uppercase">Jenis</span>
+                          <div>
+                            <span className={`${acc.type === 'Bank' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'} border px-2.5 py-1 rounded-full font-medium inline-block`}>
+                              {acc.type}
+                            </span>
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] opacity-60 uppercase">No. Rekening</span>
+                          <div className={styles.textSub}>{acc.type === 'Bank' ? (acc.accountNumber || '-') : '-'}</div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] opacity-60 uppercase">Saldo Berjalan</span>
+                          <div className={`font-bold ${styles.textTitle}`}>Rp {Number(acc.balance || 0).toLocaleString('id-ID')}</div>
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <button
+                            onClick={() => handleOpenMutations(acc)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                            title="Lihat Riwayat Mutasi"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleEditAccount(acc)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                            title="Edit Akun"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteAccount(acc)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                            title="Hapus Akun"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
                   )}
                 </div>
               </div>
