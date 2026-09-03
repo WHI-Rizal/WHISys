@@ -6,6 +6,7 @@ import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, 
 import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus } from 'lucide-react';
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN } from '../../lib/ppn';
+import { getNextCustomerCode } from '../../lib/customerCode';
 
 // Firestore where(..., 'in', [...]) cuma dukung maks 30 nilai sekaligus —
 // buat query yang array-nya bisa aja lebih dari itu (grup rombongan gede),
@@ -235,6 +236,9 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [showModal, setShowModal] = useState(false);
   const [editingBookingId, setEditingBookingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  // Guard anti double-submit — cegah tap ganda (koneksi lambat) bikin
+  // booking/jamaah kedobel saat handleSubmit masih berjalan.
+  const [isSavingBooking, setIsSavingBooking] = useState(false);
 
   // State Riwayat Setoran
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -1044,18 +1048,6 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       updated[idx] = { ...updated[idx], newJamaah: { ...updated[idx].newJamaah, [field]: value } };
       return { ...prev, pesertaList: updated };
     });
-  };
-
-  // Generate kode customer baru mengikuti pola CSTxxxxxx (sama seperti di Data Master Jamaah)
-  const generateNextCustomerCode = (existingList) => {
-    let maxNum = 2000;
-    existingList.forEach(j => {
-      if (j.customerCode && j.customerCode.startsWith('CST')) {
-        const numPart = parseInt(j.customerCode.replace('CST', ''), 10);
-        if (!isNaN(numPart) && numPart > maxNum) maxNum = numPart;
-      }
-    });
-    return `CST${String(maxNum + 1).padStart(6, '0')}`;
   };
 
   const handleDeleteBooking = async (item) => {
@@ -1942,7 +1934,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       let newJamaahData;
       if (addPaxForm.jamaahId === '__new__') {
-        const newCode = generateNextCustomerCode(jamaahList);
+        const newCode = await getNextCustomerCode();
         const newJamaahRef = await addDoc(collection(db, 'jamaah'), {
           customerCode: newCode,
           fullName: addPaxForm.newJamaah.fullName.trim(),
@@ -2052,7 +2044,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // Resolusi Pemesan — pola sama persis dgn Pemesan di form registrasi/edit per-peserta
       let selectedOrderer = null;
       if (groupEditForm.ordererId === '__new__') {
-        const newOrdererCode = generateNextCustomerCode(jamaahList);
+        const newOrdererCode = await getNextCustomerCode();
         const newOrdererRef = await addDoc(collection(db, 'jamaah'), {
           customerCode: newOrdererCode,
           fullName: groupEditNewOrdererForm.fullName.trim(),
@@ -3190,6 +3182,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSavingBooking) return;
+    setIsSavingBooking(true);
+    try {
     if (!formData.packageId) {
       alert("Pilih Paket Travel.");
       return;
@@ -3237,7 +3232,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // documents/participant array manapun.
       let selectedOrderer = null;
       if (formData.ordererId === '__new__') {
-        const newOrdererCode = generateNextCustomerCode(workingJamaahList);
+        const newOrdererCode = await getNextCustomerCode();
         const newOrdererRef = await addDoc(collection(db, 'jamaah'), {
           customerCode: newOrdererCode,
           fullName: newOrdererForm.fullName.trim(),
@@ -3277,7 +3272,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           }
           paxList.push({ jamaahId: selectedOrderer.id, jamaahName: selectedOrderer.fullName, passportNumber: selectedOrderer.passportNumber || '-' });
         } else if (entry.jamaahId === '__new__') {
-          const newCode = generateNextCustomerCode(workingJamaahList);
+          const newCode = await getNextCustomerCode();
           const newJamaahRef = await addDoc(collection(db, 'jamaah'), {
             customerCode: newCode,
             fullName: entry.newJamaah.fullName.trim(),
@@ -3634,6 +3629,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       fetchData();
     } catch (err) {
       alert("Gagal memproses booking: " + err.message);
+    }
+    } finally {
+      setIsSavingBooking(false);
     }
   };
 
@@ -5021,8 +5019,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 <button type="button" onClick={() => setShowModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
-                <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
-                  {editingBookingId ? 'Simpan Perubahan' : 'Proses Booking'}
+                <button type="submit" disabled={isSavingBooking} className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium disabled:opacity-60 disabled:cursor-not-allowed">
+                  {isSavingBooking ? 'Memproses...' : (editingBookingId ? 'Simpan Perubahan' : 'Proses Booking')}
                 </button>
               </div>
             </form>
