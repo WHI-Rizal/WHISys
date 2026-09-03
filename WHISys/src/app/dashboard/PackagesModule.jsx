@@ -47,6 +47,26 @@ const DESTINATION_CATEGORIES = [
 // tanpa perlu minta perubahan rules baru.
 const DESTINATION_CATEGORY_CONFIG_ID = '_destination_categories_config';
 
+// Daftar default Kategori Maskapai/Transportasi — dibikin baku sama persis
+// kayak Destinasi/Kota Tujuan di atas, biar penulisannya seragam ("Saudi
+// Arabian Airlines" vs "Saudia" vs "Garuda Indonesia" dst nggak lagi ngasal),
+// jadi pas tarik data / filter berdasarkan maskapai hasilnya konsisten.
+const AIRLINE_CATEGORIES = [
+  'Saudi Arabian Airlines',
+  'Garuda Indonesia',
+  'Lion Air / Batik Air',
+  'Etihad Airways',
+  'Emirates',
+  'Qatar Airways',
+  'Korean Air',
+  'Transportasi Darat (Bus/LA)',
+  'Lainnya'
+];
+
+// Pola & alasan penyamaran ID dokumen konfigurasi sama persis kayak
+// DESTINATION_CATEGORY_CONFIG_ID di atas.
+const AIRLINE_CATEGORY_CONFIG_ID = '_airline_categories_config';
+
 export default function PackagesModule({ theme = 'dark', userRole = '', currentUser = null }) {
   const isDark = theme === 'dark';
 
@@ -91,6 +111,14 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
   const [newDestinationCategoryText, setNewDestinationCategoryText] = useState('');
   const [savingDestinationCategories, setSavingDestinationCategories] = useState(false);
 
+  // Kategori Maskapai/Transportasi — pola & alasannya sama persis kayak
+  // Kategori Destinasi di atas.
+  const [airlineCategories, setAirlineCategories] = useState(AIRLINE_CATEGORIES);
+  const [showAirlineCategoryModal, setShowAirlineCategoryModal] = useState(false);
+  const [airlineCategoryDraft, setAirlineCategoryDraft] = useState([]);
+  const [newAirlineCategoryText, setNewAirlineCategoryText] = useState('');
+  const [savingAirlineCategories, setSavingAirlineCategories] = useState(false);
+
   // State Modal Itinerary
   const [showItineraryModal, setShowItineraryModal] = useState(false);
   const [selectedPackageForItinerary, setSelectedPackageForItinerary] = useState(null);
@@ -103,7 +131,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     type: 'Umroh Regular',
     departureDate: '',
     durationDays: '9 Hari',
-    airline: 'Saudi Arabian Airlines',
+    airline: AIRLINE_CATEGORIES[0],
     hotelMakkah: 'Pullman Zamzam',
     hotelMadinah: 'Front Taiba',
     destinationCity: DESTINATION_CATEGORIES[0],
@@ -122,9 +150,13 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       const pkgSnap = await getDocs(collection(db, 'packages'));
       const pkgDocs = pkgSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const destinationConfigDoc = pkgDocs.find(p => p.id === DESTINATION_CATEGORY_CONFIG_ID);
-      const pkgs = pkgDocs.filter(p => p.id !== DESTINATION_CATEGORY_CONFIG_ID);
+      const airlineConfigDoc = pkgDocs.find(p => p.id === AIRLINE_CATEGORY_CONFIG_ID);
+      const pkgs = pkgDocs.filter(p => p.id !== DESTINATION_CATEGORY_CONFIG_ID && p.id !== AIRLINE_CATEGORY_CONFIG_ID);
       if (destinationConfigDoc && Array.isArray(destinationConfigDoc.categories) && destinationConfigDoc.categories.length > 0) {
         setDestinationCategories(destinationConfigDoc.categories);
+      }
+      if (airlineConfigDoc && Array.isArray(airlineConfigDoc.categories) && airlineConfigDoc.categories.length > 0) {
+        setAirlineCategories(airlineConfigDoc.categories);
       }
 
       const bkSnap = await getDocs(collection(db, 'bookings'));
@@ -174,7 +206,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       type: 'Umroh Regular',
       departureDate: '',
       durationDays: '9 Hari',
-      airline: 'Saudi Arabian Airlines',
+      airline: airlineCategories[0],
       hotelMakkah: 'Pullman Zamzam',
       hotelMadinah: 'Front Taiba',
       destinationCity: destinationCategories[0],
@@ -349,6 +381,89 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       alert("Gagal menyimpan daftar destinasi: " + err.message);
     }
     setSavingDestinationCategories(false);
+  };
+
+  // ============ Kelola Kategori Maskapai/Transportasi (Tambah/Edit/Hapus) ============
+  // Pola & alasannya identik sama Kelola Kategori Destinasi di atas.
+
+  const openAirlineCategoryModal = () => {
+    if (!canManagePackages) {
+      alert("Cuma Super Admin & Operational yang boleh kelola kategori maskapai.");
+      return;
+    }
+    setAirlineCategoryDraft(airlineCategories.map((c, i) => ({ key: `existing-${i}`, original: c, value: c })));
+    setNewAirlineCategoryText('');
+    setShowAirlineCategoryModal(true);
+  };
+
+  const handleAddAirlineCategoryDraft = () => {
+    const text = newAirlineCategoryText.trim();
+    if (!text) return;
+    const isDuplicate = airlineCategoryDraft.some(c => c.value.trim().toLowerCase() === text.toLowerCase());
+    if (isDuplicate) {
+      alert(`Maskapai "${text}" udah ada di daftar.`);
+      return;
+    }
+    setAirlineCategoryDraft(prev => [...prev, { key: `new-${Date.now()}`, original: null, value: text }]);
+    setNewAirlineCategoryText('');
+  };
+
+  const handleRenameAirlineCategoryDraft = (key, value) => {
+    setAirlineCategoryDraft(prev => prev.map(c => c.key === key ? { ...c, value } : c));
+  };
+
+  const handleRemoveAirlineCategoryDraft = (key) => {
+    const target = airlineCategoryDraft.find(c => c.key === key);
+    if (!target) return;
+    if (target.original) {
+      const usedCount = packagesList.filter(p => p.airline === target.original).length;
+      if (usedCount > 0) {
+        if (!confirm(`Maskapai "${target.original}" masih dipakai oleh ${usedCount} paket. Kalau dihapus dari daftar, paket-paket itu tetap tersimpan datanya (nggak ikut kehapus/kereset), cuma nggak muncul lagi di pilihan dropdown. Tetap hapus dari daftar?`)) return;
+      }
+    }
+    setAirlineCategoryDraft(prev => prev.filter(c => c.key !== key));
+  };
+
+  const handleSaveAirlineCategories = async () => {
+    const finalValues = airlineCategoryDraft.map(c => c.value.trim()).filter(Boolean);
+    if (finalValues.length === 0) {
+      alert("Minimal harus ada 1 maskapai.");
+      return;
+    }
+    const lowerSet = new Set();
+    for (const v of finalValues) {
+      const lower = v.toLowerCase();
+      if (lowerSet.has(lower)) {
+        alert(`Ada maskapai yang namanya sama: "${v}". Gabungkan atau ganti dulu salah satunya.`);
+        return;
+      }
+      lowerSet.add(lower);
+    }
+
+    setSavingAirlineCategories(true);
+    try {
+      // Rename: maskapai lama yang namanya diubah (bukan yang baru ditambah)
+      // ikut disesuaikan ke semua paket yang masih pakai nama lama itu, biar
+      // data paket existing tetap konsisten sama daftar maskapai terbaru.
+      const renames = airlineCategoryDraft.filter(c => c.original && c.value.trim() && c.value.trim() !== c.original);
+      for (const r of renames) {
+        const affected = packagesList.filter(p => p.airline === r.original);
+        await Promise.all(affected.map(p => updateDoc(doc(db, 'packages', p.id), { airline: r.value.trim() })));
+      }
+
+      await setDoc(doc(db, 'packages', AIRLINE_CATEGORY_CONFIG_ID), {
+        isCategoryConfig: true,
+        categories: finalValues,
+        updatedAt: new Date().toISOString()
+      });
+
+      setAirlineCategories(finalValues);
+      setShowAirlineCategoryModal(false);
+      await fetchData();
+    } catch (err) {
+      alert("Gagal menyimpan daftar maskapai: " + err.message);
+    }
+    setSavingAirlineCategories(false);
   };
 
   // ============ ITINERARY PAKET ============
@@ -554,8 +669,11 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     }
   };
 
-  // Extract Maskapai & Periode
-  const availableAirlines = Array.from(new Set(packagesList.map(p => p.airline).filter(Boolean)));
+  // Extract Periode. Maskapai buat filter sekarang ambil dari daftar
+  // Kategori Maskapai yang udah dibakukan (airlineCategories), bukan lagi
+  // nge-scan nilai mentah dari packagesList — biar seragam sama pola
+  // Destinasi/Kota Tujuan (dan nggak nampilin varian penulisan lama yang
+  // beda-beda kalau ada data legacy sebelum kategori ini dibuat).
   const availablePeriods = Array.from(new Set(packagesList.map(p => formatMonthYear(p.departureDate)).filter(Boolean)));
 
   // Sisa Seat dihitung dari Kuota Total dikurangi booking yang statusnya
@@ -721,7 +839,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
               className={`w-full ${styles.inputBg} pl-9 pr-3 py-2 rounded-lg text-xs focus:outline-none focus:border-emerald-500`}
             >
               <option value="">-- Semua Maskapai --</option>
-              {availableAirlines.map((airline, idx) => (
+              {airlineCategories.map((airline, idx) => (
                 <option key={idx} value={airline}>{airline}</option>
               ))}
             </select>
@@ -1030,13 +1148,28 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
               </div>
 
               <div>
-                <label className="block mb-1 font-medium">Maskapai Penerbangan / Transportasi</label>
-                <input
-                  type="text" placeholder="Garuda Indonesia / Korean Air / Land Transport"
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-medium">Maskapai Penerbangan / Transportasi</label>
+                  <button
+                    type="button"
+                    onClick={openAirlineCategoryModal}
+                    className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1"
+                  >
+                    <Settings className="w-3 h-3" /> Kelola
+                  </button>
+                </div>
+                <select
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                   value={formData.airline}
                   onChange={e => setFormData({ ...formData, airline: e.target.value })}
-                />
+                >
+                  {formData.airline && !airlineCategories.includes(formData.airline) && (
+                    <option value={formData.airline}>{formData.airline} (nilai lama)</option>
+                  )}
+                  {airlineCategories.map(airline => (
+                    <option key={airline} value={airline}>{airline}</option>
+                  ))}
+                </select>
               </div>
 
               {/* DYNAMIC FIELD */}
@@ -1242,6 +1375,79 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded-lg text-xs font-medium"
               >
                 {savingDestinationCategories ? 'Menyimpan...' : 'Simpan Destinasi'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL KELOLA KATEGORI MASKAPAI/TRANSPORTASI */}
+      {showAirlineCategoryModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowAirlineCategoryModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <Plane className="w-5 h-5 text-emerald-500" /> Kelola Kategori Maskapai
+            </h3>
+            <p className={`text-[11px] ${styles.textSub} mb-4`}>
+              Ubah nama maskapai yang udah ada, hapus yang nggak kepake, atau tambah maskapai baru. Perubahan ini langsung kepakai di dropdown Maskapai dan filter pencarian.
+            </p>
+
+            <div className="space-y-2 mb-4">
+              {airlineCategoryDraft.map((c) => (
+                <div key={c.key} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
+                    value={c.value}
+                    onChange={e => handleRenameAirlineCategoryDraft(c.key, e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveAirlineCategoryDraft(c.key)}
+                    className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors shrink-0"
+                    title="Hapus maskapai ini"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              {airlineCategoryDraft.length === 0 && (
+                <p className={`text-xs ${styles.textSub}`}>Belum ada maskapai. Tambahkan minimal 1 di bawah.</p>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 mb-5">
+              <input
+                type="text"
+                placeholder="Nama maskapai baru, cth: Turkish Airlines"
+                className={`w-full ${styles.inputBg} rounded-lg p-2.5 text-xs`}
+                value={newAirlineCategoryText}
+                onChange={e => setNewAirlineCategoryText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddAirlineCategoryDraft(); } }}
+              />
+              <button
+                type="button"
+                onClick={handleAddAirlineCategoryDraft}
+                className="flex items-center gap-1 px-3 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-medium shrink-0"
+              >
+                <Plus className="w-4 h-4" /> Tambah
+              </button>
+            </div>
+
+            <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <button type="button" onClick={() => setShowAirlineCategoryModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg text-xs`}>
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAirlineCategories}
+                disabled={savingAirlineCategories}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded-lg text-xs font-medium"
+              >
+                {savingAirlineCategories ? 'Menyimpan...' : 'Simpan Maskapai'}
               </button>
             </div>
           </div>
