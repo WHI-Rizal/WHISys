@@ -5,6 +5,7 @@ import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
+import { logActivity } from '../../lib/activityLog';
 
 // Helper Format Tanggal dd/mm/yyyy
 const formatDateDDMMYYYY = (dateString) => {
@@ -46,7 +47,7 @@ const DESTINATION_CATEGORIES = [
 // tanpa perlu minta perubahan rules baru.
 const DESTINATION_CATEGORY_CONFIG_ID = '_destination_categories_config';
 
-export default function PackagesModule({ theme = 'dark', userRole = '' }) {
+export default function PackagesModule({ theme = 'dark', userRole = '', currentUser = null }) {
   const isDark = theme === 'dark';
 
   // Cuma Super Admin & Operational yang boleh kelola katalog paket (buat,
@@ -251,6 +252,17 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
       if (!confirm(`Apakah Anda yakin ingin menghapus paket "${pkg.name}"?`)) return;
 
       await deleteDoc(doc(db, 'packages', pkg.id));
+
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Paket Perjalanan',
+        targetLabel: pkg.name,
+        details: `Menghapus paket "${pkg.name}" (${pkg.code || '-'}) dari katalog.`
+      });
+
       fetchData();
     } catch (err) {
       alert("Gagal menghapus paket: " + err.message);
@@ -506,6 +518,16 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
           payload.quotaRemaining = Math.max(0, oldRemaining + delta);
         }
         await updateDoc(doc(db, 'packages', editingPackageId), payload);
+
+        logActivity({
+          userId: currentUser?.uid,
+          userName: currentUser?.fullName || currentUser?.email,
+          userRole: currentUser?.role,
+          action: 'update',
+          module: 'Paket Perjalanan',
+          targetLabel: payload.name,
+          details: `Mengubah data paket "${payload.name}" (${payload.code || '-'}).`
+        });
       } else {
         // Paket baru: Sisa Kuota harus diisi penuh sama dengan Kuota Total
         // saat dibuat — kalau nggak, field ini kosong (undefined) dan semua
@@ -513,6 +535,16 @@ export default function PackagesModule({ theme = 'dark', userRole = '' }) {
         payload.quotaRemaining = payload.quotaTotal;
         payload.createdAt = new Date().toISOString();
         await addDoc(collection(db, 'packages'), payload);
+
+        logActivity({
+          userId: currentUser?.uid,
+          userName: currentUser?.fullName || currentUser?.email,
+          userRole: currentUser?.role,
+          action: 'create',
+          module: 'Paket Perjalanan',
+          targetLabel: payload.name,
+          details: `Membuat paket baru "${payload.name}" (${payload.code || '-'}).`
+        });
       }
 
       setShowModal(false);
