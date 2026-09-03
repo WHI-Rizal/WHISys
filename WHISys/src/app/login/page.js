@@ -105,7 +105,7 @@ export default function LoginPage() {
         </form>
 
         <div className="mt-8 pt-4 border-t border-slate-800 text-center text-[11px] text-slate-500">
-          PT Wisata Halal Indonesia • Secure Enterprise System
+          PT Wisata Halal Internasional • Secure Enterprise System
         </div>
 
       </div>
