@@ -897,7 +897,7 @@ export default function DashboardPage() {
         {activeMenu === 'equipment' && <EquipmentModule theme={theme} />}
 
         {/* MODUL MITRA & AGEN */}
-        {activeMenu === 'agents' && <AgentsModule theme={theme} />}
+        {activeMenu === 'agents' && <AgentsModule theme={theme} userRole={userProfile?.role} />}
 
         {/* MODUL PENGATURAN SISTEM */}
         {activeMenu === 'settings' && <SettingsModule theme={theme} currentUser={userProfile} />}
