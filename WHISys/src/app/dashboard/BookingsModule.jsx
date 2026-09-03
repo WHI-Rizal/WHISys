@@ -4281,6 +4281,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         </div>
         </>
         ) : (
+        <>
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className={`${styles.tableHeaderBg} uppercase tracking-wider border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
@@ -4363,6 +4364,73 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             </tbody>
           </table>
         </div>
+
+        {/* MOBILE CARD VIEW - Ringkasan Booking (default, per grup/kode) */}
+        <div className="md:hidden space-y-3">
+          {loading ? (
+            <div className={`p-8 text-center text-xs ${styles.textSub}`}>Memuat data manifest...</div>
+          ) : groupedBookingSummary.length === 0 ? (
+            <div className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada data booking.</div>
+          ) : (
+            groupedBookingSummary.map((group) => {
+              const kekurangan = Number(group.totalAmount || 0) - Number(group.totalPaid || 0);
+              return (
+                <div
+                  key={group.code}
+                  onClick={() => setActiveGroupCode(group.code)}
+                  className={`${styles.innerBg} border ${styles.borderColor} rounded-xl p-3.5 text-xs cursor-pointer`}
+                >
+                  <div className={`font-semibold ${styles.textTitle}`}>
+                    {group.primary.packageName || '-'}
+                    <span className="block text-[10px] text-emerald-500 font-mono">{group.code}</span>
+                  </div>
+
+                  <div className={`mt-2 space-y-1 ${styles.textSub}`}>
+                    <div><span className="font-medium">Pemesan:</span> {group.primary.ordererName || '-'}</div>
+                    <div><span className="font-medium">Keberangkatan:</span> {formatDateDDMMYYYY(group.primary.departureDate)}</div>
+                    <div><span className="font-medium">Jumlah Pax:</span> {group.paxCount} Pax</div>
+                    <div><span className="font-medium">Waktu Transaksi:</span> {formatDateTimeID(group.earliestCreatedAt)}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium">Status:</span> {renderStatusBadge(group.primary)}
+                    </div>
+                    <div>{renderDueDates({ ...group.primary, createdAt: group.earliestCreatedAt })}</div>
+                    <div><span className="font-medium">Tagihan:</span> Rp {Number(group.totalAmount || 0).toLocaleString('id-ID')}</div>
+                    <div>
+                      <span className="font-medium">Kekurangan:</span>{' '}
+                      {group.primary.status === 'cancelled' || group.primary.status === 'rescheduled' ? (
+                        <span>-</span>
+                      ) : kekurangan <= 0 ? (
+                        <span className="font-semibold text-emerald-500">Lunas</span>
+                      ) : (
+                        <span className="font-bold text-amber-500">Rp {kekurangan.toLocaleString('id-ID')}</span>
+                      )}
+                    </div>
+                    <div className={`font-semibold ${styles.textTitle}`}>% Bayar: {formatPercentID(group.percentBayar)}</div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {canManageBookings && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleOpenGroupPaymentModal(group); }}
+                        className="p-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-500 hover:text-white rounded-lg transition-colors"
+                        title="Catat Setoran Grup"
+                      >
+                        <Wallet className="w-4 h-4" />
+                      </button>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setActiveGroupCode(group.code); }}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium"
+                    >
+                      Opsi ›
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+        </>
         )}
       </div>
 
