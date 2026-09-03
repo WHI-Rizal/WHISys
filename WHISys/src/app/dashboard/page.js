@@ -23,10 +23,19 @@ import {
   ChevronRight,
   Menu,
   X,
-  History
+  History,
+  KeyRound,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { auth, db } from '../../lib/firebase';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import {
+  onAuthStateChanged,
+  signOut,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  updatePassword
+} from 'firebase/auth';
 import { doc, getDoc, collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import { logActivity } from '../../lib/activityLog';
 
@@ -100,6 +109,79 @@ export default function DashboardPage() {
     if (planeFlying) return;
     setPlaneFlying(true);
   };
+
+  // ================ MODAL GANTI PASSWORD (SELF-SERVICE) ================
+  // Setiap user yang lagi login (role apapun) bisa ganti password akunnya
+  // sendiri dari sini — nggak perlu Super Admin. Firebase Auth mewajibkan
+  // re-autentikasi (masukin password LAMA lagi) sebelum boleh updatePassword,
+  // demi keamanan (jaga-jaga sesi login-nya udah lama / device dipinjem orang).
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [changePasswordForm, setChangePasswordForm] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
+  const [changePasswordVisibility, setChangePasswordVisibility] = useState({ old: false, new: false, confirm: false });
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  const handleOpenChangePasswordModal = () => {
+    setChangePasswordForm({ oldPassword: '', newPassword: '', confirmPassword: '' });
+    setChangePasswordVisibility({ old: false, new: false, confirm: false });
+    setShowChangePasswordModal(true);
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    if (isChangingPassword) return;
+
+    const { oldPassword, newPassword, confirmPassword } = changePasswordForm;
+    if (!oldPassword || !newPassword || !confirmPassword) {
+      alert("Semua kolom wajib diisi.");
+      return;
+    }
+    if (newPassword.length < 6) {
+      alert("Password baru minimal 6 karakter.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      alert("Konfirmasi password baru tidak sama dengan password baru.");
+      return;
+    }
+    if (!auth.currentUser?.email) {
+      alert("Sesi login tidak valid. Silakan login ulang.");
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      // Re-autentikasi wajib dari Firebase Auth sebelum boleh ganti password —
+      // tanpa ini, updatePassword bakal ditolak dengan error auth/requires-recent-login.
+      const credential = EmailAuthProvider.credential(auth.currentUser.email, oldPassword);
+      await reauthenticateWithCredential(auth.currentUser, credential);
+      await updatePassword(auth.currentUser, newPassword);
+
+      logActivity({
+        userId: auth.currentUser.uid,
+        userName: userProfile?.fullName || auth.currentUser.email,
+        userRole: userProfile?.role || 'Belum Diatur',
+        action: 'update',
+        module: 'Autentikasi',
+        targetLabel: userProfile?.fullName || auth.currentUser.email,
+        details: 'Mengganti password akun sendiri.'
+      });
+
+      alert("Password berhasil diganti.");
+      setShowChangePasswordModal(false);
+      setChangePasswordForm({ oldPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (err) {
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        alert("Password lama yang Anda masukkan salah.");
+      } else if (err.code === 'auth/too-many-requests') {
+        alert("Terlalu banyak percobaan gagal. Coba lagi beberapa saat lagi.");
+      } else {
+        alert("Gagal mengganti password: " + err.message);
+      }
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+  // ================ /MODAL GANTI PASSWORD (SELF-SERVICE) ================
 
   // Load saved theme & preferensi sidebar dari LocalStorage saat pertama kali dimuat
   useEffect(() => {
@@ -585,13 +667,22 @@ export default function DashboardPage() {
               </span>
             </div>
           </div>
-          <button
-            onClick={handleLogout}
-            className="text-slate-400 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-slate-800/10"
-            title="Keluar / Logout"
-          >
-            <LogOut className="w-5 h-5" />
-          </button>
+          <div className={`flex items-center ${sidebarCollapsed ? 'md:flex-col md:gap-1' : 'gap-1'}`}>
+            <button
+              onClick={handleOpenChangePasswordModal}
+              className="text-slate-400 hover:text-emerald-400 transition-colors p-1.5 rounded-lg hover:bg-slate-800/10"
+              title="Ganti Password"
+            >
+              <KeyRound className="w-5 h-5" />
+            </button>
+            <button
+              onClick={handleLogout}
+              className="text-slate-400 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-slate-800/10"
+              title="Keluar / Logout"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -849,6 +940,104 @@ export default function DashboardPage() {
         )}
 
       </main>
+
+      {/* MODAL GANTI PASSWORD (SELF-SERVICE) — bisa dibuka user role apapun
+          lewat ikon kunci di pojok kiri bawah sidebar, di sebelah tombol Logout. */}
+      {showChangePasswordModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${currentTheme.card} border rounded-2xl w-full max-w-sm p-6 relative`}>
+            <button
+              onClick={() => setShowChangePasswordModal(false)}
+              className={`absolute right-4 top-4 ${currentTheme.subText} hover:${currentTheme.headingText}`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className={`text-lg font-bold ${currentTheme.headingText} mb-1 flex items-center gap-2`}>
+              <KeyRound className="w-5 h-5 text-emerald-500" /> Ganti Password
+            </h3>
+            <p className={`text-xs ${currentTheme.subText} mb-5`}>
+              Masukkan password lama Anda dulu sebagai verifikasi, lalu password baru.
+            </p>
+
+            <form onSubmit={handleChangePassword} className="space-y-3 text-xs">
+              <div>
+                <label className={`block mb-1 font-medium ${currentTheme.subText}`}>Password Lama</label>
+                <div className="relative">
+                  <input
+                    type={changePasswordVisibility.old ? 'text' : 'password'}
+                    required
+                    value={changePasswordForm.oldPassword}
+                    onChange={e => setChangePasswordForm({ ...changePasswordForm, oldPassword: e.target.value })}
+                    className={`w-full ${theme === 'dark' ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'} border rounded-lg pl-3 pr-10 py-2.5 focus:outline-none focus:border-emerald-500`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setChangePasswordVisibility(v => ({ ...v, old: !v.old }))}
+                    className={`absolute right-3 top-1/2 -translate-y-1/2 ${currentTheme.subText}`}
+                    tabIndex={-1}
+                  >
+                    {changePasswordVisibility.old ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className={`block mb-1 font-medium ${currentTheme.subText}`}>Password Baru</label>
+                <div className="relative">
+                  <input
+                    type={changePasswordVisibility.new ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    value={changePasswordForm.newPassword}
+                    onChange={e => setChangePasswordForm({ ...changePasswordForm, newPassword: e.target.value })}
+                    className={`w-full ${theme === 'dark' ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'} border rounded-lg pl-3 pr-10 py-2.5 focus:outline-none focus:border-emerald-500`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setChangePasswordVisibility(v => ({ ...v, new: !v.new }))}
+                    className={`absolute right-3 top-1/2 -translate-y-1/2 ${currentTheme.subText}`}
+                    tabIndex={-1}
+                  >
+                    {changePasswordVisibility.new ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className={`mt-1 text-[10px] ${currentTheme.subText} opacity-70`}>Minimal 6 karakter.</p>
+              </div>
+
+              <div>
+                <label className={`block mb-1 font-medium ${currentTheme.subText}`}>Konfirmasi Password Baru</label>
+                <div className="relative">
+                  <input
+                    type={changePasswordVisibility.confirm ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    value={changePasswordForm.confirmPassword}
+                    onChange={e => setChangePasswordForm({ ...changePasswordForm, confirmPassword: e.target.value })}
+                    className={`w-full ${theme === 'dark' ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'} border rounded-lg pl-3 pr-10 py-2.5 focus:outline-none focus:border-emerald-500`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setChangePasswordVisibility(v => ({ ...v, confirm: !v.confirm }))}
+                    className={`absolute right-3 top-1/2 -translate-y-1/2 ${currentTheme.subText}`}
+                    tabIndex={-1}
+                  >
+                    {changePasswordVisibility.confirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isChangingPassword}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed text-white py-2.5 rounded-lg font-semibold transition-all mt-2"
+              >
+                {isChangingPassword ? 'Menyimpan...' : 'Simpan Password Baru'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
