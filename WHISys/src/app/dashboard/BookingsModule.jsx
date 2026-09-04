@@ -2693,15 +2693,38 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   // digabung jadi beberapa halaman dlm 1 dokumen print).
   // Variabel Dinamis Profil Perusahaan & Bank — dipakai bareng-bareng oleh
   // invoice per-pax maupun invoice gabungan 1 grup, biar konsisten.
-  const getCompanyInvoiceVars = () => ({
-    compName: companyInfo?.name || 'PT. WISATA HALAL INTERNASIONAL',
-    compAddress: companyInfo?.address || 'Ruko Graha Cirendeu No.1C Jl. Cirendeu Raya, Tangerang Selatan, Banten, Indonesia, 15445',
-    compPpiu: companyInfo?.ppiuNumber || 'PPIU No. U.123 / 2024',
-    compPhone: companyInfo?.phone || '+62 812-0000-0000',
-    compEmail: companyInfo?.email || 'admin@wisatahalalindonesia.id',
-    bankName: companyInfo?.bankName || 'Bank Syariah Indonesia (BSI)',
-    bankAccount: companyInfo?.bankAccount || '788-9900-112 a.n. PT. Wisata Halal Internasional'
-  });
+  const getCompanyInvoiceVars = () => {
+    // Daftar Rekening Pembayaran — sekarang bisa lebih dari satu (mis. BSI
+    // & Mandiri sekaligus), diambil dari array `bankAccounts` yang diatur
+    // di menu Pengaturan > Identitas PT. Kalau array itu belum ada (data
+    // lama / belum sempat disimpan ulang), fallback ke field tunggal
+    // `bankName`/`bankAccount` yang lama, biar invoice tetap tampil normal.
+    const bankAccountsList = (Array.isArray(companyInfo?.bankAccounts) && companyInfo.bankAccounts.length > 0)
+      ? companyInfo.bankAccounts
+      : [{
+          bankName: companyInfo?.bankName || 'Bank Syariah Indonesia (BSI)',
+          bankAccount: companyInfo?.bankAccount || '788-9900-112 a.n. PT. Wisata Halal Internasional'
+        }];
+
+    // HTML siap-pakai buat ditaruh langsung di kotak "Informasi Pembayaran"
+    // invoice — kalau rekeningnya lebih dari satu, dikasih label "Rekening 1",
+    // "Rekening 2", dst biar jamaah nggak bingung mau transfer ke mana.
+    const bankAccountsHtml = bankAccountsList.map((acc, idx) => `
+              ${bankAccountsList.length > 1 ? `<strong>Rekening ${idx + 1}:</strong><br>` : ''}
+              Bank: <strong>${acc.bankName}</strong><br>
+              No. Rekening & A.N: <strong>${acc.bankAccount}</strong>`
+    ).join('<div style="height: 10px;"></div>');
+
+    return {
+      compName: companyInfo?.name || 'PT. WISATA HALAL INTERNASIONAL',
+      compAddress: companyInfo?.address || 'Ruko Graha Cirendeu No.1C Jl. Cirendeu Raya, Tangerang Selatan, Banten, Indonesia, 15445',
+      compPpiu: companyInfo?.ppiuNumber || 'PPIU No. U.123 / 2024',
+      compPhone: companyInfo?.phone || '+62 812-0000-0000',
+      compEmail: companyInfo?.email || 'admin@wisatahalalindonesia.id',
+      bankAccountsList,
+      bankAccountsHtml
+    };
+  };
 
   // Baris "Jatuh Tempo" di invoice — cuma dimunculkan selama booking belum
   // lunas. Tanggal yang udah lewat ditandai merah biar kelihatan.
@@ -2746,7 +2769,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             <td>${d.name || 'Diskon'}${d.notes ? ` <span style="font-weight: 400; font-style: italic; color: #64748b;">(${d.notes})</span>` : ''}:</td>
             <td style="text-align: right; color: #d97706; white-space: nowrap;">- Rp ${Number(d.amount || 0).toLocaleString('id-ID')}</td>
           </tr>`).join('');
-    const { compName, compAddress, compPpiu, compPhone, compEmail, bankName, bankAccount } = getCompanyInvoiceVars();
+    const { compName, compAddress, compPpiu, compPhone, compEmail, bankAccountsHtml } = getCompanyInvoiceVars();
 
     const totalPaid = payments.length > 0
       ? payments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
@@ -2869,8 +2892,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             <h5>Informasi Pembayaran / Transfer:</h5>
             <div>Silakan lakukan pembayaran melalui rekening resmi perusahaan:</div>
             <div class="bank-details" style="margin-top: 6px;">
-              Bank: <strong>${bankName}</strong><br>
-              No. Rekening & A.N: <strong>${bankAccount}</strong>
+              ${bankAccountsHtml}
             </div>
           </div>
           <div class="signature-box">
@@ -3010,7 +3032,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             <td>${d.name || 'Diskon'}${d.notes ? ` <span style="font-weight: 400; font-style: italic; color: #64748b;">(${d.notes})</span>` : ''}:</td>
             <td style="text-align: right; color: #d97706; white-space: nowrap;">- Rp ${Number(d.amount || 0).toLocaleString('id-ID')}</td>
           </tr>`).join('');
-    const { compName, compAddress, compPpiu, compPhone, compEmail, bankName, bankAccount } = getCompanyInvoiceVars();
+    const { compName, compAddress, compPpiu, compPhone, compEmail, bankAccountsHtml } = getCompanyInvoiceVars();
 
     const pesertaRowsHtml = items.map((b, idx) => `
       <tr>
@@ -3149,8 +3171,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             <h5>Informasi Pembayaran / Transfer:</h5>
             <div>Silakan lakukan pembayaran melalui rekening resmi perusahaan:</div>
             <div class="bank-details" style="margin-top: 6px;">
-              Bank: <strong>${bankName}</strong><br>
-              No. Rekening & A.N: <strong>${bankAccount}</strong>
+              ${bankAccountsHtml}
             </div>
           </div>
           <div class="signature-box">
