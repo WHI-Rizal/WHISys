@@ -22,7 +22,8 @@ import {
   X,
   Trash2,
   Lock,
-  ShieldCheck
+  ShieldCheck,
+  Plus
 } from 'lucide-react';
 
 export default function SettingsModule({ theme = 'dark', currentUser = null }) {
@@ -66,8 +67,12 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
     address: 'Jl. Raya Utama No. 88, Jakarta Selatan',
     phone: '0812-3456-7890',
     email: 'info@wisatahalal.co.id',
-    bankName: 'Bank Syariah Indonesia (BSI)',
-    bankAccount: '7123456789 a.n. PT Wisata Halal Internasional'
+    // Rekening Pembayaran Resmi — sekarang berupa DAFTAR (bisa lebih dari
+    // satu, mis. BSI & Mandiri sekaligus), bukan cuma 1 field kayak dulu.
+    // Semua rekening di daftar ini bakal otomatis tampil di invoice.
+    bankAccounts: [
+      { bankName: 'Bank Syariah Indonesia (BSI)', bankAccount: '7123456789 a.n. PT Wisata Halal Internasional' }
+    ]
   });
 
   const [apiData, setApiData] = useState({
@@ -124,7 +129,24 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           const data = docSnap.data();
-          if (data.company) setCompanyData(data.company);
+          if (data.company) {
+            // Migrasi otomatis dari format LAMA (1 field bankName/bankAccount
+            // doang) ke format BARU (array bankAccounts). Kalau dokumen di
+            // Firestore masih format lama & belum sempat disimpan ulang
+            // lewat form ini, tetap tampil normal sebagai 1 baris rekening.
+            let migratedCompany = { ...data.company };
+            if (!Array.isArray(migratedCompany.bankAccounts) || migratedCompany.bankAccounts.length === 0) {
+              if (migratedCompany.bankName || migratedCompany.bankAccount) {
+                migratedCompany.bankAccounts = [{
+                  bankName: migratedCompany.bankName || '',
+                  bankAccount: migratedCompany.bankAccount || ''
+                }];
+              } else {
+                migratedCompany.bankAccounts = [{ bankName: '', bankAccount: '' }];
+              }
+            }
+            setCompanyData(prev => ({ ...prev, ...migratedCompany }));
+          }
           if (data.api) setApiData(data.api);
           if (data.preferences) setSystemPref(data.preferences);
         }
@@ -136,6 +158,32 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
     fetchSettings();
     fetchUsersAndRole();
   }, []);
+
+  // 2b. Kelola Daftar Rekening Pembayaran (bisa lebih dari 1)
+  const handleAddBankAccount = () => {
+    setCompanyData(prev => ({
+      ...prev,
+      bankAccounts: [...(prev.bankAccounts || []), { bankName: '', bankAccount: '' }]
+    }));
+  };
+
+  const handleUpdateBankAccountField = (index, field, value) => {
+    setCompanyData(prev => {
+      const updated = [...(prev.bankAccounts || [])];
+      updated[index] = { ...updated[index], [field]: value };
+      return { ...prev, bankAccounts: updated };
+    });
+  };
+
+  const handleRemoveBankAccount = (index) => {
+    setCompanyData(prev => {
+      const current = prev.bankAccounts || [];
+      // Minimal harus ada 1 rekening — kalau tinggal 1, tombol hapusnya
+      // disembunyikan dari UI, tapi dijaga juga di sini sebagai pengaman.
+      if (current.length <= 1) return prev;
+      return { ...prev, bankAccounts: current.filter((_, i) => i !== index) };
+    });
+  };
 
   // 3. Simpan Settings
   const handleSaveSettings = async (e) => {
@@ -380,28 +428,58 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
             </div>
 
             <div className="border-t border-slate-800 pt-4">
-              <h5 className={`text-xs font-bold ${styles.textTitle} flex items-center gap-2 mb-3`}>
-                <CreditCard className="w-4 h-4 text-emerald-400" /> Rekening Pembayaran Resmi (Untuk Kwitansi)
-              </h5>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className={`block text-xs font-medium ${styles.textSub} mb-1.5`}>Nama Bank</label>
-                  <input
-                    type="text"
-                    value={companyData.bankName}
-                    onChange={(e) => setCompanyData({...companyData, bankName: e.target.value})}
-                    className={`w-full ${styles.inputBg} p-3 rounded-xl text-xs focus:outline-none focus:border-emerald-500`}
-                  />
-                </div>
-                <div>
-                  <label className={`block text-xs font-medium ${styles.textSub} mb-1.5`}>Nomor Rekening & Atas Nama</label>
-                  <input
-                    type="text"
-                    value={companyData.bankAccount}
-                    onChange={(e) => setCompanyData({...companyData, bankAccount: e.target.value})}
-                    className={`w-full ${styles.inputBg} p-3 rounded-xl text-xs focus:outline-none focus:border-emerald-500`}
-                  />
-                </div>
+              <div className="flex items-center justify-between mb-3">
+                <h5 className={`text-xs font-bold ${styles.textTitle} flex items-center gap-2`}>
+                  <CreditCard className="w-4 h-4 text-emerald-400" /> Rekening Pembayaran Resmi (Untuk Invoice & Kwitansi)
+                </h5>
+                <button
+                  type="button"
+                  onClick={handleAddBankAccount}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-500 border border-emerald-500/30 rounded-lg text-[11px] font-medium transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Tambah Rekening
+                </button>
+              </div>
+              <p className={`text-xs ${styles.textSub} mb-3`}>Semua rekening di daftar ini bakal otomatis muncul di Invoice, bisa lebih dari satu (mis. BSI & Mandiri sekaligus).</p>
+
+              <div className="space-y-3">
+                {(companyData.bankAccounts || []).map((acc, idx) => (
+                  <div key={idx} className={`${styles.innerBg} border rounded-xl p-3`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`text-[11px] font-semibold ${styles.textSub}`}>Rekening {idx + 1}</span>
+                      {(companyData.bankAccounts || []).length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveBankAccount(idx)}
+                          className="text-rose-500 hover:text-rose-400 p-1"
+                          title="Hapus Rekening Ini"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className={`block text-xs font-medium ${styles.textSub} mb-1.5`}>Nama Bank</label>
+                        <input
+                          type="text"
+                          value={acc.bankName}
+                          onChange={(e) => handleUpdateBankAccountField(idx, 'bankName', e.target.value)}
+                          className={`w-full ${styles.inputBg} p-3 rounded-xl text-xs focus:outline-none focus:border-emerald-500`}
+                        />
+                      </div>
+                      <div>
+                        <label className={`block text-xs font-medium ${styles.textSub} mb-1.5`}>Nomor Rekening & Atas Nama</label>
+                        <input
+                          type="text"
+                          value={acc.bankAccount}
+                          onChange={(e) => handleUpdateBankAccountField(idx, 'bankAccount', e.target.value)}
+                          className={`w-full ${styles.inputBg} p-3 rounded-xl text-xs focus:outline-none focus:border-emerald-500`}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
