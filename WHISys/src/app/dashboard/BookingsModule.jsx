@@ -2718,7 +2718,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     return {
       compName: companyInfo?.name || 'PT. WISATA HALAL INTERNASIONAL',
       compAddress: companyInfo?.address || 'Ruko Graha Cirendeu No.1C Jl. Cirendeu Raya, Tangerang Selatan, Banten, Indonesia, 15445',
-      compPpiu: companyInfo?.ppiuNumber || 'PPIU No. U.123 / 2024',
+      // compPpiu sengaja DIHAPUS dari cetakan invoice — sistem ini baru
+      // dipakai buat paket Wisata Halal (leisure), belum buat Umrah/Haji,
+      // jadi nomor izin PPIU (yang emang khusus penyelenggara Umrah/Haji)
+      // nggak relevan ditampilkan di invoice.
       compPhone: companyInfo?.phone || '+62 812-0000-0000',
       compEmail: companyInfo?.email || 'admin@wisatahalalindonesia.id',
       bankAccountsList,
@@ -2769,7 +2772,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             <td>${d.name || 'Diskon'}${d.notes ? ` <span style="font-weight: 400; font-style: italic; color: #64748b;">(${d.notes})</span>` : ''}:</td>
             <td style="text-align: right; color: #d97706; white-space: nowrap;">- Rp ${Number(d.amount || 0).toLocaleString('id-ID')}</td>
           </tr>`).join('');
-    const { compName, compAddress, compPpiu, compPhone, compEmail, bankAccountsHtml } = getCompanyInvoiceVars();
+    const { compName, compAddress, compPhone, compEmail, bankAccountsHtml } = getCompanyInvoiceVars();
 
     const totalPaid = payments.length > 0
       ? payments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
@@ -2799,7 +2802,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         <div class="kop-header">
           <div>
             <h1 class="company-logo-title">${compName}</h1>
-            <p class="company-sub">Penyelenggara Perjalanan Ibadah Umrah, Haji & Wisata Halal • ${compPpiu}</p>
+            <p class="company-sub">Penyelenggara Perjalanan Ibadah Umrah, Haji & Wisata Halal</p>
             <p class="company-address">
               ${compAddress}<br>
               Telp/WA: ${compPhone} | Email: ${compEmail}
@@ -3032,7 +3035,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             <td>${d.name || 'Diskon'}${d.notes ? ` <span style="font-weight: 400; font-style: italic; color: #64748b;">(${d.notes})</span>` : ''}:</td>
             <td style="text-align: right; color: #d97706; white-space: nowrap;">- Rp ${Number(d.amount || 0).toLocaleString('id-ID')}</td>
           </tr>`).join('');
-    const { compName, compAddress, compPpiu, compPhone, compEmail, bankAccountsHtml } = getCompanyInvoiceVars();
+    const { compName, compAddress, compPhone, compEmail, bankAccountsHtml } = getCompanyInvoiceVars();
 
     const pesertaRowsHtml = items.map((b, idx) => `
       <tr>
@@ -3070,7 +3073,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         <div class="kop-header">
           <div>
             <h1 class="company-logo-title">${compName}</h1>
-            <p class="company-sub">Penyelenggara Perjalanan Ibadah Umrah, Haji & Wisata Halal • ${compPpiu}</p>
+            <p class="company-sub">Penyelenggara Perjalanan Ibadah Umrah, Haji & Wisata Halal</p>
             <p class="company-address">
               ${compAddress}<br>
               Telp/WA: ${compPhone} | Email: ${compEmail}
