@@ -3149,6 +3149,14 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             <td style="font-weight: bold;">Total Harga Keseluruhan Pemesanan:</td>
             <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
           </tr>` : ''}
+          <tr style="font-size: 10px; color: #94a3b8;">
+            <td>DPP:</td>
+            <td style="text-align: right; white-space: nowrap;">Rp ${ppnDpp.toLocaleString('id-ID')}</td>
+          </tr>
+          <tr style="font-size: 10px; color: #94a3b8;">
+            <td>PPN (1,1%) — sudah termasuk di Total Tagihan:</td>
+            <td style="text-align: right; white-space: nowrap;">Rp ${ppnAmount.toLocaleString('id-ID')}</td>
+          </tr>
           <tr style="background-color: #f1f5f9; border-top: 1px solid #e2e8f0;">
             <td colspan="2" style="font-weight: bold; font-size: 11px; color: #047857; text-transform: uppercase;">
               Rincian Setoran Pembayaran Diterima (Seluruh Peserta):
