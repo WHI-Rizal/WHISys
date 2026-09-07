@@ -26,7 +26,6 @@ const chunkArray = (arr, size = 30) => {
 const LEAD_SOURCE_OPTIONS = [
   'Ads',
   'Alumni',
-  'Ads + Alumni',
   'Pameran',
   'War Group WA',
   'Konsorsium',
@@ -299,6 +298,12 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedBookingForHistory, setSelectedBookingForHistory] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
+  // Tanggal setoran (payments_income) PALING AWAL yang udah tercatat buat
+  // booking yang lagi dibuka di modal Edit — dipakai buat batasi field
+  // "Tanggal Transaksi (Koreksi)" biar nggak bisa digeser ke tanggal SETELAH
+  // ada setoran yang udah masuk (nggak masuk akal ada uang masuk sebelum
+  // booking-nya "ada"). null kalau belum ada setoran sama sekali.
+  const [editBookingMinPaymentDate, setEditBookingMinPaymentDate] = useState(null);
   const [editingPaymentId, setEditingPaymentId] = useState(null);
 
   // State Monitoring Dokumen
@@ -358,7 +363,8 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     // analisa "Sumber Lead per Bulan" di menu Keuangan & Pelunasan >
     // Laporan. leadSourceOther cuma keisi kalau leadSource === 'Lainnya'.
     leadSource: '',
-    leadSourceOther: ''
+    leadSourceOther: '',
+    transactionDate: ''
   });
 
   // Draft form buat nambah/edit 1 baris di tabel "Biaya Tambahan" & "Potongan
@@ -670,6 +676,27 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     return isNaN(combined.getTime()) ? now.toISOString() : combined.toISOString();
   };
 
+  // Koreksi Tanggal Transaksi (createdAt) booking — dipakai Finance/Super
+  // Admin buat benerin kalau TC/Sales salah input tanggal DP awal pas
+  // registrasi (createdAt otomatis ke-set dari tanggal itu, lihat
+  // resolvePaymentCreatedAt di atas). Kalau tanggalnya nggak berubah dari
+  // aslinya, createdAt dibiarin apa adanya (jam-menit-detik aslinya nggak
+  // ikut kegeser). Kalau berubah, jam-menit-detik aslinya tetap dipertahankan
+  // (cuma tanggalnya yang dikoreksi), biar urutan "Waktu Transaksi" di
+  // hari yang sama tetap wajar.
+  const resolveCorrectedCreatedAt = (dateStr, originalCreatedAt) => {
+    if (!dateStr) return originalCreatedAt || new Date().toISOString();
+    const originalDatePart = originalCreatedAt ? String(originalCreatedAt).slice(0, 10) : '';
+    if (dateStr === originalDatePart) return originalCreatedAt;
+    let timePart = '00:00:00';
+    if (originalCreatedAt) {
+      const d = new Date(originalCreatedAt);
+      if (!isNaN(d.getTime())) timePart = d.toTimeString().slice(0, 8);
+    }
+    const combined = new Date(`${dateStr}T${timePart}`);
+    return isNaN(combined.getTime()) ? (originalCreatedAt || new Date().toISOString()) : combined.toISOString();
+  };
+
   // Tanggal setoran (DP maupun tambahan) nggak boleh diisi SEBELUM tanggal
   // pemesanan/booking-nya sendiri dibuat — nggak masuk akal ada uang masuk
   // sebelum bookingnya ada. Ambil bagian yyyy-mm-dd doang dari createdAt biar
@@ -856,8 +883,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       paymentDate: todayDateStr(),
       extraCharges: [], extraDiscounts: [],
       closingSourceType: '', closingSourceId: '', closingSourceName: '',
-      leadSource: '', leadSourceOther: ''
+      leadSource: '', leadSourceOther: '', transactionDate: ''
     });
+    setEditBookingMinPaymentDate(null);
     setChargeDraft({ name: '', amount: '', notes: '' });
     setEditingChargeId(null);
     setDiscountDraft({ name: '', amount: '', notes: '' });
@@ -866,12 +894,24 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     setShowModal(true);
   };
 
-  const handleOpenEditModal = (item) => {
+  const handleOpenEditModal = async (item) => {
     if (!canEditOwnBooking(item)) {
       alert("Cuma Finance & Super Admin, atau TC/Sales yang bikin booking ini sendiri, yang boleh mengedit booking.");
       return;
     }
     setEditingBookingId(item.id);
+    // Cari tanggal setoran paling awal yang udah tercatat buat booking ini,
+    // buat batas atas field koreksi Tanggal Transaksi di bawah (Finance/Super
+    // Admin doang yang bisa lihat & isi field ini).
+    setEditBookingMinPaymentDate(null);
+    if (canManageBookings) {
+      const payments = await fetchPaymentHistory(item.id);
+      const dates = (payments || [])
+        .map(p => (p.createdAt ? String(p.createdAt).slice(0, 10) : null))
+        .filter(Boolean)
+        .sort();
+      setEditBookingMinPaymentDate(dates.length > 0 ? dates[0] : null);
+    }
     setFormData({
       packageId: item.packageId || '',
       // Booking lama belum punya field Pemesan. Kalau ada namanya tapi ID-nya
@@ -904,7 +944,12 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       leadSource: item.leadSource
         ? (LEAD_SOURCE_OPTIONS.includes(item.leadSource) ? item.leadSource : 'Lainnya')
         : '',
-      leadSourceOther: item.leadSource && !LEAD_SOURCE_OPTIONS.includes(item.leadSource) ? item.leadSource : ''
+      leadSourceOther: item.leadSource && !LEAD_SOURCE_OPTIONS.includes(item.leadSource) ? item.leadSource : '',
+      // Tanggal Transaksi (Koreksi) — prefill dari createdAt booking ini.
+      // Cuma dipakai/ditampilkan kalau canManageBookings (Finance/Super
+      // Admin); TC/Sales nggak lihat field ini soalnya field ini nentuin
+      // periode laporan keuangan (Closing TC, P&L, Sumber Lead per Bulan).
+      transactionDate: item.createdAt ? String(item.createdAt).slice(0, 10) : ''
     });
     setChargeDraft({ name: '', amount: '', notes: '' });
     setEditingChargeId(null);
@@ -3544,6 +3589,14 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           alert(`Tanggal setoran tambahan nggak boleh sebelum tanggal pemesanan ${currentBooking?.bookingCode || ''} dibuat (${minDate.split('-').reverse().join('/')}).`);
           return;
         }
+        // Koreksi Tanggal Transaksi (createdAt) — cuma Finance/Super Admin
+        // yang bisa geser field ini (lihat gating di JSX). Nggak boleh
+        // digeser ke tanggal SETELAH ada setoran yang udah tercatat buat
+        // booking ini, biar nggak ada uang masuk "sebelum" booking-nya ada.
+        if (canManageBookings && formData.transactionDate && editBookingMinPaymentDate && formData.transactionDate > editBookingMinPaymentDate) {
+          alert(`Tanggal Transaksi nggak boleh digeser ke setelah tanggal setoran yang udah tercatat (${editBookingMinPaymentDate.split('-').reverse().join('/')}). Betulkan/hapus dulu setorannya lewat Riwayat Pembayaran kalau memang tanggal setoran itu yang salah.`);
+          return;
+        }
         // Edit selalu 1 booking/pax (paxCount dipaksa 1 di handleOpenEditModal),
         // jadi daftar biaya/diskonnya langsung dipakai apa adanya (nggak
         // perlu dibagi rata splitFlatAmount — itu cuma buat registrasi rombongan baru).
@@ -3568,6 +3621,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           closingSourceId: formData.closingSourceId || '',
           closingSourceName: formData.closingSourceName || '',
           leadSource: resolveLeadSource(formData),
+          ...(canManageBookings ? { createdAt: resolveCorrectedCreatedAt(formData.transactionDate, currentBooking?.createdAt) } : {}),
           updatedAt: new Date().toISOString()
         });
 
@@ -3607,6 +3661,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           module: 'Booking',
           targetLabel: selectedJamaah.fullName || currentBooking?.bookingCode,
           details: `Mengedit booking ${currentBooking?.bookingCode || '-'} an. ${selectedJamaah.fullName || '-'}, paket ${selectedPkg.name}.`
+            + (canManageBookings && formData.transactionDate && currentBooking?.createdAt && formData.transactionDate !== String(currentBooking.createdAt).slice(0, 10)
+                ? ` Tanggal Transaksi dikoreksi dari ${String(currentBooking.createdAt).slice(0, 10).split('-').reverse().join('/')} ke ${formData.transactionDate.split('-').reverse().join('/')}.`
+                : '')
         });
 
       } else {
@@ -5003,6 +5060,30 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                   )}
                 </div>
               </div>
+
+              {editingBookingId && canManageBookings && (
+                <div className={`${styles.innerBg} p-4 rounded-xl border space-y-3`}>
+                  <p className="text-[11px] font-bold text-amber-500 uppercase tracking-wider">Koreksi Tanggal Transaksi (Finance/Super Admin)</p>
+                  <p className="text-[10px] opacity-70 -mt-2">
+                    Tanggal ini otomatis ke-set dari tanggal DP awal pas booking ini pertama kali diregistrasi, dan dipakai sebagai dasar "Waktu Transaksi" di laporan (Closing TC, P&amp;L, Sumber Lead per Bulan). Ubah cuma kalau TC/Sales salah input tanggal DP awal pas registrasi.
+                  </p>
+                  <div>
+                    <label className="block mb-1 font-medium">Tanggal Transaksi</label>
+                    <input
+                      type="date"
+                      max={editBookingMinPaymentDate || undefined}
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={formData.transactionDate}
+                      onChange={e => setFormData({ ...formData, transactionDate: e.target.value })}
+                    />
+                    {editBookingMinPaymentDate && (
+                      <p className="text-[10px] mt-1 opacity-70">
+                        Nggak bisa digeser ke setelah tanggal setoran yang udah tercatat ({editBookingMinPaymentDate.split('-').reverse().join('/')}).
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {!editingBookingId && formData.packageId && (() => {
                 const pkgPreview = packagesList.find(p => p.id === formData.packageId);
