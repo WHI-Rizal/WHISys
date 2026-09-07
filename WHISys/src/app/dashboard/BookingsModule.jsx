@@ -2755,13 +2755,20 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     const discountsList = booking.extraDiscounts || [];
     const chargesTotal = chargesList.reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
     const discountsTotal = discountsList.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
-    const hasExtras = chargesList.length > 0 || discountsList.length > 0;
-    const basePackagePrice = totalAmount - chargesTotal + discountsTotal;
-    // PPN Besaran Tertentu Biro Perjalanan Wisata (PMK 71/2022): 1,1% dari
-    // DPP (harga paket + biaya tambahan, SEBELUM pajak), DITAMBAHKAN ke atas
-    // DPP itu jadi totalAmount (= nilai akhir yang ditagihkan). Breakdown di
-    // bawah ini dihitung mundur dari totalAmount buat ditampilkan di invoice.
+    // PPN Besaran Tertentu Biro Perjalanan Wisata (PMK 71/2022): skema
+    // EXCLUDE — DPP (harga paket + biaya tambahan, SEBELUM pajak) dihitung
+    // dulu, PPN 1,1% dihitung DARI DPP itu, baru DITAMBAHKAN ke atasnya jadi
+    // totalAmount (= nilai akhir yang ditagihkan). ppnDpp di sini = DPP utuh
+    // (harga paket + charges - discounts, SEBELUM pajak), didapat balik dari
+    // totalAmount karena dokumen booking cuma nyimpen nilai akhirnya.
     const { dpp: ppnDpp, ppn: ppnAmount } = calculatePPN(totalAmount);
+    // Harga paket MURNI (belum kena tambahan/potongan/PPN): DPP utuh dikurangi
+    // charges & ditambah balik discounts. PENTING dihitung dari ppnDpp
+    // (DPP, bebas pajak), BUKAN dari totalAmount (yang udah kena PPN) — kalau
+    // dari totalAmount, PPN-nya keikut nempel di baris "Harga Paket" dan
+    // invoice keliatan seperti skema include lagi, padahal sistem pakai
+    // skema exclude (PPN dihitung & ditambahkan terpisah di baris sendiri).
+    const basePackagePrice = ppnDpp - chargesTotal + discountsTotal;
     const chargeRowsHtml = chargesList.map(c => `
           <tr>
             <td>${c.name || 'Biaya Tambahan'}${c.notes ? ` <span style="font-weight: 400; font-style: italic; color: #64748b;">(${c.notes})</span>` : ''}:</td>
@@ -2852,23 +2859,22 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
         <table class="summary-table">
           <tr class="summary-header-row">
-            <td>${hasExtras ? 'Harga Paket:' : 'Total Harga Paket:'}</td>
+            <td>Harga Paket:</td>
             <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${basePackagePrice.toLocaleString('id-ID')}</td>
           </tr>
           ${chargeRowsHtml}
           ${discountRowsHtml}
-          ${hasExtras ? `
-          <tr style="border-top: 1px dashed #cbd5e1;">
-            <td style="font-weight: bold;">Total Harga Keseluruhan Pemesanan:</td>
-            <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
-          </tr>` : ''}
-          <tr style="font-size: 10px; color: #94a3b8;">
-            <td>DPP:</td>
+          <tr style="border-top: 1px dashed #cbd5e1; font-size: 10px; color: #94a3b8;">
+            <td>Subtotal (DPP):</td>
             <td style="text-align: right; white-space: nowrap;">Rp ${ppnDpp.toLocaleString('id-ID')}</td>
           </tr>
           <tr style="font-size: 10px; color: #94a3b8;">
-            <td>PPN (1,1%) — sudah termasuk di Total Tagihan:</td>
-            <td style="text-align: right; white-space: nowrap;">Rp ${ppnAmount.toLocaleString('id-ID')}</td>
+            <td>PPN (1,1%):</td>
+            <td style="text-align: right; white-space: nowrap;">+ Rp ${ppnAmount.toLocaleString('id-ID')}</td>
+          </tr>
+          <tr style="border-top: 1px dashed #cbd5e1;">
+            <td style="font-weight: bold;">Total Tagihan (sudah + PPN):</td>
+            <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
           </tr>
           <tr style="background-color: #f1f5f9; border-top: 1px solid #e2e8f0;">
             <td colspan="2" style="font-weight: bold; font-size: 11px; color: #047857; text-transform: uppercase;">
@@ -3018,13 +3024,18 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     const discountsList = mergeExtraLists(items, 'extraDiscounts');
     const chargesTotal = chargesList.reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
     const discountsTotal = discountsList.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
-    const hasExtras = chargesList.length > 0 || discountsList.length > 0;
-    const basePackagePrice = totalAmount - chargesTotal + discountsTotal;
-    // PPN Besaran Tertentu Biro Perjalanan Wisata (PMK 71/2022): 1,1% dari
-    // DPP (harga paket + biaya tambahan, SEBELUM pajak), DITAMBAHKAN ke atas
-    // DPP itu jadi totalAmount (= nilai akhir yang ditagihkan). Breakdown di
-    // bawah ini dihitung mundur dari totalAmount buat ditampilkan di invoice.
+    // PPN Besaran Tertentu Biro Perjalanan Wisata (PMK 71/2022): skema
+    // EXCLUDE — DPP (harga paket seluruh peserta + biaya tambahan, SEBELUM
+    // pajak) dihitung dulu, PPN 1,1% dihitung DARI DPP itu, baru
+    // DITAMBAHKAN ke atasnya jadi totalAmount (= nilai akhir yang
+    // ditagihkan). ppnDpp = DPP utuh, didapat balik dari totalAmount karena
+    // dokumen booking cuma nyimpen nilai akhirnya.
     const { dpp: ppnDpp, ppn: ppnAmount } = calculatePPN(totalAmount);
+    // Harga paket MURNI (seluruh peserta, belum kena tambahan/potongan/PPN):
+    // dihitung dari ppnDpp (DPP, bebas pajak), BUKAN dari totalAmount (yang
+    // udah kena PPN) — biar PPN-nya nggak keikut nempel di baris "Harga
+    // Paket" dan invoice keliatan seperti skema include lagi.
+    const basePackagePrice = ppnDpp - chargesTotal + discountsTotal;
     const chargeRowsHtml = chargesList.map(c => `
           <tr>
             <td>${c.name || 'Biaya Tambahan'}${c.notes ? ` <span style="font-weight: 400; font-style: italic; color: #64748b;">(${c.notes})</span>` : ''}:</td>
@@ -3139,23 +3150,22 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
         <table class="summary-table">
           <tr class="summary-header-row">
-            <td>${hasExtras ? 'Harga Paket (Seluruh Peserta):' : 'Total Harga Keseluruhan Pemesanan:'}</td>
+            <td>Harga Paket (Seluruh Peserta):</td>
             <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${basePackagePrice.toLocaleString('id-ID')}</td>
           </tr>
           ${chargeRowsHtml}
           ${discountRowsHtml}
-          ${hasExtras ? `
-          <tr style="border-top: 1px dashed #cbd5e1;">
-            <td style="font-weight: bold;">Total Harga Keseluruhan Pemesanan:</td>
-            <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
-          </tr>` : ''}
-          <tr style="font-size: 10px; color: #94a3b8;">
-            <td>DPP:</td>
+          <tr style="border-top: 1px dashed #cbd5e1; font-size: 10px; color: #94a3b8;">
+            <td>Subtotal (DPP):</td>
             <td style="text-align: right; white-space: nowrap;">Rp ${ppnDpp.toLocaleString('id-ID')}</td>
           </tr>
           <tr style="font-size: 10px; color: #94a3b8;">
-            <td>PPN (1,1%) — sudah termasuk di Total Tagihan:</td>
-            <td style="text-align: right; white-space: nowrap;">Rp ${ppnAmount.toLocaleString('id-ID')}</td>
+            <td>PPN (1,1%):</td>
+            <td style="text-align: right; white-space: nowrap;">+ Rp ${ppnAmount.toLocaleString('id-ID')}</td>
+          </tr>
+          <tr style="border-top: 1px dashed #cbd5e1;">
+            <td style="font-weight: bold;">Total Tagihan (sudah + PPN):</td>
+            <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
           </tr>
           <tr style="background-color: #f1f5f9; border-top: 1px solid #e2e8f0;">
             <td colspan="2" style="font-weight: bold; font-size: 11px; color: #047857; text-transform: uppercase;">
