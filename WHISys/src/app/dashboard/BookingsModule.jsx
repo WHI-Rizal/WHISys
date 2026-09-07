@@ -1244,7 +1244,13 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         console.error('Gagal mengembalikan stok perlengkapan:', equipErr);
       }
 
-      if (item.packageId) {
+      // Kuota cuma dilepas kalau booking ini statusnya masih 'active' pas
+      // dihapus — kalau udah 'cancelled' atau 'rescheduled' sebelumnya,
+      // kuotanya udah kelepas duluan di proses itu (lihat handleCancelSubmit
+      // & handleRescheduleSubmit). Tanpa pengecekan ini, hapus booking yang
+      // udah cancelled/rescheduled bakal nambah kuota LAGI (dobel-lepas) dan
+      // bikin paket keliatan punya seat lebih banyak dari kapasitas aslinya.
+      if (item.packageId && (item.status || 'active') === 'active') {
         // Pakai increment() (atomic di server) — bukan baca-lalu-tulis dari
         // client — supaya nggak salah hitung kalau ada aksi lain yang
         // barengan ubah kuota paket yang sama. Dibungkus try/catch sendiri:
@@ -2152,6 +2158,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     }
     if (!groupEditForm.packageId) {
       alert("Pilih Paket Travel.");
+      return;
+    }
+    // Jaga-jaga (defense in depth) — field Paket Travel di form ini sengaja
+    // dikunci (disabled) di JSX, TC/Sales/Finance sekalipun cuma boleh ganti
+    // paket lewat "Reschedule Grup" (canReschedule = Finance/Super Admin
+    // doang), bukan dari Edit Grup ini. Tolak di sini juga kalau entah
+    // gimana caranya packageId tetap kekirim beda dari aslinya.
+    if (groupEditForm.packageId !== groupEditTarget.primary?.packageId) {
+      alert('Paket nggak bisa diganti lewat Edit Grup. Pakai tombol "Reschedule Grup" (Finance/Super Admin) buat pindah paket.');
       return;
     }
     if (!groupEditForm.ordererId) {
@@ -3580,6 +3595,17 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
 
       if (editingBookingId) {
         const currentBooking = bookings.find(b => b.id === editingBookingId);
+        // Jaga-jaga (defense in depth) — field Paket Travel di form Edit
+        // Booking sengaja dikunci (disabled) di JSX: ganti paket dari sini
+        // nggak pernah nyesuaiin kuota paket lama/baru sama sekali, dan
+        // sekaligus jadi celah "reschedule gratis" buat TC/Sales (yang
+        // seharusnya cuma boleh Finance/Super Admin). Tolak juga di sini
+        // kalau entah gimana caranya packageId tetap kekirim beda dari
+        // aslinya. Pindah paket wajib lewat tombol "Reschedule".
+        if (formData.packageId !== currentBooking?.packageId) {
+          alert('Paket nggak bisa diganti lewat Edit Booking. Pakai tombol "Reschedule" (Finance/Super Admin) buat pindah paket.');
+          return;
+        }
         if (!canEditOwnBooking(currentBooking)) {
           alert("Cuma Finance & Super Admin, atau TC/Sales yang bikin booking ini sendiri, yang boleh mengedit booking.");
           return;
@@ -4779,7 +4805,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 <label className="block mb-1 font-medium">Pilih Paket Travel</label>
                 <select
                   required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  disabled={!!editingBookingId}
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5 ${editingBookingId ? 'opacity-60 cursor-not-allowed' : ''}`}
                   value={formData.packageId}
                   onChange={e => setFormData({ ...formData, packageId: e.target.value })}
                 >
@@ -4790,6 +4817,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                     </option>
                   ))}
                 </select>
+                {editingBookingId && (
+                  <p className="text-[10px] mt-1 text-amber-500">
+                    Paket nggak bisa diganti lewat Edit Booking (biar kuota paket lama/baru selalu ke-update bener). Kalau jamaah ini mau pindah ke paket keberangkatan lain, pakai tombol "Reschedule" (Finance/Super Admin).
+                  </p>
+                )}
               </div>
 
               {/* PEMESAN (ORDERER) — siapa yang melakukan pemesanan, belum tentu ikut
@@ -6294,7 +6326,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 <label className="block mb-1 font-medium">Pilih Paket Travel</label>
                 <select
                   required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  disabled
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5 opacity-60 cursor-not-allowed`}
                   value={groupEditForm.packageId}
                   onChange={e => setGroupEditForm({ ...groupEditForm, packageId: e.target.value })}
                 >
@@ -6305,6 +6338,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                     </option>
                   ))}
                 </select>
+                <p className="text-[10px] mt-1 text-amber-500">
+                  Paket nggak bisa diganti lewat Edit Grup (biar kuota paket lama/baru selalu ke-update bener & tetap dijaga cuma Finance/Super Admin). Kalau grup ini mau pindah ke paket keberangkatan lain, pakai tombol "Reschedule Grup" (Finance/Super Admin).
+                </p>
               </div>
 
               <div>
