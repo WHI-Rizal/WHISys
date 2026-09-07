@@ -369,7 +369,28 @@ export default function AgentsModule({ theme = 'dark', userRole = '' }) {
       return;
     }
     const label = pb.paxCount > 1 ? `${pb.jamaahName} dkk (${pb.paxCount} pax)` : pb.jamaahName;
-    if (!confirm(`Putuskan hubungan pemesanan ${pb.groupBookingCode} (${label}) dari mitra "${pb.partnerName}"? Komisi Rp ${Number(pb.commissionAmount).toLocaleString('id-ID')} dari pemesanan ini nggak akan dihitung lagi.`)) return;
+    // Pembayaran komisi dicatat LUMP-SUM per mitra (bukan per link/booking),
+    // jadi nggak ada cara pasti tau porsi komisi booking ini spesifiknya
+    // udah kebayar atau belum. Tapi kita BISA deteksi tanda bahayanya: kalau
+    // komisi booking ini dibuang dari total accrued mitra, dan total yang
+    // udah dibayar (paid) jadi lebih besar dari sisa accrued yang baru,
+    // berarti pembayaran yang udah masuk itu kemungkinan besar sebagian
+    // mencakup komisi booking ini juga — unlink diam-diam bakal bikin
+    // outstanding mitra "minus" (keliatan lebih bayar) tanpa staff sadar
+    // kenapa. Makanya di sini kita hitung dulu & kasih peringatan eksplisit
+    // sebelum lanjut, bukan cuma confirm generik kayak sebelumnya.
+    const { paid } = getPartnerSummary(pb.partnerId);
+    const commissionAmount = Number(pb.commissionAmount) || 0;
+    const otherAccrued = partnerBookings
+      .filter(x => x.partnerId === pb.partnerId && x.id !== pb.id)
+      .reduce((acc, x) => acc + (Number(x.commissionAmount) || 0), 0);
+    const outstandingAfterUnlink = otherAccrued - paid;
+
+    let message = `Putuskan hubungan pemesanan ${pb.groupBookingCode} (${label}) dari mitra "${pb.partnerName}"? Komisi Rp ${commissionAmount.toLocaleString('id-ID')} dari pemesanan ini nggak akan dihitung lagi.`;
+    if (outstandingAfterUnlink < 0) {
+      message += `\n\nPERINGATAN: Total komisi yang udah dibayar ke "${pb.partnerName}" (Rp ${paid.toLocaleString('id-ID')}) akan jadi LEBIH BESAR dari sisa komisi booking lain yang masih terhubung (Rp ${otherAccrued.toLocaleString('id-ID')}) — selisih Rp ${Math.abs(outstandingAfterUnlink).toLocaleString('id-ID')}. Ini tanda pembayaran yang udah masuk kemungkinan mencakup komisi booking ini juga. Cek dulu riwayat "Pembayaran Komisi" mitra ini sebelum lanjut — kalau memang perlu dikoreksi, catat pengurangan/refund komisi secara manual setelah unlink.`;
+    }
+    if (!confirm(message)) return;
     try {
       await deleteDoc(doc(db, 'partner_bookings', pb.id));
       fetchData();
