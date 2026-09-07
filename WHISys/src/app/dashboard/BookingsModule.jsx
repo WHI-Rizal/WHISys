@@ -3031,11 +3031,62 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     // ditagihkan). ppnDpp = DPP utuh, didapat balik dari totalAmount karena
     // dokumen booking cuma nyimpen nilai akhirnya.
     const { dpp: ppnDpp, ppn: ppnAmount } = calculatePPN(totalAmount);
-    // Harga paket MURNI (seluruh peserta, belum kena tambahan/potongan/PPN):
-    // dihitung dari ppnDpp (DPP, bebas pajak), BUKAN dari totalAmount (yang
-    // udah kena PPN) — biar PPN-nya nggak keikut nempel di baris "Harga
-    // Paket" dan invoice keliatan seperti skema include lagi.
-    const basePackagePrice = ppnDpp - chargesTotal + discountsTotal;
+    // Harga Paket PER PAX (bukan cuma dibagi rata dari agregat) — dihitung
+    // per booking individual di grup ini, biar tetap akurat kalau ada pax
+    // dengan tipe kamar/harga beda dalam 1 grup yang sama. Tiap harga per
+    // pax di sini tetap DPP MURNI (dihitung dari calculatePPN atas
+    // totalAmount pax itu sendiri, dikurangi biaya tambahan & ditambah balik
+    // potongan harga porsi dia) — bebas PPN, sesuai skema exclude, biar PPN
+    // nggak keikut nempel di baris "Harga Paket" (invoice keliatan seperti
+    // skema include lagi kalau nempel).
+    const perPaxPriceList = items.map(b => {
+      const itemTotalAmount = Number(b.totalAmount) || 0;
+      const itemCharges = (b.extraCharges || []).reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
+      const itemDiscounts = (b.extraDiscounts || []).reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
+      const itemDpp = calculatePPN(itemTotalAmount).dpp;
+      return itemDpp - itemCharges + itemDiscounts;
+    });
+    // Total Harga Paket seluruh peserta = jumlah harga per-pax di atas —
+    // ini yang ditampilkan sebagai "Harga Paket" di invoice, hasilnya sama
+    // aja kalau semua pax harganya seragam (harga per pax x jumlah pax).
+    const basePackagePrice = perPaxPriceList.reduce((acc, p) => acc + p, 0);
+    // Kelompokkan pax berdasarkan harga paketnya masing-masing — biasanya
+    // seragam (1 tipe kamar/harga buat 1 grup), tapi bisa beda kalau
+    // grupnya campuran beberapa tipe kamar/harga sekaligus.
+    const priceGroupsMap = {};
+    const priceGroupOrder = [];
+    perPaxPriceList.forEach(price => {
+      const key = String(price);
+      if (!priceGroupsMap[key]) { priceGroupsMap[key] = { price, count: 0 }; priceGroupOrder.push(key); }
+      priceGroupsMap[key].count += 1;
+    });
+    const priceGroupList = priceGroupOrder.map(k => priceGroupsMap[k]);
+    // Kalau seragam (1 harga aja buat semua pax): tampil simpel "Harga Paket
+    // (per Pax)" + "Total Harga Paket (N Pax x Rp ...)". Kalau campuran
+    // beberapa harga: tampil rincian per kelompok harga, baru totalnya.
+    const packagePriceRowsHtml = priceGroupList.length <= 1
+      ? `
+          <tr class="summary-header-row">
+            <td>Harga Paket (per Pax):</td>
+            <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${(priceGroupList[0]?.price || 0).toLocaleString('id-ID')}</td>
+          </tr>
+          <tr>
+            <td>Total Harga Paket (${items.length} Pax x Rp ${(priceGroupList[0]?.price || 0).toLocaleString('id-ID')}):</td>
+            <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${basePackagePrice.toLocaleString('id-ID')}</td>
+          </tr>`
+      : `
+          <tr class="summary-header-row">
+            <td colspan="2" style="font-weight: bold;">Rincian Harga Paket per Pax:</td>
+          </tr>
+          ${priceGroupList.map(g => `
+          <tr>
+            <td>${g.count} Pax x Rp ${g.price.toLocaleString('id-ID')}:</td>
+            <td style="text-align: right; white-space: nowrap;">Rp ${(g.price * g.count).toLocaleString('id-ID')}</td>
+          </tr>`).join('')}
+          <tr>
+            <td style="font-weight: bold;">Total Harga Paket (Seluruh Peserta):</td>
+            <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${basePackagePrice.toLocaleString('id-ID')}</td>
+          </tr>`;
     const chargeRowsHtml = chargesList.map(c => `
           <tr>
             <td>${c.name || 'Biaya Tambahan'}${c.notes ? ` <span style="font-weight: 400; font-style: italic; color: #64748b;">(${c.notes})</span>` : ''}:</td>
@@ -3149,10 +3200,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         </table>
 
         <table class="summary-table">
-          <tr class="summary-header-row">
-            <td>Harga Paket (Seluruh Peserta):</td>
-            <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${basePackagePrice.toLocaleString('id-ID')}</td>
-          </tr>
+          ${packagePriceRowsHtml}
           ${chargeRowsHtml}
           ${discountRowsHtml}
           <tr style="border-top: 1px dashed #cbd5e1; font-size: 10px; color: #94a3b8;">
