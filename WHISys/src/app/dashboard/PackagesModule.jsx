@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
-import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings } from 'lucide-react';
+import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings, List, LayoutGrid, CalendarRange } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 import { logActivity } from '../../lib/activityLog';
 
@@ -98,6 +98,12 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
   const [selectedDestinationCity, setSelectedDestinationCity] = useState('');
   const [selectedAirline, setSelectedAirline] = useState('');
   const [sortBy, setSortBy] = useState('');
+
+  // Mode Tampilan: 'list' (tabel/kartu biasa, urutan sesuai filter/sort) atau
+  // 'monthly' (dikelompokkan per bulan keberangkatan) — dibuat biar tim CS
+  // gampang mencocokkan paket yang udah dibuat di sistem sama daftar
+  // rencana di sheet "Cek Seat" yang juga disusun per bulan.
+  const [viewMode, setViewMode] = useState('list');
 
   const [showModal, setShowModal] = useState(false);
   const [editingPackageId, setEditingPackageId] = useState(null);
@@ -730,6 +736,43 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     }
   });
 
+  // Pengelompokan per Bulan Keberangkatan — dipakai buat Tampilan "Per
+  // Bulan", biar polanya mirip sheet "Cek Seat" (yang disusun per bulan:
+  // JANUARI, FEBRUARI, dst) sehingga gampang dicocokkan paket mana yang
+  // udah dibuat di sistem. Dikelompokkan dari sortedPackages (jadi ikut
+  // filter & pencarian yang aktif), lalu urutan grup bulannya dibikin
+  // kronologis berdasarkan tanggal keberangkatan paling awal di grup itu —
+  // bukan abjad — biar bulan terdekat selalu muncul duluan.
+  const packagesByMonth = (() => {
+    const groupsMap = {};
+    const order = [];
+    sortedPackages.forEach((pkg) => {
+      const label = formatMonthYear(pkg.departureDate) || 'Tanpa Tanggal Keberangkatan';
+      if (!groupsMap[label]) {
+        groupsMap[label] = { label, packages: [], earliestDate: pkg.departureDate ? new Date(pkg.departureDate) : null };
+        order.push(label);
+      }
+      groupsMap[label].packages.push(pkg);
+      const pkgDate = pkg.departureDate ? new Date(pkg.departureDate) : null;
+      if (pkgDate && !isNaN(pkgDate.getTime())) {
+        if (!groupsMap[label].earliestDate || isNaN(groupsMap[label].earliestDate.getTime()) || pkgDate < groupsMap[label].earliestDate) {
+          groupsMap[label].earliestDate = pkgDate;
+        }
+      }
+    });
+    return order
+      .map((label) => groupsMap[label])
+      .sort((a, b) => {
+        // Grup tanpa tanggal keberangkatan yang valid selalu ditaruh paling
+        // akhir, apapun urutan sort yang aktif.
+        if (!a.earliestDate || isNaN(a.earliestDate.getTime())) return 1;
+        if (!b.earliestDate || isNaN(b.earliestDate.getTime())) return -1;
+        return sortBy === 'date_desc'
+          ? b.earliestDate - a.earliestDate
+          : a.earliestDate - b.earliestDate;
+      });
+  })();
+
   const resetFilters = () => {
     setSearchTerm('');
     setSelectedPeriod('');
@@ -768,11 +811,39 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
           <span className={`text-xs font-bold ${styles.textTitle} flex items-center gap-1.5`}>
             <Filter className="w-4 h-4 text-emerald-500" /> Filter Data Keberangkatan
           </span>
-          {(searchTerm || selectedPeriod || selectedDestination || selectedDestinationCity || selectedAirline || sortBy) && (
-            <button onClick={resetFilters} className="text-[11px] text-rose-500 hover:underline flex items-center gap-1">
-              <RefreshCw className="w-3 h-3" /> Reset Filter
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {(searchTerm || selectedPeriod || selectedDestination || selectedDestinationCity || selectedAirline || sortBy) && (
+              <button onClick={resetFilters} className="text-[11px] text-rose-500 hover:underline flex items-center gap-1">
+                <RefreshCw className="w-3 h-3" /> Reset Filter
+              </button>
+            )}
+            <div className={`flex items-center rounded-lg border ${isDark ? 'border-slate-700' : 'border-slate-200'} overflow-hidden text-[11px] font-medium`}>
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                title="Tampilan List"
+                className={`flex items-center gap-1 px-2.5 py-1.5 transition-colors ${
+                  viewMode === 'list'
+                    ? 'bg-emerald-600 text-white'
+                    : `${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-100'}`
+                }`}
+              >
+                <List className="w-3.5 h-3.5" /> List
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('monthly')}
+                title="Tampilan Per Bulan Keberangkatan"
+                className={`flex items-center gap-1 px-2.5 py-1.5 transition-colors border-l ${isDark ? 'border-slate-700' : 'border-slate-200'} ${
+                  viewMode === 'monthly'
+                    ? 'bg-emerald-600 text-white'
+                    : `${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-100'}`
+                }`}
+              >
+                <CalendarRange className="w-3.5 h-3.5" /> Per Bulan
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -866,7 +937,8 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         </div>
       </div>
 
-      {/* TABEL DATA PAKET */}
+      {/* TABEL DATA PAKET (Tampilan List) */}
+      {viewMode === 'list' && (
       <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
@@ -1066,6 +1138,160 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
           )}
         </div>
       </div>
+      )}
+
+      {/* TAMPILAN PER BULAN KEBERANGKATAN — buat cocokkan sama sheet "Cek Seat" */}
+      {viewMode === 'monthly' && (
+        <div className="space-y-4">
+          {loading ? (
+            <div className={`${styles.cardBg} border rounded-xl p-8 text-center text-xs ${styles.textSub}`}>Memuat katalog paket...</div>
+          ) : packagesByMonth.length === 0 ? (
+            <div className={`${styles.cardBg} border rounded-xl p-8 text-center text-xs ${styles.textSub}`}>Tidak ada paket yang sesuai dengan filter pencarian.</div>
+          ) : (
+            packagesByMonth.map((group) => {
+              const groupSeatTotals = group.packages.reduce((acc, pkg) => {
+                const { totalQuota, remainingQuota } = getPackageSeatInfo(pkg);
+                acc.total += totalQuota;
+                acc.remaining += remainingQuota;
+                return acc;
+              }, { total: 0, remaining: 0 });
+
+              return (
+                <div key={group.label} className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
+                  <div className={`flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b ${isDark ? 'border-slate-800 bg-slate-800/40' : 'border-slate-200 bg-slate-50'}`}>
+                    <span className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2`}>
+                      <Calendar className="w-4 h-4 text-emerald-500" /> {group.label}
+                      <span className={`text-[11px] font-normal ${styles.textSub}`}>({group.packages.length} paket)</span>
+                    </span>
+                    <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${
+                      groupSeatTotals.remaining > 0
+                        ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                        : 'bg-rose-500/10 text-rose-500 border border-rose-500/20'
+                    }`}>
+                      Sisa Seat: {groupSeatTotals.remaining} / {groupSeatTotals.total}
+                    </span>
+                  </div>
+
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className={`${styles.tableHeaderBg} uppercase tracking-wider border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                        <tr>
+                          <th className="p-3">Kode & Nama Paket</th>
+                          <th className="p-3">Jenis & Maskapai</th>
+                          <th className="p-3">Tgl Keberangkatan</th>
+                          <th className="p-3">Destinasi/Kota</th>
+                          <th className="p-3 text-center">Sisa Seat</th>
+                          <th className="p-3 text-center">Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                        {group.packages.map((pkg) => {
+                          const { totalQuota, remainingQuota } = getPackageSeatInfo(pkg);
+                          return (
+                            <tr key={pkg.id} className={`${isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'} transition-colors`}>
+                              <td className={`p-3 font-semibold ${styles.textTitle}`}>
+                                {pkg.name}
+                                <span className="block text-[10px] text-emerald-500 font-mono">{pkg.code}</span>
+                              </td>
+                              <td className="p-3">
+                                <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] block w-fit mb-1 font-medium`}>{pkg.type}</span>
+                                <span className={`${styles.textSub} text-[11px] flex items-center gap-1`}>
+                                  <Plane className="w-3 h-3 text-blue-500" /> {pkg.airline || '-'}
+                                </span>
+                              </td>
+                              <td className={`p-3 font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                {formatDateDDMMYYYY(pkg.departureDate)}
+                              </td>
+                              <td className={`p-3 ${styles.textSub}`}>{pkg.destinationCity || '-'}</td>
+                              <td className="p-3 text-center">
+                                <span className={`px-3 py-1 rounded-full text-[11px] font-bold whitespace-nowrap inline-block ${
+                                  remainingQuota > 5
+                                    ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                                    : 'bg-rose-500/10 text-rose-500 border border-rose-500/20'
+                                }`}>
+                                  {remainingQuota} / {totalQuota}
+                                </span>
+                              </td>
+                              <td className="p-3 text-center">
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    onClick={() => handleOpenItinerary(pkg)}
+                                    className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-purple-500 rounded-lg transition-colors`}
+                                    title="Itinerary Perjalanan"
+                                  >
+                                    <ListOrdered className="w-4 h-4" />
+                                  </button>
+                                  {canManagePackages && (
+                                    <button
+                                      onClick={() => handleOpenEdit(pkg)}
+                                      className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                                      title="Edit Paket"
+                                    >
+                                      <Edit className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="md:hidden space-y-3 p-4">
+                    {group.packages.map((pkg) => {
+                      const { totalQuota, remainingQuota } = getPackageSeatInfo(pkg);
+                      return (
+                        <div key={pkg.id} className={`${styles.innerBg} border rounded-xl p-4 text-xs space-y-2`}>
+                          <div>
+                            <div className={`font-semibold ${styles.textTitle}`}>{pkg.name}</div>
+                            <div className="text-[10px] text-emerald-500 font-mono">{pkg.code}</div>
+                          </div>
+                          <div className={`space-y-1 ${styles.textSub}`}>
+                            <div>Jenis: <span className={`${styles.textTitle} font-medium`}>{pkg.type}</span></div>
+                            <div className="flex items-center gap-1">Maskapai: <Plane className="w-3 h-3 text-blue-500" /> <span className={styles.textTitle}>{pkg.airline || '-'}</span></div>
+                            <div>Tgl Keberangkatan: <span className={styles.textTitle}>{formatDateDDMMYYYY(pkg.departureDate)}</span></div>
+                            <div>Destinasi/Kota: <span className={styles.textTitle}>{pkg.destinationCity || '-'}</span></div>
+                            <div className="flex items-center gap-2">
+                              Sisa Seat:
+                              <span className={`px-3 py-1 rounded-full text-[11px] font-bold whitespace-nowrap inline-block ${
+                                remainingQuota > 5
+                                  ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                                  : 'bg-rose-500/10 text-rose-500 border border-rose-500/20'
+                              }`}>
+                                {remainingQuota} / {totalQuota}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2 pt-2">
+                            <button
+                              onClick={() => handleOpenItinerary(pkg)}
+                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-purple-500 rounded-lg transition-colors`}
+                              title="Itinerary Perjalanan"
+                            >
+                              <ListOrdered className="w-4 h-4" />
+                            </button>
+                            {canManagePackages && (
+                              <button
+                                onClick={() => handleOpenEdit(pkg)}
+                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                                title="Edit Paket"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
 
       {/* MODAL ADAPTIF */}
       {showModal && (
