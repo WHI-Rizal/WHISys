@@ -26,6 +26,7 @@ const chunkArray = (arr, size = 30) => {
 const LEAD_SOURCE_OPTIONS = [
   'Ads',
   'Alumni',
+  'Ads + Alumni',
   'Pameran',
   'War Group WA',
   'Konsorsium',
