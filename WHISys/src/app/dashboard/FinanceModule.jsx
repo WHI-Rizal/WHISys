@@ -365,6 +365,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   const [closingTcQuickMonth, setClosingTcQuickMonth] = useState(() => getPeriodKey(todayISODate()));
   const [expandedClosingTcIds, setExpandedClosingTcIds] = useState([]);
 
+  // Sub-laporan "Sumber Lead per Bulan" — komposisi closing/seat per sumber
+  // lead (Ads, Alumni, Pameran, dst — diisi TC/Sales pas registrasi booking
+  // di modul Booking) buat 1 bulan terpilih. leadSourceMetric nentuin basis
+  // hitungnya: 'purchase' = jumlah closing/pemesanan (1 grup = 1 closing,
+  // pax tunggal juga dihitung 1), 'seat' = jumlah pax/seat (1 booking = 1 seat).
+  const [leadSourcePeriod, setLeadSourcePeriod] = useState(() => getPeriodKey(todayISODate()));
+  const [leadSourceMetric, setLeadSourceMetric] = useState('purchase');
+
   // Modal "Riwayat Mutasi" per akun Kas/Bank — mirip rekening koran, buat
   // rekonsiliasi manual sama mutasi bank asli.
   const [showMutationsModal, setShowMutationsModal] = useState(false);
@@ -1601,6 +1609,88 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     totalPax: acc.totalPax + tc.totalPax
   }), { totalClosing: 0, totalPax: 0 });
 
+  // ================= Laporan > Sumber Lead per Bulan =================
+  // Komposisi closing/seat per Sumber Lead (diisi TC/Sales pas registrasi
+  // booking) buat 1 bulan terpilih — dipisah dari Closing TC di atas karena
+  // ini soal DARI MANA calon jamaah kenal WHI, bukan siapa yang closing-in.
+  const leadSourceAvailablePeriods = Array.from(new Set(
+    bookingsList.map(bk => getPeriodKey(bk.createdAt)).filter(Boolean)
+  )).sort().reverse();
+
+  const LEAD_SOURCE_COLORS = ['#3b82f6', '#f97316', '#10b981', '#f59e0b', '#ec4899', '#6366f1', '#ef4444', '#22c55e', '#a855f7', '#14b8a6'];
+
+  const leadSourceReport = (() => {
+    const bookingsInPeriod = bookingsList.filter(bk => getPeriodKey(bk.createdAt) === leadSourcePeriod);
+
+    // Basis "Purchase" = jumlah closing/pemesanan — 1 grup rombongan (dikenali
+    // dari groupBookingCode) dihitung 1x, biar nggak keganda per-pax. Basis
+    // "Seat" = jumlah pax/seat — tiap dokumen booking dihitung apa adanya
+    // (persis pola getPackageSeatInfo di modul Paket).
+    const bucket = {};
+    const seenGroupKeys = new Set();
+
+    bookingsInPeriod.forEach(bk => {
+      const label = (bk.leadSource || '').trim() || 'Tidak Diisi';
+      if (leadSourceMetric === 'seat') {
+        bucket[label] = (bucket[label] || 0) + 1;
+      } else {
+        const groupKey = bk.groupBookingCode || bk.bookingCode || bk.id;
+        if (seenGroupKeys.has(groupKey)) return;
+        seenGroupKeys.add(groupKey);
+        bucket[label] = (bucket[label] || 0) + 1;
+      }
+    });
+
+    const total = Object.values(bucket).reduce((a, b) => a + b, 0);
+    const entries = Object.entries(bucket)
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Sumber dengan kontribusi kecil (di luar 8 besar, atau share < 2%)
+    // digabung jadi 1 slice "Lainnya" biar pie-nya tetap kebaca.
+    const MAX_SLICES = 8;
+    const MIN_SHARE = 0.02;
+    const top = [];
+    let othersCount = 0;
+    entries.forEach((entry, idx) => {
+      const share = total > 0 ? entry.count / total : 0;
+      if (idx < MAX_SLICES && share >= MIN_SHARE) {
+        top.push({ ...entry });
+      } else {
+        othersCount += entry.count;
+      }
+    });
+    if (othersCount > 0) {
+      const existingLainnya = top.find(e => e.label === 'Lainnya');
+      if (existingLainnya) {
+        existingLainnya.count += othersCount;
+      } else {
+        top.push({ label: 'Lainnya', count: othersCount });
+      }
+    }
+    top.sort((a, b) => b.count - a.count);
+
+    const slices = top.map((entry, idx) => ({
+      ...entry,
+      percent: total > 0 ? (entry.count / total) * 100 : 0,
+      color: LEAD_SOURCE_COLORS[idx % LEAD_SOURCE_COLORS.length]
+    }));
+
+    return { slices, total };
+  })();
+
+  const leadSourceConicGradient = (() => {
+    if (leadSourceReport.slices.length === 0) return null;
+    let cursor = 0;
+    const stops = leadSourceReport.slices.map(s => {
+      const start = cursor;
+      const end = cursor + s.percent;
+      cursor = end;
+      return `${s.color} ${start}% ${end}%`;
+    });
+    return `conic-gradient(${stops.join(', ')})`;
+  })();
+
   const toggleClosingTcExpand = (tcId) => {
     setExpandedClosingTcIds(prev => prev.includes(tcId) ? prev.filter(id => id !== tcId) : [...prev, tcId]);
   };
@@ -2445,6 +2535,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             >
               Kas & Bank
             </button>
+            <button
+              onClick={() => setReportsSubTab('lead_source')}
+              className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${
+                reportsSubTab === 'lead_source' ? `${styles.tabActive} text-indigo-500 border` : `${styles.textSub} hover:${styles.textTitle}`
+              }`}
+            >
+              Sumber Lead
+            </button>
             {/* — sub-tab laporan berikutnya nyusul di sini — */}
           </div>
 
@@ -3086,6 +3184,80 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                     ))
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {reportsSubTab === 'lead_source' && (
+            <div className="space-y-4">
+              <div className={`${styles.cardBg} border rounded-xl p-4`}>
+                <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-3 mb-4">
+                  <div>
+                    <h4 className={`text-sm font-bold ${styles.textTitle}`}>Sumber Lead per Bulan</h4>
+                    <p className={`text-xs ${styles.textSub} mt-1`}>
+                      Komposisi {leadSourceMetric === 'seat' ? 'seat' : 'closing'} per sumber lead untuk bulan terpilih. Sumber dengan kontribusi kecil digabung ke "Lainnya".
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
+                      value={leadSourcePeriod}
+                      onChange={e => setLeadSourcePeriod(e.target.value)}
+                    >
+                      {!leadSourceAvailablePeriods.includes(leadSourcePeriod) && (
+                        <option value={leadSourcePeriod}>{formatPeriodLabel(leadSourcePeriod)}</option>
+                      )}
+                      {leadSourceAvailablePeriods.map(p => (
+                        <option key={p} value={p}>{formatPeriodLabel(p)}</option>
+                      ))}
+                    </select>
+                    <div className={`flex items-center rounded-lg border ${isDark ? 'border-slate-700' : 'border-slate-200'} overflow-hidden text-xs font-medium`}>
+                      <button
+                        type="button"
+                        onClick={() => setLeadSourceMetric('purchase')}
+                        className={`px-3 py-2 transition-colors ${
+                          leadSourceMetric === 'purchase' ? 'bg-indigo-600 text-white' : `${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-100'}`
+                        }`}
+                      >
+                        Purchase
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLeadSourceMetric('seat')}
+                        className={`px-3 py-2 transition-colors border-l ${isDark ? 'border-slate-700' : 'border-slate-200'} ${
+                          leadSourceMetric === 'seat' ? 'bg-indigo-600 text-white' : `${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-100'}`
+                        }`}
+                      >
+                        Seat
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {leadSourceReport.total === 0 ? (
+                  <div className={`p-10 text-center text-xs ${styles.textSub}`}>Belum ada data booking dengan Sumber Lead terisi untuk periode ini.</div>
+                ) : (
+                  <div className="flex flex-col md:flex-row items-center gap-8 py-2">
+                    <div
+                      className="w-56 h-56 rounded-full flex-shrink-0"
+                      style={{ background: leadSourceConicGradient }}
+                      title={`Total: ${leadSourceReport.total}`}
+                    />
+                    <div className="flex-1 w-full space-y-2">
+                      {leadSourceReport.slices.map((s) => (
+                        <div key={s.label} className="flex items-center justify-between gap-3 text-xs">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
+                            <span className={`${styles.textTitle} truncate`}>{s.label}</span>
+                          </div>
+                          <span className={`${styles.textSub} whitespace-nowrap`}>
+                            {s.count} ({s.percent.toFixed(0)}%)
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
