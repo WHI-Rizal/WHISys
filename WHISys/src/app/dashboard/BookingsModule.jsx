@@ -19,6 +19,32 @@ const chunkArray = (arr, size = 30) => {
   return out;
 };
 
+// Daftar baku pilihan "Sumber Lead" — dari mana calon jamaah awalnya kenal
+// WHI, dipakai TC/Sales pas registrasi booking. "Lainnya" mancing input teks
+// bebas (formData.leadSourceOther) buat sumber yang belum ada di daftar,
+// biar tetap kecatet tanpa perlu ubah kode tiap kali ada kanal baru.
+const LEAD_SOURCE_OPTIONS = [
+  'Ads',
+  'Alumni',
+  'Pameran',
+  'War Group WA',
+  'Konsorsium',
+  'Reseller/Mitra',
+  'Referral / Rekomendasi',
+  'Website',
+  'Lead Lama',
+  'Lainnya'
+];
+
+// Resolve pilihan dropdown Sumber Lead (+ teks bebas kalau "Lainnya") jadi 1
+// string flat yang disimpan ke field `leadSource` booking — biar laporan
+// tinggal group-by 1 field, nggak perlu tau soal "Lainnya" + field lain lagi.
+const resolveLeadSource = (fd) => {
+  if (!fd) return '';
+  if (fd.leadSource === 'Lainnya') return (fd.leadSourceOther || '').trim();
+  return fd.leadSource || '';
+};
+
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
   const date = new Date(dateString);
@@ -324,7 +350,14 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     // "Hubungkan Pemesanan ke Mitra" di modul Mitra & Agen.
     closingSourceType: '',
     closingSourceId: '',
-    closingSourceName: ''
+    closingSourceName: '',
+    // Sumber Lead — dari mana calon jamaah ini awalnya kenal WHI (Ads,
+    // Alumni, Pameran, War Group WA, dst), BEDA sama "Sumber Closing" di
+    // atas (yang nyatet TC/Mitra mana yang closing-in). Dipakai buat
+    // analisa "Sumber Lead per Bulan" di menu Keuangan & Pelunasan >
+    // Laporan. leadSourceOther cuma keisi kalau leadSource === 'Lainnya'.
+    leadSource: '',
+    leadSourceOther: ''
   });
 
   // Draft form buat nambah/edit 1 baris di tabel "Biaya Tambahan" & "Potongan
@@ -821,7 +854,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       initialPayment: '', paymentMethod: 'Transfer Bank', accountId: '', paymentNotes: 'DP Pendaftaran',
       paymentDate: todayDateStr(),
       extraCharges: [], extraDiscounts: [],
-      closingSourceType: '', closingSourceId: '', closingSourceName: ''
+      closingSourceType: '', closingSourceId: '', closingSourceName: '',
+      leadSource: '', leadSourceOther: ''
     });
     setChargeDraft({ name: '', amount: '', notes: '' });
     setEditingChargeId(null);
@@ -862,7 +896,14 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       // dikoreksi belakangan, misal salah pilih TC pas awal input).
       closingSourceType: item.closingSourceType || '',
       closingSourceId: item.closingSourceId || '',
-      closingSourceName: item.closingSourceName || ''
+      closingSourceName: item.closingSourceName || '',
+      // Prefill Sumber Lead — kalau nilai tersimpannya persis salah satu
+      // opsi baku, pilih langsung di dropdown; kalau nggak (teks bebas dari
+      // "Lainnya" atau data lama), arahkan ke opsi "Lainnya" + isi teksnya.
+      leadSource: item.leadSource
+        ? (LEAD_SOURCE_OPTIONS.includes(item.leadSource) ? item.leadSource : 'Lainnya')
+        : '',
+      leadSourceOther: item.leadSource && !LEAD_SOURCE_OPTIONS.includes(item.leadSource) ? item.leadSource : ''
     });
     setChargeDraft({ name: '', amount: '', notes: '' });
     setEditingChargeId(null);
@@ -1535,6 +1576,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         // eksklusif Finance/Super Admin, cuma kepemilikannya yang di-carry).
         createdByUid: oldBooking.createdByUid || '',
         createdByName: oldBooking.createdByName || '',
+        // Sumber Lead ikut dibawa dari booking lama, biar analisa "Sumber
+        // Lead per Bulan" nggak kehilangan jejak asal lead cuma gara-gara
+        // pesertanya reschedule.
+        leadSource: oldBooking.leadSource || '',
         createdAt: new Date().toISOString()
       });
 
@@ -2030,6 +2075,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         // pax dalam 1 grup kudu "milik" orang yang sama).
         createdByUid: groupEditTarget.primary?.createdByUid || '',
         createdByName: groupEditTarget.primary?.createdByName || '',
+        // Sumber Lead ikutin punya grupnya (pax pertama) — 1 closing = 1 sumber lead yang sama.
+        leadSource: groupEditTarget.primary?.leadSource || '',
         createdAt: new Date().toISOString()
       });
 
@@ -2351,6 +2398,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           // booking aslinya tetap bisa Edit booking hasil reschedule grup ini.
           createdByUid: oldBooking.createdByUid || '',
           createdByName: oldBooking.createdByName || '',
+          leadSource: oldBooking.leadSource || '',
           createdAt: nowIso
         });
 
@@ -3518,6 +3566,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           closingSourceType: formData.closingSourceType || '',
           closingSourceId: formData.closingSourceId || '',
           closingSourceName: formData.closingSourceName || '',
+          leadSource: resolveLeadSource(formData),
           updatedAt: new Date().toISOString()
         });
 
@@ -3602,6 +3651,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             closingSourceType: formData.closingSourceType || '',
             closingSourceId: formData.closingSourceId || '',
             closingSourceName: formData.closingSourceName || '',
+            leadSource: resolveLeadSource(formData),
             // Dicatat otomatis pas booking dibuat — dipakai buat nentuin siapa
             // yang boleh Edit booking ini belakangan kalau yang bikin TC/Sales
             // (lihat canEditOwnBooking di atas: Finance/Super Admin tetap bebas
@@ -3714,6 +3764,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               closingSourceType: formData.closingSourceType || '',
               closingSourceId: formData.closingSourceId || '',
               closingSourceName: formData.closingSourceName || '',
+              leadSource: resolveLeadSource(formData),
               // Sama kayak alur 1 pax — dipakai buat cek kepemilikan pas
               // TC/Sales mau Edit booking ini belakangan (canEditOwnBooking).
               createdByUid: currentUser?.uid || '',
@@ -4543,6 +4594,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                   <div className={`mt-2 space-y-1 ${styles.textSub}`}>
                     <div><span className="font-medium">Pemesan:</span> {group.primary.ordererName || '-'}</div>
                     <div><span className="font-medium">Closingan:</span> {group.primary.closingSourceName || '-'}</div>
+                    <div><span className="font-medium">Sumber Lead:</span> {group.primary.leadSource || '-'}</div>
                     <div><span className="font-medium">Keberangkatan:</span> {formatDateDDMMYYYY(group.primary.departureDate)}</div>
                     <div><span className="font-medium">Jumlah Pax:</span> {group.paxCount} Pax</div>
                     <div><span className="font-medium">Waktu Transaksi:</span> {formatDateTimeID(group.earliestCreatedAt)}</div>
@@ -4917,6 +4969,38 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                 {formData.closingSourceType === 'partner' && (
                   <p className="text-[10px] opacity-70">Ini cuma catetan referensi. Komisi aktual buat Mitra/Agen tetap diformalkan lewat "Hubungkan Pemesanan ke Mitra" di menu Mitra & Agen.</p>
                 )}
+              </div>
+
+              <div className={`${styles.innerBg} p-4 rounded-xl border space-y-3`}>
+                <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">Sumber Lead (Opsional)</p>
+                <p className="text-[10px] opacity-70 -mt-2">Dari mana calon jamaah ini awalnya kenal WHI (Ads, Alumni, Pameran, dsb) — beda sama Sumber Closing di atas. Dipakai buat analisa "Sumber Lead per Bulan" di menu Keuangan &gt; Laporan.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block mb-1 font-medium">Sumber Lead</label>
+                    <select
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={formData.leadSource}
+                      onChange={e => setFormData({ ...formData, leadSource: e.target.value, leadSourceOther: e.target.value === 'Lainnya' ? formData.leadSourceOther : '' })}
+                    >
+                      <option value="">-- Tidak Diisi --</option>
+                      {LEAD_SOURCE_OPTIONS.map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {formData.leadSource === 'Lainnya' && (
+                    <div>
+                      <label className="block mb-1 font-medium">Sebutkan Sumber Lead</label>
+                      <input
+                        type="text"
+                        placeholder="mis. TikTok, Google Search, dst"
+                        className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                        value={formData.leadSourceOther}
+                        onChange={e => setFormData({ ...formData, leadSourceOther: e.target.value })}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
 
               {!editingBookingId && formData.packageId && (() => {
