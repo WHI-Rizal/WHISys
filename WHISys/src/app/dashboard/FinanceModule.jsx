@@ -505,7 +505,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       
       if (targetBk) {
         const totalAmount = Number(targetBk.data().totalAmount) || 0;
-        const status = totalPaidReal >= totalAmount ? 'Full Payment' : 'DP Paid';
+        // Sama kayak versi di BookingsModule.jsx — kalau semua setoran booking
+        // ini kehapus sampai totalPaidReal balik ke 0, statusnya harus balik
+        // ke "Belum Bayar", bukan nyangkut di "DP Paid".
+        const status = totalPaidReal <= 0 ? 'Belum Bayar' : (totalPaidReal >= totalAmount ? 'Full Payment' : 'DP Paid');
 
         await updateDoc(doc(db, 'bookings', bookingId), {
           totalPaid: totalPaidReal,
@@ -1094,6 +1097,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   };
 
   const handleDeleteVendorPayment = async (vp) => {
+    // Sama kayak hapus setoran jamaah — kalau paket terkait pembayaran vendor
+    // ini omzet/HPP-nya udah "diakui" (masuk Laporan P&L), hapus DIBLOK dulu
+    // biar angka yang udah dilaporkan nggak berubah diam-diam.
+    const recognizedPkg = findPackageForVendor(vp);
+    if (recognizedPkg && recognizedPkg.revenueRecognized) {
+      alert(`Pembayaran vendor ini tidak dapat dihapus karena paket "${recognizedPkg.name}" omzet & HPP-nya sudah "Diakui" dan sudah masuk Laporan P&L.\n\nBatalkan dulu pengakuan pendapatan paket ini lewat tombol "Batalkan Pengakuan" di tab Riwayat Bayar Vendor/Laporan, baru pembayaran ini bisa dihapus/dikoreksi.`);
+      return;
+    }
     if (vp.convertedToDeposit) {
       if (!confirm(`PERHATIAN: transaksi ini udah pernah dikonversi jadi Saldo Deposit Vendor (Rp ${Number(vp.convertedAmount || 0).toLocaleString('id-ID')}). Menghapus catatan aslinya TIDAK otomatis narik balik saldo deposit yang udah kebentuk itu. Kalau emang mau dikoreksi, sesuaikan juga saldo deposit vendornya secara manual. Tetap lanjut hapus?`)) return;
     } else {
@@ -1301,9 +1312,30 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   };
 
   const handleDeleteIncomeRow = async (row) => {
-    const confirmMsg = row.isMerged
+    // Kalau paket terkait setoran ini omzetnya udah "diakui" (masuk Laporan
+    // P&L periode tertentu), hapus setoran ini DIBLOK dulu — kalau nggak,
+    // angka omset yang udah dilaporkan ke owner bisa berubah diam-diam tanpa
+    // jejak. Staff harus "Batalkan Pengakuan Pendapatan" paket itu dulu
+    // (modul Paket ini balik ke status Diterima/Dibayar Dimuka, keluar dari
+    // P&L), baru boleh hapus/koreksi setorannya.
+    const recognizedPkg = row.docs.map(d => findPackageForIncome(d)).find(pkg => pkg && pkg.revenueRecognized);
+    if (recognizedPkg) {
+      alert(`Setoran ini tidak dapat dihapus karena paket "${recognizedPkg.name}" omzetnya sudah "Diakui" dan sudah masuk Laporan P&L.\n\nBatalkan dulu pengakuan pendapatan paket ini lewat tombol "Batalkan Pengakuan" di tab Riwayat Setoran Jamaah/Laporan, baru setoran ini bisa dihapus/dikoreksi.`);
+      return;
+    }
+    let confirmMsg = row.isMerged
       ? `Hapus transaksi setoran gabungan senilai Rp ${row.amount.toLocaleString('id-ID')} ini? Ini akan menghapus ${row.docs.length} catatan setoran split (per peserta) yang jadi bagiannya sekaligus.`
       : "Apakah Anda yakin ingin menghapus catatan transaksi setoran ini?";
+    // Setoran yang dibayar pakai Saldo Deposit nggak punya accountId — saldo
+    // Kas/Bank memang nggak perlu disesuaikan (uangnya emang bukan uang baru
+    // masuk), TAPI saldo Deposit Pemesan yang udah kepotong pas setoran ini
+    // dicatat SENGAJA nggak otomatis dibalikin di sini (lihat komentar di
+    // bawah) — staff gampang lupa itu kalau nggak diingetin di titik ini.
+    const depositDocs = row.docs.filter(d => d.paymentMethod === 'Saldo Deposit');
+    if (depositDocs.length > 0) {
+      const depositTotal = depositDocs.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
+      confirmMsg += `\n\nPERHATIAN: Rp ${depositTotal.toLocaleString('id-ID')} dari transaksi ini dibayar pakai Saldo Deposit — saldo Deposit Pemesan yang udah kepotong TIDAK akan otomatis dikembalikan. Kalau setoran ini dihapus karena salah catat, koreksi saldo Deposit Pemesan-nya secara manual lewat modul Data Master Jamaah/Booking.`;
+    }
     if (!confirm(confirmMsg)) return;
     try {
       await Promise.all(row.docs.map(d => deleteDoc(doc(db, 'payments_income', d.id))));
