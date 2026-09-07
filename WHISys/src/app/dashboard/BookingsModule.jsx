@@ -707,12 +707,27 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     return !!(paymentDateStr && minDate && paymentDateStr < minDate);
   };
 
+  // Status pembayaran booking — dipakai di banyak tempat (bikin booking baru,
+  // reschedule, tambah pax ke grup, sync ulang setelah edit/hapus setoran).
+  // SEBELUMNYA cuma ternary 2 opsi (Full Payment / DP Paid), jadi kalau
+  // seluruh setoran suatu booking dihapus sampai totalPaid balik ke 0,
+  // statusnya nyangkut di "DP Paid" — padahal harusnya balik ke "Belum
+  // Bayar". Sekarang 3 opsi, `paidAmount <= 0` selalu "Belum Bayar" apapun
+  // totalAmount-nya (termasuk kalau totalAmount juga 0/belum keisi).
+  const resolvePaymentStatus = (paidAmount, totalAmount) => {
+    const paid = Number(paidAmount) || 0;
+    const total = Number(totalAmount) || 0;
+    if (paid <= 0) return 'Belum Bayar';
+    if (paid >= total) return 'Full Payment';
+    return 'DP Paid';
+  };
+
   const syncBookingTotalPaid = async (bookingId, totalTagihan) => {
     try {
       const q = query(collection(db, 'payments_income'), where('bookingId', '==', bookingId));
       const snap = await getDocs(q);
       const totalPaidReal = snap.docs.reduce((acc, curr) => acc + (Number(curr.data().amount) || 0), 0);
-      const status = totalPaidReal >= totalTagihan ? 'Full Payment' : 'DP Paid';
+      const status = resolvePaymentStatus(totalPaidReal, totalTagihan);
 
       await updateDoc(doc(db, 'bookings', bookingId), {
         totalPaid: totalPaidReal,
@@ -1509,6 +1524,15 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       alert("Pilih akun Kas/Bank sumber dana refund ini dulu.");
       return;
     }
+    // Nominal refund nggak boleh lebih besar dari yang beneran udah disetor
+    // jamaah ini — kalau nggak dicek, saldo Kas/Bank (atau Saldo Deposit
+    // Pemesan) bisa dikurangi/ditambah lebih dari uang yang sebenarnya
+    // pernah diterima, tanpa peringatan apapun.
+    const totalPaidForRefund = Number(selectedBookingForAction.totalPaid || 0);
+    if (refundAmountVal > totalPaidForRefund) {
+      alert(`Nominal refund (Rp ${refundAmountVal.toLocaleString('id-ID')}) tidak boleh lebih besar dari total setoran yang sudah diterima booking ini (Rp ${totalPaidForRefund.toLocaleString('id-ID')}).`);
+      return;
+    }
 
     try {
       await updateDoc(doc(db, 'bookings', selectedBookingForAction.id), {
@@ -1615,7 +1639,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         busGroup: rescheduleForm.busGroup,
         totalAmount: newPrice,
         totalPaid: carryOverAmount,
-        paymentStatus: carryOverAmount >= newPrice ? 'Full Payment' : 'DP Paid',
+        paymentStatus: resolvePaymentStatus(carryOverAmount, newPrice),
         documents: oldBooking.documents || {
           passport: false, ktp_foto: false, family_cert: false, sponsor_letter: false,
           bank_statement: false, vaccine_cert: false, visa: false, ticket: false
@@ -2447,7 +2471,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           busGroup: groupRescheduleForm.busGroup,
           totalAmount: newPrice,
           totalPaid: carryOverAmount,
-          paymentStatus: carryOverAmount >= newPrice ? 'Full Payment' : 'DP Paid',
+          paymentStatus: resolvePaymentStatus(carryOverAmount, newPrice),
           documents: oldBooking.documents || {
             passport: false, ktp_foto: false, family_cert: false, sponsor_letter: false,
             bank_statement: false, vaccine_cert: false, visa: false, ticket: false
@@ -2546,6 +2570,17 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     const totalRefund = Number(groupCancelForm.refundAmount || 0);
     if (groupCancelForm.refundMethod !== 'Deposit / Saldo Akun' && totalRefund > 0 && !groupCancelForm.refundAccountId) {
       alert("Pilih akun Kas/Bank sumber dana refund ini dulu.");
+      return;
+    }
+    // Sama kayak pembatalan per-pax — nominal refund total nggak boleh
+    // lebih besar dari total setoran yang beneran udah masuk dari seluruh
+    // peserta AKTIF grup ini (yang cancelled/rescheduled sebelumnya nggak
+    // ikut dihitung, uangnya udah diurus di proses itu masing-masing).
+    const totalPaidActiveForRefund = groupCancelTarget.items
+      .filter(b => (b.status || 'active') === 'active')
+      .reduce((acc, b) => acc + (Number(b.totalPaid) || 0), 0);
+    if (totalRefund > totalPaidActiveForRefund) {
+      alert(`Nominal refund (Rp ${totalRefund.toLocaleString('id-ID')}) tidak boleh lebih besar dari total setoran yang sudah diterima dari seluruh peserta aktif grup ini (Rp ${totalPaidActiveForRefund.toLocaleString('id-ID')}).`);
       return;
     }
 
@@ -3730,7 +3765,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             extraDiscounts: formDiscounts,
             totalAmount: singleTotalAmount,
             totalPaid: paymentVal,
-            paymentStatus: paymentVal >= singleTotalAmount ? 'Full Payment' : 'DP Paid',
+            paymentStatus: resolvePaymentStatus(paymentVal, singleTotalAmount),
             documents: emptyDocChecklist,
             closingSourceType: formData.closingSourceType || '',
             closingSourceId: formData.closingSourceId || '',
@@ -3839,7 +3874,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               extraDiscounts: paxDiscounts,
               totalAmount: paxTotalAmount,
               totalPaid: paxShare,
-              paymentStatus: paxShare >= paxTotalAmount ? 'Full Payment' : 'DP Paid',
+              paymentStatus: resolvePaymentStatus(paxShare, paxTotalAmount),
               documents: emptyDocChecklist,
               // Sumber Closing sama buat semua pax dalam grup ini (1 closing =
               // 1 pemesanan, bukan per pax) — nominal komisi TC ditulis apa
