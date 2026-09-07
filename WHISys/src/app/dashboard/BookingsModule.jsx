@@ -2707,13 +2707,12 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         }];
 
     // HTML siap-pakai buat ditaruh langsung di kotak "Informasi Pembayaran"
-    // invoice — kalau rekeningnya lebih dari satu, dikasih label "Rekening 1",
-    // "Rekening 2", dst biar jamaah nggak bingung mau transfer ke mana.
-    const bankAccountsHtml = bankAccountsList.map((acc, idx) => `
-              ${bankAccountsList.length > 1 ? `<strong>Rekening ${idx + 1}:</strong><br>` : ''}
-              Bank: <strong>${acc.bankName}</strong><br>
-              No. Rekening & A.N: <strong>${acc.bankAccount}</strong>`
-    ).join('<div style="height: 10px;"></div>');
+    // invoice — dibikin RINGKAS, 1 baris per rekening (Nama Bank — No.
+    // Rekening & A.N), biar nggak makan tempat walau rekeningnya lebih dari
+    // satu.
+    const bankAccountsHtml = bankAccountsList.map(acc => `
+              <div style="margin-top: 2px;">Bank <strong>${acc.bankName}</strong> — No. Rek: <strong>${acc.bankAccount}</strong></div>`
+    ).join('');
 
     return {
       compName: companyInfo?.name || 'PT. WISATA HALAL INTERNASIONAL',
