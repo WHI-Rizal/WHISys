@@ -2809,7 +2809,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         <div class="kop-header">
           <div>
             <h1 class="company-logo-title">${compName}</h1>
-            <p class="company-sub">Penyelenggara Perjalanan Ibadah Umrah, Haji & Wisata Halal</p>
+            <p class="company-sub">Penyelenggara Perjalanan Wisata Halal</p>
             <p class="company-address">
               ${compAddress}<br>
               Telp/WA: ${compPhone} | Email: ${compEmail}
@@ -3135,7 +3135,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         <div class="kop-header">
           <div>
             <h1 class="company-logo-title">${compName}</h1>
-            <p class="company-sub">Penyelenggara Perjalanan Ibadah Umrah, Haji & Wisata Halal</p>
+            <p class="company-sub">Penyelenggara Perjalanan Wisata Halal</p>
             <p class="company-address">
               ${compAddress}<br>
               Telp/WA: ${compPhone} | Email: ${compEmail}
