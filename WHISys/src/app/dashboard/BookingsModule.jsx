@@ -207,6 +207,34 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   // Finance & Super Admin doang di atas).
   const canRecordPayment = true;
 
+  // TC/Sales sekarang dibolehkan EDIT booking yang MEREKA SENDIRI yang buat
+  // dulunya — bukan bebas edit punya siapa aja (itu tetap eksklusif Finance
+  // & Super Admin, lihat canManageBookings di atas). Kepemilikan dicek dari
+  // field createdByUid yang dicatat otomatis pas booking dibuat. Buat data
+  // LAMA yang belum punya field itu (dibuat sebelum fitur ini ada),
+  // fallback-nya cocokkan closingSourceName booking itu sama nama staff yang
+  // lagi login — asumsinya TC/Sales nyatet closingan atas nama dirinya sendiri.
+  const canEditOwnBooking = (item) => {
+    if (canManageBookings) return true;
+    if (!isSales && !isOperational) return false;
+    if (!item) return false;
+    const myUid = currentUser?.uid || '';
+    if (myUid && item.createdByUid && item.createdByUid === myUid) return true;
+    const myName = (currentUser?.fullName || '').trim().toLowerCase();
+    const closingName = (item.closingSourceName || '').trim().toLowerCase();
+    if (myName && closingName && myName === closingName) return true;
+    return false;
+  };
+
+  // Versi buat GRUP (rombongan) — semua pax dalam grup itu harus lolos cek
+  // kepemilikan di atas, biar nggak ada 1-2 pax "nyempil" punya orang lain
+  // ikut keedit bareng pas TC/Sales edit grupnya.
+  const canEditOwnGroup = (group) => {
+    if (canManageBookings) return true;
+    if (!group || !Array.isArray(group.items) || group.items.length === 0) return false;
+    return group.items.every(item => canEditOwnBooking(item));
+  };
+
   const isDark = theme === 'dark';
 
   const styles = {
@@ -804,8 +832,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   };
 
   const handleOpenEditModal = (item) => {
-    if (!canManageBookings) {
-      alert("Cuma Finance & Super Admin yang boleh mengedit booking.");
+    if (!canEditOwnBooking(item)) {
+      alert("Cuma Finance & Super Admin, atau TC/Sales yang bikin booking ini sendiri, yang boleh mengedit booking.");
       return;
     }
     setEditingBookingId(item.id);
@@ -1501,6 +1529,12 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         },
         rescheduledFromBookingId: oldBooking.id,
         rescheduledFromBookingCode: oldBooking.bookingCode,
+        // Bawa terus kepemilikan (createdByUid/Name) dari booking lama ke
+        // booking hasil reschedule — biar TC/Sales yang bikin booking aslinya
+        // tetap bisa Edit booking barunya juga (reschedule sendiri tetap
+        // eksklusif Finance/Super Admin, cuma kepemilikannya yang di-carry).
+        createdByUid: oldBooking.createdByUid || '',
+        createdByName: oldBooking.createdByName || '',
         createdAt: new Date().toISOString()
       });
 
@@ -1872,8 +1906,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   // yang udah jalan. Cuma edit field yang emang shared se-grup: Paket, Pemesan,
   // Tipe Kamar, Alokasi Bus. Identitas peserta TETAP di Edit per-peserta.
   const handleOpenGroupEditModal = (group) => {
-    if (!canManageBookings) {
-      alert("Cuma Finance & Super Admin yang boleh mengedit booking.");
+    if (!canEditOwnGroup(group)) {
+      alert("Cuma Finance & Super Admin, atau TC/Sales yang bikin booking ini sendiri, yang boleh mengedit booking.");
       return;
     }
     setGroupEditTarget(group);
@@ -1991,6 +2025,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         totalPaid: 0,
         paymentStatus: 'Belum Bayar',
         documents: emptyDocChecklist,
+        // Ikutin kepemilikan pax pertama di grup ini (kalau ada) — biar grup
+        // ini tetap konsisten kepemilikannya buat cek canEditOwnGroup (semua
+        // pax dalam 1 grup kudu "milik" orang yang sama).
+        createdByUid: groupEditTarget.primary?.createdByUid || '',
+        createdByName: groupEditTarget.primary?.createdByName || '',
         createdAt: new Date().toISOString()
       });
 
@@ -2014,8 +2053,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   const handleGroupEditSubmit = async (e) => {
     e.preventDefault();
     if (!groupEditTarget) return;
-    if (!canManageBookings) {
-      alert("Cuma Finance & Super Admin yang boleh mengedit booking.");
+    if (!canEditOwnGroup(groupEditTarget)) {
+      alert("Cuma Finance & Super Admin, atau TC/Sales yang bikin booking ini sendiri, yang boleh mengedit booking.");
       return;
     }
     if (!groupEditForm.packageId) {
@@ -2307,6 +2346,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
           },
           rescheduledFromBookingId: oldBooking.id,
           rescheduledFromBookingCode: oldBooking.bookingCode,
+          // Bawa terus kepemilikan (createdByUid/Name) dari booking lama —
+          // sama kayak reschedule per-peserta, biar TC/Sales yang bikin
+          // booking aslinya tetap bisa Edit booking hasil reschedule grup ini.
+          createdByUid: oldBooking.createdByUid || '',
+          createdByName: oldBooking.createdByName || '',
           createdAt: nowIso
         });
 
@@ -3441,11 +3485,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       const payAccount = financialAccounts.find(a => a.id === formData.accountId);
 
       if (editingBookingId) {
-        if (!canManageBookings) {
-          alert("Cuma Finance & Super Admin yang boleh mengedit booking.");
+        const currentBooking = bookings.find(b => b.id === editingBookingId);
+        if (!canEditOwnBooking(currentBooking)) {
+          alert("Cuma Finance & Super Admin, atau TC/Sales yang bikin booking ini sendiri, yang boleh mengedit booking.");
           return;
         }
-        const currentBooking = bookings.find(b => b.id === editingBookingId);
         if (paymentVal > 0 && isPaymentDateBeforeBooking(formData.paymentDate, currentBooking?.createdAt)) {
           const minDate = getBookingMinDate(currentBooking?.createdAt);
           alert(`Tanggal setoran tambahan nggak boleh sebelum tanggal pemesanan ${currentBooking?.bookingCode || ''} dibuat (${minDate.split('-').reverse().join('/')}).`);
@@ -3558,6 +3602,12 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             closingSourceType: formData.closingSourceType || '',
             closingSourceId: formData.closingSourceId || '',
             closingSourceName: formData.closingSourceName || '',
+            // Dicatat otomatis pas booking dibuat — dipakai buat nentuin siapa
+            // yang boleh Edit booking ini belakangan kalau yang bikin TC/Sales
+            // (lihat canEditOwnBooking di atas: Finance/Super Admin tetap bebas
+            // edit siapa aja, TC/Sales cuma booking bikinan sendiri).
+            createdByUid: currentUser?.uid || '',
+            createdByName: currentUser?.fullName || currentUser?.email || '',
               // Waktu Transaksi booking ikut field tanggal yang diisi staff pas
             // registrasi/DP awal (formData.paymentDate) — bukan jam submit
             // sistem, biar bisa tetap akurat kalau input booking dilakukan
@@ -3664,6 +3714,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               closingSourceType: formData.closingSourceType || '',
               closingSourceId: formData.closingSourceId || '',
               closingSourceName: formData.closingSourceName || '',
+              // Sama kayak alur 1 pax — dipakai buat cek kepemilikan pas
+              // TC/Sales mau Edit booking ini belakangan (canEditOwnBooking).
+              createdByUid: currentUser?.uid || '',
+              createdByName: currentUser?.fullName || currentUser?.email || '',
                   // Sama kayak alur 1 pax — Waktu Transaksi ikut field tanggal
               // yang diisi staff, bukan jam submit sistem.
               createdAt: resolvePaymentCreatedAt(formData.paymentDate)
@@ -3982,8 +4036,10 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
               <History className="w-3.5 h-3.5" /> Riwayat Pembayaran
             </button>
 
-            {/* 2. EDIT BOOKING (GRUP) */}
-            {canManageBookings && (
+            {/* 2. EDIT BOOKING (GRUP) — Finance/Super Admin bebas, TC/Sales
+                cuma buat grup yang mereka sendiri yang bikin (semua pax di
+                grup ini kudu lolos cek kepemilikan). */}
+            {canEditOwnGroup(activeGroupSummary) && (
               <button
                 onClick={() => handleOpenGroupEditModal(activeGroupSummary)}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium transition-colors"
@@ -4176,9 +4232,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                                 </button>
                               )}
 
-                              {canManageBookings && (
+                              {canEditOwnBooking(item) && (
                                 <>
-                                  {/* TOMBOL EDIT BOOKING */}
+                                  {/* TOMBOL EDIT BOOKING — Finance/Super Admin bebas,
+                                      TC/Sales cuma buat booking yang mereka sendiri
+                                      yang bikin. */}
                                   <button
                                     onClick={() => handleOpenEditModal(item)}
                                     className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
@@ -4329,7 +4387,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                       </button>
                     )}
 
-                    {canManageBookings && (
+                    {canEditOwnBooking(item) && (
                       <button
                         onClick={() => handleOpenEditModal(item)}
                         className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
