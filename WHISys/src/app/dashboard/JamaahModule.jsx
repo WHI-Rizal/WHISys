@@ -45,6 +45,22 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
   const [editingId, setEditingId] = useState(null);
   const [isSavingJamaah, setIsSavingJamaah] = useState(false);
 
+  // Sort tabel Data Master Jamaah — klik header "Kode CST" atau "Nama
+  // Lengkap" buat urutin (klik lagi buat kebalik arahnya). Ini yang bikin
+  // gampang nyari Kode Jamaah kembar: kalau diurutin per kode, dua data yang
+  // kodenya sama bakal langsung nempel bersebelahan di tabel, gampang keliatan.
+  const [sortField, setSortField] = useState('customerCode');
+  const [sortDir, setSortDir] = useState('asc');
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
   const [formData, setFormData] = useState({
     customerCode: '',
     fullName: '',
@@ -349,6 +365,21 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
       (j.passportNumber && j.passportNumber.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
+  const sortedList = [...filteredList].sort((a, b) => {
+    const valA = (a[sortField] || '').toString();
+    const valB = (b[sortField] || '').toString();
+    // numeric: true biar "CST002" ke "CST010" keurut bener secara angka,
+    // bukan keurut per-karakter kayak string biasa (yang bakal naro
+    // "CST010" sebelum "CST002" gara-gara karakter '1' < '2' itu keliru).
+    const cmp = valA.localeCompare(valB, 'id', { numeric: true, sensitivity: 'base' });
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  const SortIcon = ({ field }) => {
+    if (sortField !== field) return <span className="inline-block w-3 opacity-30">↕</span>;
+    return <span className="inline-block w-3 text-emerald-500">{sortDir === 'asc' ? '↑' : '↓'}</span>;
+  };
+
   return (
     <div className="space-y-6">
       <div className={`flex gap-2 ${styles.cardBg} p-2 rounded-xl border w-fit`}>
@@ -383,7 +414,7 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
         </button>
       </div>
 
-      <div className={`${styles.cardBg} p-4 rounded-xl border flex items-center gap-4`}>
+      <div className={`${styles.cardBg} p-4 rounded-xl border flex flex-col sm:flex-row items-stretch sm:items-center gap-3`}>
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
           <input
@@ -394,6 +425,29 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
             className={`w-full ${styles.inputBg} pl-9 pr-4 py-2 rounded-lg text-xs focus:outline-none focus:border-emerald-500`}
           />
         </div>
+        {/* Sort dropdown — sama fungsinya kayak klik header kolom di tabel
+            desktop, tapi ini tetap keliatan/kepake di layar kecil (mobile)
+            yang nggak nampilin header tabel. Berguna banget buat nyari Kode
+            Jamaah kembar: urutin per Kode CST, data yang kodenya sama bakal
+            langsung nempel bersebelahan. */}
+        <div className="flex items-center gap-2 shrink-0">
+          <select
+            value={sortField}
+            onChange={(e) => setSortField(e.target.value)}
+            className={`${styles.inputBg} px-3 py-2 rounded-lg text-xs focus:outline-none focus:border-emerald-500`}
+          >
+            <option value="customerCode">Urutkan: Kode CST</option>
+            <option value="fullName">Urutkan: Nama Jamaah</option>
+          </select>
+          <button
+            type="button"
+            onClick={() => setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+            className={`${styles.inputBg} px-3 py-2 rounded-lg text-xs hover:text-emerald-500 transition-colors`}
+            title={sortDir === 'asc' ? 'A ke Z / kecil ke besar' : 'Z ke A / besar ke kecil'}
+          >
+            {sortDir === 'asc' ? '↑ A-Z' : '↓ Z-A'}
+          </button>
+        </div>
       </div>
 
       <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
@@ -401,8 +455,24 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
           <table className="w-full text-left text-xs">
             <thead className={`${styles.tableHeaderBg} uppercase tracking-wider border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <tr>
-                <th className="p-4">Kode CST</th>
-                <th className="p-4">Nama Lengkap & NIK</th>
+                <th className="p-4">
+                  <button
+                    type="button"
+                    onClick={() => handleSort('customerCode')}
+                    className="flex items-center gap-1 hover:text-emerald-500 transition-colors"
+                  >
+                    Kode CST <SortIcon field="customerCode" />
+                  </button>
+                </th>
+                <th className="p-4">
+                  <button
+                    type="button"
+                    onClick={() => handleSort('fullName')}
+                    className="flex items-center gap-1 hover:text-emerald-500 transition-colors"
+                  >
+                    Nama Lengkap & NIK <SortIcon field="fullName" />
+                  </button>
+                </th>
                 <th className="p-4">Gender & Kontak</th>
                 <th className="p-4">Paspor & Expiry</th>
                 <th className="p-4">Alamat</th>
@@ -414,12 +484,12 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
                 <tr>
                   <td colSpan="6" className={`p-8 text-center ${styles.textSub}`}>Memuat data jamaah...</td>
                 </tr>
-              ) : filteredList.length === 0 ? (
+              ) : sortedList.length === 0 ? (
                 <tr>
                   <td colSpan="6" className={`p-8 text-center ${styles.textSub}`}>Belum ada data jamaah.</td>
                 </tr>
               ) : (
-                filteredList.map((item) => {
+                sortedList.map((item) => {
                   const isExpiringSoon = item.passportExpiry && new Date(item.passportExpiry) < new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
                   return (
                     <tr key={item.id} className={`${isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'} transition-colors`}>
@@ -478,10 +548,10 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
         <div className="md:hidden space-y-3 p-3">
           {loading ? (
             <div className={`p-8 text-center ${styles.textSub}`}>Memuat data jamaah...</div>
-          ) : filteredList.length === 0 ? (
+          ) : sortedList.length === 0 ? (
             <div className={`p-8 text-center ${styles.textSub}`}>Belum ada data jamaah.</div>
           ) : (
-            filteredList.map((item) => {
+            sortedList.map((item) => {
               const isExpiringSoon = item.passportExpiry && new Date(item.passportExpiry) < new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
               return (
                 <div key={item.id} className={`${styles.innerBg} border rounded-xl p-4 space-y-2`}>
