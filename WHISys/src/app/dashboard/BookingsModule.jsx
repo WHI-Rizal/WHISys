@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where, increment, runTransaction } from 'firebase/firestore';
-import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus } from 'lucide-react';
+import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus, Eye } from 'lucide-react';
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN, addPPN } from '../../lib/ppn';
 import { getNextCustomerCode } from '../../lib/customerCode';
@@ -4853,21 +4853,40 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             <div className="space-y-2.5 mb-6">
               {REQUIRED_DOCUMENTS.map((docItem) => {
                 const isChecked = docChecklist[docItem.key] || false;
+                // Kalau jamaah upload sendiri lewat Portal Customer, file-nya
+                // kesimpen di documentFiles.{key} (lihat portal/page.js) —
+                // munculin link "Lihat" di sini biar staf bisa langsung buka
+                // & verifikasi filenya tanpa harus minta ulang lewat WA.
+                const uploadedFile = selectedBookingForDoc?.documentFiles?.[docItem.key];
                 return (
                   <label
                     key={docItem.key}
                     onClick={() => setDocChecklist({ ...docChecklist, [docItem.key]: !isChecked })}
-                    className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-all ${
-                      isChecked 
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500' 
+                    className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                      isChecked
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
                         : `${styles.innerBg} text-slate-400`
                     }`}
                   >
                     <span className="text-xs font-semibold">{docItem.label}</span>
-                    <div className={`w-5 h-5 rounded-md flex items-center justify-center border transition-all ${
-                      isChecked ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-500'
-                    }`}>
-                      {isChecked && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {uploadedFile?.url && (
+                        <a
+                          href={uploadedFile.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title={`Diupload jamaah lewat Portal • ${uploadedFile.fileName || ''}`}
+                          className="flex items-center gap-1 bg-slate-950/30 hover:bg-slate-950/60 text-emerald-400 px-1.5 py-1 rounded text-[10px] font-medium"
+                        >
+                          <Eye className="w-3 h-3" /> Lihat
+                        </a>
+                      )}
+                      <div className={`w-5 h-5 rounded-md flex items-center justify-center border transition-all ${
+                        isChecked ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-500'
+                      }`}>
+                        {isChecked && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                      </div>
                     </div>
                   </label>
                 );
