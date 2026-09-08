@@ -714,54 +714,55 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     const companyName = companyInfo?.name || 'PT. WISATA HALAL INTERNASIONAL';
 
     const activeItems = (group.items || []).filter(i => (i.status || 'active') === 'active');
-    const paxNames = activeItems.map(i => i.jamaahName).filter(Boolean);
     const paxCount = activeItems.length || group.paxCount || 1;
     const isGroup = paxCount > 1;
 
     const kekurangan = Number(group.totalAmount || 0) - Number(group.totalPaid || 0);
     const isLunas = kekurangan <= 0;
 
-    const paxLine = isGroup ? `Peserta (${paxCount} pax): ${paxNames.join(', ')}\n` : '';
-
     // Cek kelengkapan dokumen SELURUH pax aktif di grup ini — dipakai buat
     // nentuin baris ajakan upload dokumen di bawah. Kalau masih ada yang
-    // kurang, pesannya tegas ngajak upload lewat portal (soalnya ini yang
-    // paling sering ditanya customer: "upload paspor/KTP-nya di mana?").
-    // Kalau udah lengkap semua, baris ajakannya diskip biar nggak nyuruh
-    // upload sesuatu yang udah kelar.
+    // kurang, pesannya ngajak upload lewat portal (soalnya ini yang paling
+    // sering ditanya customer: "upload paspor/KTP-nya di mana?"). Kalau
+    // udah lengkap semua, baris ajakannya diskip biar nggak nyuruh upload
+    // sesuatu yang udah kelar.
     const anyDocMissing = activeItems.some((i) => {
       const docs = i.documents || {};
       return REQUIRED_DOCUMENTS.some((d) => !docs[d.key]);
     });
-    const uploadLine = anyDocMissing
-      ? `\n\nBelum semua dokumen lengkap (paspor/KTP/dll) — Bpk/Ibu bisa upload langsung lewat Portal Jamaah itu juga, tinggal login lalu buka menu "Upload Dokumen" per peserta. Kalau butuh dibantu, tinggal kabari kami ya.`
+    const uploadBlock = anyDocMissing
+      ? `\n\nUntuk kelengkapan *DOKUMEN* yg diperlukan silahkan upload/scan via link diatas, jika ada yg perlu dibantu bisa hubungi tim kita yaa`
       : '';
 
-    // Template diringkes — inti pesan cuma beberapa blok: sapaan+status,
-    // daftar peserta (kalau grup), akses portal (link+cara login), ajakan
-    // upload dokumen (kalau masih ada yang kurang), penutup 1 baris. Dulu
-    // ada banyak kalimat basa-basi & penjelasan panjang, sekarang dipotong
-    // tapi info penting (status bayar, link, kode jamaah, cara login, upload
-    // dokumen) tetep lengkap semua.
+    // Template sesuai format yang dipakai tim CS/TC sehari-hari (WHI
+    // Business Intelligence WA) — greeting lengkap, tiap blok dipisah baris
+    // kosong biar enak dibaca di WA, link portal berdiri sendiri di
+    // barisnya, penutup "Terimakasih🙏". Kalimat "seluruh peserta di
+    // rombongan ini" cuma muncul kalau emang rombongan (>1 pax aktif),
+    // biar nggak aneh buat yang daftar sendirian.
     const message = isLunas
-      ? `Assalamu'alaikum Wr. Wb.
-Bpk/Ibu *${ordererName}*, pembayaran paket *${primary.packageName || '-'}* sudah *LUNAS*. Terima kasih ya 🙏
+      ? `Assalamu'alaikum Warahmatullahi Wabarakatuh Bpk/Ibu *${ordererName}*
 
-${paxLine}Cek kesiapan berangkat & unduh kwitansi lewat Portal Jamaah:
+Alhamdulillah, pembayaran untuk paket *${primary.packageName || '-'}* sudah *LUNAS*. Terima kasih atas kepercayaan Bpk/Ibu kepada ${companyName} 🙏
+
+Cek kesiapan berangkat, unduh kwitansi, dan status dokumen${isGroup ? ' seluruh peserta di rombongan ini' : ''}, Bpk/Ibu bisa cek sendiri lewat Portal Jamaah kami:
+
 ${portalUrl}
-Kode Jamaah: *${ordererData.customerCode}*
-Tanggal Lahir: sesuai KTP${uploadLine}
 
-Ada pertanyaan, kabari kami aja ya. Terima kasih.`
-      : `Assalamu'alaikum Wr. Wb.
-Bpk/Ibu *${ordererName}*, DP paket *${primary.packageName || '-'}* sudah kami terima. Terima kasih ya 🙏
+Login pakai Kode Jamaah: *${ordererData.customerCode}* dan *Tanggal Lahir*${uploadBlock}
 
-${paxLine}Pantau progres, sisa tagihan & kelengkapan dokumen lewat Portal Jamaah:
+Terimakasih🙏`
+      : `Assalamu'alaikum Warahmatullahi Wabarakatuh Bpk/Ibu *${ordererName}*
+
+Alhamdulillah, DP untuk paket *${primary.packageName || '-'}* sudah kami terima. Terima kasih atas kepercayaan Bpk/Ibu kepada ${companyName} 🙏
+
+Pantau progres persiapan keberangkatan, status pembayaran, dan cek dokumen${isGroup ? ' seluruh peserta di rombongan ini' : ''}, Bpk/Ibu bisa cek sendiri lewat Portal Jamaah kami:
+
 ${portalUrl}
-Kode Jamaah: *${ordererData.customerCode}*
-Tanggal Lahir: sesuai KTP${uploadLine}
 
-Kode Jamaah ini mohon disimpan, dipakai buat login portal. Ada pertanyaan, kabari kami aja ya.`;
+Login pakai Kode Jamaah: *${ordererData.customerCode}* dan *Tanggal Lahir*${uploadBlock}
+
+Terimakasih🙏`;
 
     window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(message)}`, '_blank');
   };
