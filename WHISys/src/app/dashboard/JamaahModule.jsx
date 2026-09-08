@@ -211,16 +211,21 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
   const handleOpenEdit = async (item) => {
     setEditingId(item.id);
     const customerCode = item.customerCode || (await getNextCustomerCodeAtomic());
+    const existingNik = item.nik || '';
+    // Buat jamaah lama yang NIK-nya udah tersimpan tapi belum ada Tanggal
+    // Lahir (kolom ini baru ditambahin belakangan) — coba parse dari NIK yang
+    // udah ada begitu modal Edit dibuka, tanpa nunggu staf ngetik ulang NIK-nya.
+    const parsedFromExistingNik = !item.birthDate ? parseNikBirthInfo(existingNik) : null;
     setFormData({
       customerCode,
       fullName: item.fullName || '',
-      nik: item.nik || '',
+      nik: existingNik,
       gender: item.gender || 'L',
       phone: item.phone || '',
       passportNumber: item.passportNumber || '',
       passportExpiry: item.passportExpiry || '',
       address: item.address || '',
-      birthDate: item.birthDate || '',
+      birthDate: item.birthDate || parsedFromExistingNik?.birthDate || '',
     });
     setShowModal(true);
   };
