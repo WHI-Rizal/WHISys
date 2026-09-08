@@ -671,58 +671,84 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
   };
 
   // Kirim info akses Portal Jamaah (link + Kode Jamaah) ke customer via
-  // WhatsApp — sekali klik, pesannya udah keisi otomatis dari data booking
-  // yang ada (nggak perlu ketik ulang manual nama/kode kayak template biasa).
-  // Isi pesan beda dikit tergantung status pembayaran (DP vs Lunas), biar
-  // konteksnya pas sama momen jamaah lagi dikirimin.
-  const handleSharePortalInfo = (booking) => {
-    const jamaahData = jamaahList.find(j => j.id === booking.jamaahId || j.fullName === booking.jamaahName);
+  // WhatsApp — SEKALI kirim per BOOKING/GRUP, ke PEMESAN aja (bukan ke
+  // masing-masing peserta). Ini sengaja, soalnya kalau rombongan (misal 1
+  // pemesan daftarin 3 pax), yang megang HP & yang perlu tau progres cuma
+  // pemesannya — jangan sampe 3 pesan WA nyampe ke 3 pax yang belum tentu
+  // semuanya pegang HP sendiri/ngerti harus login pake kode siapa.
+  //
+  // Portal-nya sendiri login pake Kode Jamaah & Tanggal Lahir PEMESAN (lihat
+  // fetchBookings di portal/page.js — sekarang query jamaahId ATAU ordererId,
+  // jadi pemesan yang login otomatis kelihatan semua booking rombongannya,
+  // termasuk kalau pemesannya sendiri nggak ikut berangkat sebagai pax).
+  //
+  // Kalau jamaah daftar sendiri (solo, nggak ada pax lain), Pemesan = pax itu
+  // sendiri (staf pilih "Sama dengan Pemesan" pas registrasi), jadi otomatis
+  // tetap kekirim ke jamaah yang bersangkutan — nggak perlu logic terpisah.
+  const handleSharePortalInfo = (group) => {
+    const primary = group?.primary || {};
+    const ordererId = primary.ordererId;
+    const ordererName = primary.ordererName;
+    const ordererData = jamaahList.find(j => j.id === ordererId);
 
-    if (!jamaahData || !jamaahData.phone) {
-      alert("Nomor HP/WhatsApp jamaah tidak ditemukan pada Data Master Jamaah.");
+    if (!ordererId || !ordererData) {
+      alert(`Data Pemesan (${ordererName || 'tidak diketahui'}) belum ketemu di Data Master Jamaah, jadi info Portal belum bisa dikirim.`);
       return;
     }
-    if (!jamaahData.customerCode) {
-      alert("Kode Jamaah belum ada di Data Master Jamaah, jadi info Portal belum bisa dikirim. Lengkapi dulu Kode Jamaah-nya ya.");
+    if (!ordererData.phone) {
+      alert(`Nomor HP/WhatsApp Pemesan (${ordererName || '-'}) belum diisi di Data Master Jamaah.`);
+      return;
+    }
+    if (!ordererData.customerCode) {
+      alert(`Kode Jamaah Pemesan (${ordererName || '-'}) belum ada di Data Master Jamaah, jadi info Portal belum bisa dikirim. Lengkapi dulu Kode Jamaah-nya ya.`);
       return;
     }
 
-    let cleanPhone = jamaahData.phone.replace(/[^0-9]/g, '');
+    let cleanPhone = ordererData.phone.replace(/[^0-9]/g, '');
     if (cleanPhone.startsWith('0')) {
       cleanPhone = '62' + cleanPhone.slice(1);
     }
 
     const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
     const portalUrl = `${baseUrl}/portal`;
-    const isLunas = booking.paymentStatus === 'Full Payment';
     const companyName = companyInfo?.name || 'PT. WISATA HALAL INTERNASIONAL';
+
+    const activeItems = (group.items || []).filter(i => (i.status || 'active') === 'active');
+    const paxNames = activeItems.map(i => i.jamaahName).filter(Boolean);
+    const paxCount = activeItems.length || group.paxCount || 1;
+    const isGroup = paxCount > 1;
+
+    const kekurangan = Number(group.totalAmount || 0) - Number(group.totalPaid || 0);
+    const isLunas = kekurangan <= 0;
+
+    const paxListLine = isGroup ? `\nPeserta (${paxCount} pax): ${paxNames.join(', ')}\n` : '';
 
     const message = isLunas
       ? `Assalamu'alaikum Wr. Wb.
-Yth. Bpk/Ibu *${booking.jamaahName}*,
+Yth. Bpk/Ibu *${ordererName}*,
 
-Alhamdulillah, pembayaran untuk paket *${booking.packageName}* sudah *LUNAS*. Terima kasih banyak atas kepercayaannya, insyaAllah kami siapkan yang terbaik untuk perjalanan ibadah Bpk/Ibu bersama ${companyName}.
-
-Bpk/Ibu bisa cek kesiapan berangkat, kwitansi pembayaran, dan status dokumen kapan aja lewat Portal Jamaah kami:
+Alhamdulillah, pembayaran untuk paket *${primary.packageName || '-'}* sudah *LUNAS*. Terima kasih banyak atas kepercayaannya, insyaAllah kami siapkan yang terbaik untuk perjalanan ibadah${isGroup ? ' rombongan' : ''} Bpk/Ibu bersama ${companyName}.
+${paxListLine}
+Bpk/Ibu bisa cek kesiapan berangkat, kwitansi pembayaran, dan status dokumen${isGroup ? ' seluruh peserta di rombongan ini' : ''} kapan aja lewat Portal Jamaah kami:
 ${portalUrl}
 
 Login pakai:
-Kode Jamaah: *${jamaahData.customerCode}*
+Kode Jamaah: *${ordererData.customerCode}*
 Tanggal Lahir: sesuai KTP
 
 Kwitansi pembayaran juga bisa diunduh langsung dari portal itu ya, jadi nggak perlu minta ke kami lagi.
 
 Terima kasih, semoga perjalanannya lancar dan mabrur. Aamiin 🤲`
       : `Assalamu'alaikum Wr. Wb.
-Yth. Bpk/Ibu *${booking.jamaahName}*,
+Yth. Bpk/Ibu *${ordererName}*,
 
-Alhamdulillah, DP untuk paket *${booking.packageName}* sudah kami terima. Terima kasih atas kepercayaan Bpk/Ibu kepada ${companyName}.
-
-Untuk pantau progres persiapan keberangkatan, status pembayaran, dan cek dokumen yang masih kurang, Bpk/Ibu bisa cek sendiri lewat Portal Jamaah kami:
+Alhamdulillah, DP untuk paket *${primary.packageName || '-'}* sudah kami terima. Terima kasih atas kepercayaan Bpk/Ibu kepada ${companyName}.
+${paxListLine}
+Untuk pantau progres persiapan keberangkatan, status pembayaran, dan cek dokumen${isGroup ? ' seluruh peserta di rombongan ini' : ' yang masih kurang'}, Bpk/Ibu bisa cek sendiri lewat Portal Jamaah kami:
 ${portalUrl}
 
 Login pakai:
-Kode Jamaah: *${jamaahData.customerCode}*
+Kode Jamaah: *${ordererData.customerCode}*
 Tanggal Lahir: sesuai KTP
 
 Kode Jamaah ini mohon disimpan baik-baik ya, karena juga bakal dipakai untuk program-program kami selanjutnya.
@@ -4517,17 +4543,6 @@ Kalau ada pertanyaan, jangan sungkan hubungi kami kembali. Terima kasih 🙏`;
                                 <MessageSquare className="w-4 h-4" />
                               </button>
 
-                              {/* TOMBOL KIRIM INFO PORTAL JAMAAH — pesan WA otomatis
-                                  keisi kode jamaah, nama, & link Portal, biar staf
-                                  nggak perlu ngetik ulang manual pas DP/closing. */}
-                              <button
-                                onClick={() => handleSharePortalInfo(item)}
-                                className="p-1.5 bg-teal-600/20 hover:bg-teal-600 text-teal-400 hover:text-white rounded-lg transition-colors"
-                                title="Kirim Info Portal Jamaah via WhatsApp"
-                              >
-                                <Link2 className="w-4 h-4" />
-                              </button>
-
                               {/* TOMBOL EDIT PEMBAYARAN — cetak invoice udah dipindah ke
                                   header grup (satu tombol buat semua pax), jadi slot ini
                                   diisi akses cepat buat catat/edit setoran booking INI
@@ -4689,14 +4704,6 @@ Kalau ada pertanyaan, jangan sungkan hubungi kami kembali. Terima kasih 🙏`;
                       <MessageSquare className="w-4 h-4" />
                     </button>
 
-                    <button
-                      onClick={() => handleSharePortalInfo(item)}
-                      className="p-1.5 bg-teal-600/20 hover:bg-teal-600 text-teal-400 hover:text-white rounded-lg transition-colors"
-                      title="Kirim Info Portal Jamaah via WhatsApp"
-                    >
-                      <Link2 className="w-4 h-4" />
-                    </button>
-
                     {canManageBookings && (
                       <button
                         onClick={() => handleOpenGroupPaymentModal({
@@ -4818,17 +4825,27 @@ Kalau ada pertanyaan, jangan sungkan hubungi kami kembali. Terima kasih 🙏`;
                     </td>
                     <td className={`p-4 font-semibold ${styles.textTitle}`}>{formatPercentID(group.percentBayar)}</td>
                     <td className="p-4 text-center">
-                      {canManageBookings ? (
+                      <div className="inline-flex items-center gap-1.5">
+                        {canManageBookings && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleOpenGroupPaymentModal(group); }}
+                            className="inline-flex items-center justify-center p-2 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-500 hover:text-white rounded-lg transition-colors"
+                            title="Catat Setoran Grup"
+                          >
+                            <Wallet className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {/* TOMBOL KIRIM INFO PORTAL — sekali kirim per booking/grup,
+                            ke Pemesan aja (bukan ke tiap peserta). Lihat komentar
+                            handleSharePortalInfo. */}
                         <button
-                          onClick={(e) => { e.stopPropagation(); handleOpenGroupPaymentModal(group); }}
-                          className="inline-flex items-center justify-center p-2 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-500 hover:text-white rounded-lg transition-colors"
-                          title="Catat Setoran Grup"
+                          onClick={(e) => { e.stopPropagation(); handleSharePortalInfo(group); }}
+                          className="inline-flex items-center justify-center p-2 bg-teal-600/20 hover:bg-teal-600 text-teal-500 hover:text-white rounded-lg transition-colors"
+                          title="Kirim Info Portal Jamaah ke Pemesan via WhatsApp"
                         >
-                          <Wallet className="w-3.5 h-3.5" />
+                          <Link2 className="w-3.5 h-3.5" />
                         </button>
-                      ) : (
-                        <span className={styles.textSub}>—</span>
-                      )}
+                      </div>
                     </td>
                     <td className="p-4 text-center">
                       <button
@@ -4900,6 +4917,16 @@ Kalau ada pertanyaan, jangan sungkan hubungi kami kembali. Terima kasih 🙏`;
                         <Wallet className="w-4 h-4" />
                       </button>
                     )}
+                    {/* TOMBOL KIRIM INFO PORTAL — sekali kirim per booking/grup,
+                        ke Pemesan aja (bukan ke tiap peserta). Lihat komentar
+                        handleSharePortalInfo. */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleSharePortalInfo(group); }}
+                      className="p-1.5 bg-teal-600/20 hover:bg-teal-600 text-teal-500 hover:text-white rounded-lg transition-colors"
+                      title="Kirim Info Portal Jamaah ke Pemesan via WhatsApp"
+                    >
+                      <Link2 className="w-4 h-4" />
+                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); setActiveGroupCode(group.code); }}
                       className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium"
