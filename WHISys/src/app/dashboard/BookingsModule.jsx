@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where, increment, runTransaction } from 'firebase/firestore';
-import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus, Eye } from 'lucide-react';
+import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus, Eye, Link2 } from 'lucide-react';
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN, addPPN } from '../../lib/ppn';
 import { getNextCustomerCode } from '../../lib/customerCode';
@@ -666,6 +666,68 @@ Terima kasih telah mempercayakan perjalanan Anda bersama kami. Kami sangat mengh
 ${feedbackUrl}
 
 Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas layanan. Terima kasih 🙏`;
+
+    window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(message)}`, '_blank');
+  };
+
+  // Kirim info akses Portal Jamaah (link + Kode Jamaah) ke customer via
+  // WhatsApp — sekali klik, pesannya udah keisi otomatis dari data booking
+  // yang ada (nggak perlu ketik ulang manual nama/kode kayak template biasa).
+  // Isi pesan beda dikit tergantung status pembayaran (DP vs Lunas), biar
+  // konteksnya pas sama momen jamaah lagi dikirimin.
+  const handleSharePortalInfo = (booking) => {
+    const jamaahData = jamaahList.find(j => j.id === booking.jamaahId || j.fullName === booking.jamaahName);
+
+    if (!jamaahData || !jamaahData.phone) {
+      alert("Nomor HP/WhatsApp jamaah tidak ditemukan pada Data Master Jamaah.");
+      return;
+    }
+    if (!jamaahData.customerCode) {
+      alert("Kode Jamaah belum ada di Data Master Jamaah, jadi info Portal belum bisa dikirim. Lengkapi dulu Kode Jamaah-nya ya.");
+      return;
+    }
+
+    let cleanPhone = jamaahData.phone.replace(/[^0-9]/g, '');
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '62' + cleanPhone.slice(1);
+    }
+
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const portalUrl = `${baseUrl}/portal`;
+    const isLunas = booking.paymentStatus === 'Full Payment';
+    const companyName = companyInfo?.name || 'PT. WISATA HALAL INTERNASIONAL';
+
+    const message = isLunas
+      ? `Assalamu'alaikum Wr. Wb.
+Yth. Bpk/Ibu *${booking.jamaahName}*,
+
+Alhamdulillah, pembayaran untuk paket *${booking.packageName}* sudah *LUNAS*. Terima kasih banyak atas kepercayaannya, insyaAllah kami siapkan yang terbaik untuk perjalanan ibadah Bpk/Ibu bersama ${companyName}.
+
+Bpk/Ibu bisa cek kesiapan berangkat, kwitansi pembayaran, dan status dokumen kapan aja lewat Portal Jamaah kami:
+${portalUrl}
+
+Login pakai:
+Kode Jamaah: *${jamaahData.customerCode}*
+Tanggal Lahir: sesuai KTP
+
+Kwitansi pembayaran juga bisa diunduh langsung dari portal itu ya, jadi nggak perlu minta ke kami lagi.
+
+Terima kasih, semoga perjalanannya lancar dan mabrur. Aamiin 🤲`
+      : `Assalamu'alaikum Wr. Wb.
+Yth. Bpk/Ibu *${booking.jamaahName}*,
+
+Alhamdulillah, DP untuk paket *${booking.packageName}* sudah kami terima. Terima kasih atas kepercayaan Bpk/Ibu kepada ${companyName}.
+
+Untuk pantau progres persiapan keberangkatan, status pembayaran, dan cek dokumen yang masih kurang, Bpk/Ibu bisa cek sendiri lewat Portal Jamaah kami:
+${portalUrl}
+
+Login pakai:
+Kode Jamaah: *${jamaahData.customerCode}*
+Tanggal Lahir: sesuai KTP
+
+Kode Jamaah ini mohon disimpan baik-baik ya, karena juga bakal dipakai untuk program-program kami selanjutnya.
+
+Kalau ada pertanyaan, jangan sungkan hubungi kami kembali. Terima kasih 🙏`;
 
     window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(message)}`, '_blank');
   };
@@ -4455,6 +4517,17 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                                 <MessageSquare className="w-4 h-4" />
                               </button>
 
+                              {/* TOMBOL KIRIM INFO PORTAL JAMAAH — pesan WA otomatis
+                                  keisi kode jamaah, nama, & link Portal, biar staf
+                                  nggak perlu ngetik ulang manual pas DP/closing. */}
+                              <button
+                                onClick={() => handleSharePortalInfo(item)}
+                                className="p-1.5 bg-teal-600/20 hover:bg-teal-600 text-teal-400 hover:text-white rounded-lg transition-colors"
+                                title="Kirim Info Portal Jamaah via WhatsApp"
+                              >
+                                <Link2 className="w-4 h-4" />
+                              </button>
+
                               {/* TOMBOL EDIT PEMBAYARAN — cetak invoice udah dipindah ke
                                   header grup (satu tombol buat semua pax), jadi slot ini
                                   diisi akses cepat buat catat/edit setoran booking INI
@@ -4614,6 +4687,14 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                       title="Kirim Konfirmasi via WhatsApp"
                     >
                       <MessageSquare className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      onClick={() => handleSharePortalInfo(item)}
+                      className="p-1.5 bg-teal-600/20 hover:bg-teal-600 text-teal-400 hover:text-white rounded-lg transition-colors"
+                      title="Kirim Info Portal Jamaah via WhatsApp"
+                    >
+                      <Link2 className="w-4 h-4" />
                     </button>
 
                     {canManageBookings && (
