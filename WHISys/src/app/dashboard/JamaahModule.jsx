@@ -7,6 +7,7 @@ import { Users, Plus, Search, Edit, Trash2, X, AlertCircle, UserCheck } from 'lu
 import DateFieldID from '@/components/DateFieldID';
 import { logActivity } from '../../lib/activityLog';
 import { getNextCustomerCode as getNextCustomerCodeAtomic } from '../../lib/customerCode';
+import { parseNikBirthInfo } from '../../lib/nik';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -53,7 +54,24 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
     passportNumber: '',
     passportExpiry: '',
     address: '',
+    birthDate: '',
   });
+
+  // Dipanggil tiap NIK diubah — kalau NIK-nya 16 digit valid, tanggal lahir
+  // langsung "dibaca" dari situ (lihat lib/nik.js), gratis dan instan tanpa
+  // OCR/API luar. Cuma di-autofill kalau field Tanggal Lahir masih kosong,
+  // biar nggak nimpa input manual yang udah dikoreksi staf (misal buat kasus
+  // NIK lama/nggak standar yang datanya nggak akurat). Gender SENGAJA nggak
+  // ikut di-autofill di sini — biar tetap sepenuhnya kendali staf lewat
+  // dropdown yang sudah ada, nggak diam-diam ke-flip pas staf lagi ngetik NIK.
+  const handleNikChange = (nikValue) => {
+    setFormData((prev) => {
+      if (prev.birthDate) return { ...prev, nik: nikValue };
+      const parsed = parseNikBirthInfo(nikValue);
+      if (!parsed) return { ...prev, nik: nikValue };
+      return { ...prev, nik: nikValue, birthDate: parsed.birthDate };
+    });
+  };
 
   // ============ DATA MASTER TC / SALES ============
   // Perhitungan & pembayaran komisi TC/Sales SENGAJA ditiadakan di sistem
@@ -185,6 +203,7 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
       passportNumber: '',
       passportExpiry: '',
       address: '',
+      birthDate: '',
     });
     setShowModal(true);
   };
@@ -201,6 +220,7 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
       passportNumber: item.passportNumber || '',
       passportExpiry: item.passportExpiry || '',
       address: item.address || '',
+      birthDate: item.birthDate || '',
     });
     setShowModal(true);
   };
@@ -410,6 +430,9 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
                           {item.gender === 'L' ? 'Laki-Laki' : 'Perempuan'}
                         </span>
                         <span className={styles.textSub}>{item.phone || '-'}</span>
+                        <span className={`block text-[10px] ${styles.textSub} mt-0.5`}>
+                          Lahir: {item.birthDate ? formatDateDDMMYYYY(item.birthDate) : '-'}
+                        </span>
                       </td>
                       <td className="p-4">
                         <span className="font-semibold text-emerald-500 font-mono block">{item.passportNumber || 'Belum Ada'}</span>
@@ -472,6 +495,7 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
                       </span>
                     </div>
                     <div>Kontak: {item.phone || '-'}</div>
+                    <div>Tanggal Lahir: {item.birthDate ? formatDateDDMMYYYY(item.birthDate) : '-'}</div>
                     <div>
                       Paspor: <span className="font-semibold text-emerald-500 font-mono">{item.passportNumber || 'Belum Ada'}</span>
                     </div>
@@ -534,7 +558,7 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
                     placeholder="32010..."
                     className={`w-full ${styles.inputBg} rounded-lg p-2.5 font-mono`}
                     value={formData.nik}
-                    onChange={(e) => setFormData({ ...formData, nik: e.target.value })}
+                    onChange={(e) => handleNikChange(e.target.value)}
                   />
                 </div>
               </div>
@@ -570,6 +594,22 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Tanggal Lahir</label>
+                {/* Otomatis kesisi begitu NIK 16 digit yang valid diketik (lihat
+                    handleNikChange) — tapi tetap bisa diedit manual di sini,
+                    misalnya buat jamaah yang NIK-nya belum diisi atau nggak
+                    standar. Dipakai sebagai salah satu kunci login Portal
+                    Customer (Kode Jamaah + Tanggal Lahir), jadi sebisa mungkin
+                    diisi buat tiap jamaah. */}
+                <DateFieldID
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  nativeClassName={`[color-scheme:${theme}]`}
+                  value={formData.birthDate}
+                  onChange={(val) => setFormData({ ...formData, birthDate: val })}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
