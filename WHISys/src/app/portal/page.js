@@ -46,6 +46,26 @@ const DOC_LABELS = {
   ticket: 'Tiket',
 };
 
+// Bandingin tanggal lahir dengan aman — beberapa data jamaah lama bisa aja
+// kesimpen dalam format yang beda-beda dikit (ada spasi nyasar, atau ada
+// embel-embel waktu "T00:00:00.000Z" dari proses import/migrasi lama),
+// padahal maksudnya tanggal yang sama persis. Kalau dibandingin string mentah
+// (===) begitu aja, kasus-kasus kayak gini bikin customer nggak bisa login
+// padahal Kode Jamaah & Tanggal Lahir yang mereka masukin udah benar.
+// Fungsi ini nyari pola YYYY-MM-DD di depan string-nya dulu (paling umum &
+// paling aman, nggak lewat objek Date sama sekali jadi nggak kena geser zona
+// waktu) baru fallback ke parsing Date kalau formatnya beda banget.
+const normalizeDateOnly = (val) => {
+  if (!val) return '';
+  const s = String(val).trim();
+  const match = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
 const formatRupiah = (n) => `Rp ${Math.round(Number(n) || 0).toLocaleString('id-ID')}`;
 const formatTanggal = (iso) => {
   if (!iso) return '-';
@@ -159,7 +179,7 @@ export default function PortalPage() {
       if (!snap.empty) {
         const docSnap = snap.docs[0];
         const data = docSnap.data();
-        if (data.birthDate && data.birthDate === loginForm.birthDate) {
+        if (data.birthDate && normalizeDateOnly(data.birthDate) === normalizeDateOnly(loginForm.birthDate)) {
           matched = { id: docSnap.id, customerCode: data.customerCode, fullName: data.fullName || '' };
         }
       }
