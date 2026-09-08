@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where, increment } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where, increment, runTransaction } from 'firebase/firestore';
 import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus } from 'lucide-react';
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN, addPPN } from '../../lib/ppn';
@@ -18,6 +18,17 @@ const chunkArray = (arr, size = 30) => {
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
 };
+
+// Error khusus yang dilempar reserveQuota (lihat di dalam komponen) — dibedain
+// dari error lain (mis. gagal koneksi) biar pesan alert-nya bisa spesifik
+// nyebut sisa seat aktualnya (this.remaining), bukan cuma "gagal menyimpan".
+class InsufficientQuotaError extends Error {
+  constructor(remaining) {
+    super(`INSUFFICIENT_QUOTA:${remaining}`);
+    this.name = 'InsufficientQuotaError';
+    this.remaining = remaining;
+  }
+}
 
 // Daftar baku pilihan "Sumber Lead" — dari mana calon jamaah awalnya kenal
 // WHI, dipakai TC/Sales pas registrasi booking. "Lainnya" mancing input teks
@@ -1333,6 +1344,35 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     }
   };
 
+  // "Reservasi" kuota seat — cek sisa seat DAN kurangi kuotanya dalam SATU
+  // Firestore transaction (read + write atomik di server), bukan lagi pola
+  // "cek dari state client dulu, baru increment belakangan" seperti
+  // sebelumnya. Pola lama itu rawan race condition: 2 staff yang submit
+  // booking buat seat TERAKHIR yang sama hampir bersamaan bisa sama-sama
+  // lolos pengecekan (soalnya masing-masing masih baca quotaRemaining dari
+  // cache/state lama), dan kuota jadi minus (overbooking) tanpa error sama
+  // sekali. Dengan transaction, baca-cek-tulis-nya dijamin server nggak
+  // ke-interleave sama transaction lain yang nyentuh dokumen paket yang
+  // sama — submit kedua otomatis gagal dgn pesan yang jelas, bukan diam2 lolos.
+  // Dipanggil SEBELUM booking/pembayaran dibuat di tiap alur, biar kalau
+  // kuotanya ternyata udah keburu habis, belum ada booking baru yang
+  // kelanjur tercipta. Lempar InsufficientQuotaError (didefinisikan di luar
+  // komponen, di atas) kalau kuotanya kurang.
+  const reserveQuota = async (packageId, count) => {
+    const pkgRef = doc(db, 'packages', packageId);
+    await runTransaction(db, async (transaction) => {
+      const pkgSnap = await transaction.get(pkgRef);
+      if (!pkgSnap.exists()) {
+        throw new Error('Paket travel ini tidak ditemukan (mungkin sudah dihapus).');
+      }
+      const current = Number(pkgSnap.data().quotaRemaining) || 0;
+      if (current < count) {
+        throw new InsufficientQuotaError(current);
+      }
+      transaction.update(pkgRef, { quotaRemaining: current - count });
+    });
+  };
+
   // Saldo Deposit nempel ke Pemesan (data di collection 'jamaah'), bukan ke
   // booking. delta positif = nambah saldo (top up / konversi refund batal),
   // delta negatif = pakai saldo buat bayar. Tiap perubahan juga dicatat ke
@@ -1609,8 +1649,19 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       const newPkg = packagesList.find(p => p.id === rescheduleForm.newPackageId);
       if (!newPkg) return;
 
-      if (Number(newPkg.quotaRemaining || 0) <= 0) {
-        alert("Kuota paket tujuan sudah habis!");
+      // Reservasi 1 seat di paket tujuan secara atomik (transaction) SEBELUM
+      // booking baru dibuat — kalau ternyata kuotanya udah keburu habis
+      // (mis. 2 Finance mroses reschedule ke paket yang sama, seat terakhir,
+      // hampir bersamaan), gagal di sini duluan, belum ada booking baru yang
+      // kelanjur tercipta.
+      try {
+        await reserveQuota(newPkg.id, 1);
+      } catch (quotaErr) {
+        if (quotaErr instanceof InsufficientQuotaError) {
+          alert(`Kuota paket tujuan sudah habis! Sisa seat: ${quotaErr.remaining}.`);
+        } else {
+          alert("Gagal memeriksa kuota paket tujuan: " + quotaErr.message);
+        }
         return;
       }
 
@@ -1683,10 +1734,9 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       });
       await releaseQuotaToPackage(oldBooking.packageId);
 
-      // 4. Kurangi kuota paket tujuan (atomic, bukan baca-lalu-tulis)
-      await updateDoc(doc(db, 'packages', newPkg.id), {
-        quotaRemaining: increment(-1)
-      });
+      // 4. Kuota paket tujuan udah dikurangi duluan lewat reserveQuota() di
+      // atas (atomic transaction), sebelum booking baru ini dibuat — nggak
+      // perlu increment(-1) lagi di sini.
 
       // 5. Balikin stok perlengkapan yang udah kepotong buat booking lama —
       // keberangkatannya beda sekarang, jadi distribusi barang yang lama
@@ -2083,8 +2133,16 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         alert("Paket travel grup ini tidak ditemukan.");
         return;
       }
-      if (Number(pkg.quotaRemaining || 0) < 1) {
-        alert(`Kuota paket ini sudah habis. Sisa seat: ${pkg.quotaRemaining || 0}.`);
+      // Reservasi 1 seat secara atomik SEBELUM jamaah/booking baru dibuat —
+      // lihat penjelasan lengkap di reserveQuota().
+      try {
+        await reserveQuota(pkg.id, 1);
+      } catch (quotaErr) {
+        if (quotaErr instanceof InsufficientQuotaError) {
+          alert(`Kuota paket ini sudah habis. Sisa seat: ${quotaErr.remaining}.`);
+        } else {
+          alert("Gagal memeriksa kuota paket: " + quotaErr.message);
+        }
         return;
       }
 
@@ -2162,7 +2220,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         updateDoc(doc(db, 'bookings', item.id), { groupTotalPax: newTotalPax })
       ));
 
-      await updateDoc(doc(db, 'packages', pkg.id), { quotaRemaining: increment(-1) });
+      // Kuota paket udah dikurangi duluan lewat reserveQuota() di atas (atomic
+      // transaction), sebelum booking baru ini dibuat — nggak perlu increment(-1) lagi di sini.
 
       alert(`Peserta baru "${newJamaahData.fullName}" berhasil ditambahkan ke grup ${groupEditTarget.code}. Setoran untuk peserta ini bisa dicatat lewat "Catat Setoran Grup" atau riwayat pembayaran per-peserta.`);
       await warnIfPartnerLinked(groupEditTarget.code, 'ditambah pesertanya');
@@ -2433,8 +2492,14 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       const newPkg = packagesList.find(p => p.id === groupRescheduleForm.newPackageId);
       if (!newPkg) return;
 
-      if (Number(newPkg.quotaRemaining || 0) < sortedActive.length) {
-        alert(`Kuota paket tujuan tidak cukup. Sisa seat: ${newPkg.quotaRemaining || 0}, dibutuhkan: ${sortedActive.length}.`);
+      try {
+        await reserveQuota(newPkg.id, sortedActive.length);
+      } catch (quotaErr) {
+        if (quotaErr instanceof InsufficientQuotaError) {
+          alert(`Kuota paket tujuan tidak cukup. Sisa seat: ${quotaErr.remaining}, dibutuhkan: ${sortedActive.length}.`);
+        } else {
+          alert("Gagal memeriksa kuota paket tujuan: " + quotaErr.message);
+        }
         return;
       }
 
@@ -2515,7 +2580,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
       if (oldPackageId) {
         await updateDoc(doc(db, 'packages', oldPackageId), { quotaRemaining: increment(sortedActive.length) });
       }
-      await updateDoc(doc(db, 'packages', newPkg.id), { quotaRemaining: increment(-sortedActive.length) });
+      // Kuota paket tujuan udah dikurangi duluan lewat reserveQuota() di atas
+      // (atomic transaction) — nggak perlu increment(-sortedActive.length) lagi di sini.
 
       // Balikin stok perlengkapan yang udah kepotong buat SELURUH booking
       // lama di grup ini — keberangkatannya beda sekarang.
@@ -3733,8 +3799,14 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
         // sesuai jumlah entry peserta yang benar-benar berhasil diresolusi.
         const paxCount = paxList.length;
 
-        if (Number(selectedPkg.quotaRemaining || 0) < paxCount) {
-          alert(`Kuota paket ini tidak cukup. Sisa seat: ${selectedPkg.quotaRemaining || 0}, dibutuhkan: ${paxCount}.`);
+        try {
+          await reserveQuota(selectedPkg.id, paxCount);
+        } catch (quotaErr) {
+          if (quotaErr instanceof InsufficientQuotaError) {
+            alert(`Kuota paket ini tidak cukup. Sisa seat: ${quotaErr.remaining}, dibutuhkan: ${paxCount}.`);
+          } else {
+            alert("Gagal memeriksa kuota paket: " + quotaErr.message);
+          }
           return;
         }
 
@@ -3810,7 +3882,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             }
           }
 
-          await updateDoc(doc(db, 'packages', selectedPkg.id), { quotaRemaining: increment(-1) });
+          // Kuota paket udah dikurangi duluan lewat reserveQuota() di atas
+          // (atomic transaction) — nggak perlu increment(-1) lagi di sini.
 
           logActivity({
             userId: currentUser?.uid,
@@ -3930,7 +4003,8 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             await adjustDepositBalance(ordererId, ordererName, -paymentVal, 'usage', `Bayar DP booking grup ${groupBookingCode}`, groupBookingCode);
           }
 
-          await updateDoc(doc(db, 'packages', selectedPkg.id), { quotaRemaining: increment(-paxCount) });
+          // Kuota paket udah dikurangi duluan lewat reserveQuota() di atas
+          // (atomic transaction) — nggak perlu increment(-paxCount) lagi di sini.
 
           logActivity({
             userId: currentUser?.uid,
