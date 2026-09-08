@@ -721,39 +721,47 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
     const kekurangan = Number(group.totalAmount || 0) - Number(group.totalPaid || 0);
     const isLunas = kekurangan <= 0;
 
-    const paxListLine = isGroup ? `\nPeserta (${paxCount} pax): ${paxNames.join(', ')}\n` : '';
+    const paxLine = isGroup ? `Peserta (${paxCount} pax): ${paxNames.join(', ')}\n` : '';
 
+    // Cek kelengkapan dokumen SELURUH pax aktif di grup ini — dipakai buat
+    // nentuin baris ajakan upload dokumen di bawah. Kalau masih ada yang
+    // kurang, pesannya tegas ngajak upload lewat portal (soalnya ini yang
+    // paling sering ditanya customer: "upload paspor/KTP-nya di mana?").
+    // Kalau udah lengkap semua, baris ajakannya diskip biar nggak nyuruh
+    // upload sesuatu yang udah kelar.
+    const anyDocMissing = activeItems.some((i) => {
+      const docs = i.documents || {};
+      return REQUIRED_DOCUMENTS.some((d) => !docs[d.key]);
+    });
+    const uploadLine = anyDocMissing
+      ? `\n\nBelum semua dokumen lengkap (paspor/KTP/dll) — Bpk/Ibu bisa upload langsung lewat Portal Jamaah itu juga, tinggal login lalu buka menu "Upload Dokumen" per peserta. Kalau butuh dibantu, tinggal kabari kami ya.`
+      : '';
+
+    // Template diringkes — inti pesan cuma beberapa blok: sapaan+status,
+    // daftar peserta (kalau grup), akses portal (link+cara login), ajakan
+    // upload dokumen (kalau masih ada yang kurang), penutup 1 baris. Dulu
+    // ada banyak kalimat basa-basi & penjelasan panjang, sekarang dipotong
+    // tapi info penting (status bayar, link, kode jamaah, cara login, upload
+    // dokumen) tetep lengkap semua.
     const message = isLunas
       ? `Assalamu'alaikum Wr. Wb.
-Yth. Bpk/Ibu *${ordererName}*,
+Bpk/Ibu *${ordererName}*, pembayaran paket *${primary.packageName || '-'}* sudah *LUNAS*. Terima kasih ya 🙏
 
-Alhamdulillah, pembayaran untuk paket *${primary.packageName || '-'}* sudah *LUNAS*. Terima kasih banyak atas kepercayaannya, insyaAllah kami siapkan yang terbaik untuk perjalanan ibadah${isGroup ? ' rombongan' : ''} Bpk/Ibu bersama ${companyName}.
-${paxListLine}
-Bpk/Ibu bisa cek kesiapan berangkat, kwitansi pembayaran, dan status dokumen${isGroup ? ' seluruh peserta di rombongan ini' : ''} kapan aja lewat Portal Jamaah kami:
+${paxLine}Cek kesiapan berangkat & unduh kwitansi lewat Portal Jamaah:
 ${portalUrl}
-
-Login pakai:
 Kode Jamaah: *${ordererData.customerCode}*
-Tanggal Lahir: sesuai KTP
+Tanggal Lahir: sesuai KTP${uploadLine}
 
-Kwitansi pembayaran juga bisa diunduh langsung dari portal itu ya, jadi nggak perlu minta ke kami lagi.
-
-Terima kasih, semoga perjalanannya lancar dan mabrur. Aamiin 🤲`
+Ada pertanyaan, kabari kami aja ya. Terima kasih.`
       : `Assalamu'alaikum Wr. Wb.
-Yth. Bpk/Ibu *${ordererName}*,
+Bpk/Ibu *${ordererName}*, DP paket *${primary.packageName || '-'}* sudah kami terima. Terima kasih ya 🙏
 
-Alhamdulillah, DP untuk paket *${primary.packageName || '-'}* sudah kami terima. Terima kasih atas kepercayaan Bpk/Ibu kepada ${companyName}.
-${paxListLine}
-Untuk pantau progres persiapan keberangkatan, status pembayaran, dan cek dokumen${isGroup ? ' seluruh peserta di rombongan ini' : ' yang masih kurang'}, Bpk/Ibu bisa cek sendiri lewat Portal Jamaah kami:
+${paxLine}Pantau progres, sisa tagihan & kelengkapan dokumen lewat Portal Jamaah:
 ${portalUrl}
-
-Login pakai:
 Kode Jamaah: *${ordererData.customerCode}*
-Tanggal Lahir: sesuai KTP
+Tanggal Lahir: sesuai KTP${uploadLine}
 
-Kode Jamaah ini mohon disimpan baik-baik ya, karena juga bakal dipakai untuk program-program kami selanjutnya.
-
-Kalau ada pertanyaan, jangan sungkan hubungi kami kembali. Terima kasih 🙏`;
+Kode Jamaah ini mohon disimpan, dipakai buat login portal. Ada pertanyaan, kabari kami aja ya.`;
 
     window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(message)}`, '_blank');
   };
