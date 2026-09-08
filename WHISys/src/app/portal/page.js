@@ -1,18 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { db } from '@/lib/firebase';
+import { useEffect, useState, useRef } from 'react';
+import { db, storage } from '@/lib/firebase';
 import {
-  collection, query, where, getDocs, limit, doc, getDoc, setDoc, runTransaction
+  collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, runTransaction
 } from 'firebase/firestore';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import {
   LogIn, LogOut, Loader2, AlertTriangle, Plane, Wallet, FileCheck, CheckCircle2,
-  XCircle, Ban, RotateCcw, Clock, ShieldCheck
+  XCircle, Ban, RotateCcw, Clock, ShieldCheck, Upload, Eye, Download, Gauge
 } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 
 // ============================================================================
-// PORTAL CUSTOMER — MVP Tahap 1 (view-only)
+// PORTAL CUSTOMER — Tahap 2 (view + upload dokumen + download kwitansi)
 //
 // Login pakai Kode Jamaah (customerCode) + Tanggal Lahir, TANPA password,
 // TANPA akun staf. Sengaja dibikin nggak percaya apapun dari input customer
@@ -25,10 +28,17 @@ import DateFieldID from '@/components/DateFieldID';
 // terpisah 'portalLoginAttempts', dikunci per Kode Jamaah — BUKAN nyimpen
 // data sensitif apapun, cuma counter + waktu kunci.
 //
-// CATATAN buat yang pegang Firebase Console: halaman ini butuh Firestore
-// Security Rules tambahan (baca collection 'jamaah' & 'bookings' publik,
-// baca-tulis 'portalLoginAttempts' publik) — lihat pesan penjelasan yang
-// dikirim bareng file ini.
+// CATATAN buat yang pegang Firebase Console: halaman ini butuh Firestore &
+// Storage Security Rules tambahan — lihat pesan penjelasan yang dikirim
+// bareng file ini. Ringkasannya:
+//   - Firestore: baca collection 'jamaah' & 'bookings' publik, baca-tulis
+//     'portalLoginAttempts' publik (sudah ada dari Tahap 1), DITAMBAH update
+//     terbatas ke collection 'bookings' — HARUS dibatasi cuma boleh nyentuh
+//     field 'documents', 'documentFiles', 'updatedAt' aja (pakai
+//     affectedKeys().hasOnly([...])), supaya customer nggak bisa ngerubah
+//     totalAmount/totalPaid/status booking-nya sendiri lewat upload dokumen.
+//   - Storage: baca-tulis publik ke path 'jamaah-documents/**' (dibatasi
+//     ukuran file & tipe konten di level rules juga, bukan cuma di kode).
 // ============================================================================
 
 const ATTEMPT_LIMIT = 5;
@@ -45,6 +55,45 @@ const DOC_LABELS = {
   visa: 'Visa',
   ticket: 'Tiket',
 };
+const DOC_KEYS = Object.keys(DOC_LABELS);
+
+// Batas upload dokumen dari Portal Customer — jaga-jaga biar Storage nggak
+// kebanjiran file gede/aneh-aneh dari HP customer (foto kamera HP jaman
+// sekarang bisa belasan MB). PDF & foto biasa udah lebih dari cukup di
+// bawah batas ini.
+const MAX_UPLOAD_MB = 8;
+const ALLOWED_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'];
+
+// Kop surat buat PDF Kwitansi — pola & helper-nya sama persis kayak yang
+// dipakai FinanceModule buat Laporan Laba Rugi, sengaja diduplikat di sini
+// (bukan di-share) biar halaman portal customer ini tetap berdiri sendiri
+// tanpa nyeret dependency ke modul dashboard staf.
+const DEFAULT_COMPANY_PROFILE = {
+  name: 'PT. WISATA HALAL INTERNASIONAL',
+  ppiuNumber: '',
+  address: '',
+  phone: '',
+  email: ''
+};
+
+const loadImageAsDataURL = (src) => new Promise((resolve, reject) => {
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    } catch (err) {
+      reject(err);
+    }
+  };
+  img.onerror = reject;
+  img.src = src;
+});
 
 // Bandingin tanggal lahir dengan aman — beberapa data jamaah lama bisa aja
 // kesimpen dalam format yang beda-beda dikit (ada spasi nyasar, atau ada
@@ -128,6 +177,15 @@ export default function PortalPage() {
   const [bookings, setBookings] = useState([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
 
+  const [companyProfile, setCompanyProfile] = useState(DEFAULT_COMPANY_PROFILE);
+  // Key-nya "{bookingId}-{docKey}" — biar tiap tombol upload independen,
+  // nggak saling ngunci kalau customer upload 2 dokumen beda booking/jenis
+  // hampir bersamaan.
+  const [uploadingKey, setUploadingKey] = useState(null);
+  const [uploadError, setUploadError] = useState('');
+  const [generatingReceiptId, setGeneratingReceiptId] = useState(null);
+  const fileInputRefs = useRef({});
+
   // Pulihkan sesi dari sessionStorage (hilang otomatis kalau tab ditutup) —
   // biar customer nggak perlu login ulang tiap kali refresh halaman.
   useEffect(() => {
@@ -140,23 +198,43 @@ export default function PortalPage() {
     setRestoringSession(false);
   }, []);
 
+  const fetchBookings = async (jamaahId) => {
+    setLoadingBookings(true);
+    try {
+      const q = query(collection(db, 'bookings'), where('jamaahId', '==', jamaahId));
+      const snap = await getDocs(q);
+      const list = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+      setBookings(list);
+    } catch (err) {
+      console.error('Gagal ambil data booking portal:', err);
+    }
+    setLoadingBookings(false);
+  };
+
   useEffect(() => {
     if (!session?.id) return;
-    const fetchBookings = async () => {
-      setLoadingBookings(true);
+    fetchBookings(session.id);
+  }, [session?.id]);
+
+  // Profil perusahaan (kop surat) — dipakai buat header PDF Kwitansi. Cukup
+  // diambil sekali begitu login, sama kayak yang FinanceModule lakuin di
+  // dashboard staf. Kalau gagal/belum di-setting, tetap jalan pakai
+  // DEFAULT_COMPANY_PROFILE (nggak bikin gagal fitur download kwitansi-nya).
+  useEffect(() => {
+    if (!session?.id) return;
+    const fetchCompanyProfile = async () => {
       try {
-        const q = query(collection(db, 'bookings'), where('jamaahId', '==', session.id));
-        const snap = await getDocs(q);
-        const list = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-        setBookings(list);
+        const profileSnap = await getDoc(doc(db, 'settings', 'company_profile'));
+        if (profileSnap.exists() && profileSnap.data().company) {
+          setCompanyProfile({ ...DEFAULT_COMPANY_PROFILE, ...profileSnap.data().company });
+        }
       } catch (err) {
-        console.error('Gagal ambil data booking portal:', err);
+        console.error('Gagal ambil profil perusahaan buat kwitansi:', err);
       }
-      setLoadingBookings(false);
     };
-    fetchBookings();
+    fetchCompanyProfile();
   }, [session?.id]);
 
   const handleLogin = async (e) => {
@@ -172,17 +250,29 @@ export default function PortalPage() {
     try {
       await checkPortalLoginAllowed(code);
 
-      const q = query(collection(db, 'jamaah'), where('customerCode', '==', code), limit(1));
+      // CATATAN: idealnya Kode Jamaah unik per orang, tapi ada data lama yang
+      // ternyata sempat kesimpen dobel dengan customerCode yang sama persis
+      // (kejadian sebelum penomoran kode dipindah ke counter atomik). Makanya
+      // di sini kita nggak boleh cuma ambil SATU dokumen pertama (limit(1))
+      // terus langsung dianggap itu orangnya — kalau kebetulan yang ke-ambil
+      // itu dokumen "kembar"-nya yang beda orang, customer yang datanya bener
+      // jadi nggak akan pernah bisa cocok. Jadi di sini kita cek SEMUA
+      // dokumen yang punya kode itu, siapa tau salah satunya beneran cocok.
+      const q = query(collection(db, 'jamaah'), where('customerCode', '==', code));
       const snap = await getDocs(q);
 
+      if (snap.size > 1) {
+        console.warn(`[Portal] Kode Jamaah "${code}" dipakai lebih dari satu data jamaah (${snap.size}) — perlu dibenerin di Data Master Jamaah biar unik lagi.`);
+      }
+
       let matched = null;
-      if (!snap.empty) {
-        const docSnap = snap.docs[0];
+      snap.forEach((docSnap) => {
+        if (matched) return;
         const data = docSnap.data();
         if (data.birthDate && normalizeDateOnly(data.birthDate) === normalizeDateOnly(loginForm.birthDate)) {
           matched = { id: docSnap.id, customerCode: data.customerCode, fullName: data.fullName || '' };
         }
-      }
+      });
 
       if (!matched) {
         await recordPortalLoginFailure(code);
@@ -213,6 +303,208 @@ export default function PortalPage() {
     setSession(null);
     setBookings([]);
     setLoginForm({ customerCode: '', birthDate: '' });
+    setUploadError('');
+  };
+
+  // Upload dokumen dari customer sendiri (paspor, KTP, dll) langsung dari
+  // Portal — nggak perlu lagi kirim manual ke staf lewat WhatsApp. Begitu
+  // upload sukses, checklist "documents.{key}" langsung ke-centang otomatis
+  // (uploadnya itu sendiri YANG jadi bukti dokumennya udah "diserahkan"),
+  // dan file-nya kesimpen di documentFiles.{key} biar staf bisa buka &
+  // verifikasi dari dashboard (lihat modal Checklist Dokumen di Booking &
+  // Manifest).
+  const handleUploadDocument = async (booking, docKey, file) => {
+    if (!file) return;
+    setUploadError('');
+
+    if (!ALLOWED_UPLOAD_TYPES.includes(file.type)) {
+      setUploadError(`File "${DOC_LABELS[docKey]}" harus berupa foto (JPG/PNG/HEIC) atau PDF.`);
+      return;
+    }
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      setUploadError(`File "${DOC_LABELS[docKey]}" kebesaran (maks ${MAX_UPLOAD_MB}MB). Coba kompres/foto ulang dulu.`);
+      return;
+    }
+
+    const stateKey = `${booking.id}-${docKey}`;
+    setUploadingKey(stateKey);
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+      const path = `jamaah-documents/${booking.id}/${docKey}-${Date.now()}-${safeName}`;
+      const fileRef = storageRef(storage, path);
+      await uploadBytes(fileRef, file, { contentType: file.type });
+      const url = await getDownloadURL(fileRef);
+
+      await updateDoc(doc(db, 'bookings', booking.id), {
+        [`documents.${docKey}`]: true,
+        [`documentFiles.${docKey}`]: {
+          url,
+          fileName: file.name,
+          uploadedAt: new Date().toISOString(),
+          uploadedBy: 'portal_customer',
+        },
+        updatedAt: new Date().toISOString(),
+      });
+
+      await fetchBookings(session.id);
+    } catch (err) {
+      console.error('Gagal upload dokumen dari portal:', err);
+      setUploadError(`Gagal upload "${DOC_LABELS[docKey]}": ${err.message || 'coba lagi sebentar lagi.'}`);
+    }
+    setUploadingKey(null);
+  };
+
+  // Kwitansi PDF — kop surat & gaya tabelnya sengaja disamain sama pola PDF
+  // yang dipakai FinanceModule (Laporan Laba Rugi) di dashboard staf, biar
+  // dokumen yang keluar dari sistem WHISys konsisten look-nya, walau
+  // generate-nya independen dari sisi Portal Customer ini.
+  const handleDownloadReceipt = async (booking) => {
+    setGeneratingReceiptId(booking.id);
+    try {
+      const payQ = query(collection(db, 'payments_income'), where('bookingId', '==', booking.id));
+      const paySnap = await getDocs(payQ);
+      const payments = paySnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+
+      const totalAmount = Number(booking.totalAmount) || 0;
+      const totalPaid = Number(booking.totalPaid) || 0;
+      const sisaTagihan = Math.max(0, totalAmount - totalPaid);
+
+      const docPdf = new jsPDF({ unit: 'mm', format: 'a4' });
+      const pageWidth = docPdf.internal.pageSize.getWidth();
+      const marginX = 14;
+      let cursorY = 16;
+
+      // Kop surat
+      try {
+        const logoDataUrl = await loadImageAsDataURL('/logo.png');
+        docPdf.addImage(logoDataUrl, 'PNG', marginX, cursorY - 4, 18, 18);
+      } catch (err) {
+        console.warn('Logo tidak berhasil dimuat untuk PDF:', err);
+      }
+
+      const textStartX = marginX + 22;
+      docPdf.setFont('helvetica', 'bold');
+      docPdf.setFontSize(13);
+      docPdf.text(companyProfile.name || DEFAULT_COMPANY_PROFILE.name, textStartX, cursorY);
+
+      docPdf.setFont('helvetica', 'normal');
+      docPdf.setFontSize(8.5);
+      let subY = cursorY + 5;
+      if (companyProfile.ppiuNumber) {
+        docPdf.text(companyProfile.ppiuNumber, textStartX, subY);
+        subY += 4;
+      }
+      if (companyProfile.address) {
+        docPdf.text(companyProfile.address, textStartX, subY, { maxWidth: pageWidth - textStartX - marginX });
+        subY += 4;
+      }
+      const contactLine = [companyProfile.phone, companyProfile.email].filter(Boolean).join('  •  ');
+      if (contactLine) {
+        docPdf.text(contactLine, textStartX, subY);
+        subY += 4;
+      }
+
+      cursorY = Math.max(cursorY + 18, subY) + 2;
+      docPdf.setDrawColor(180);
+      docPdf.line(marginX, cursorY, pageWidth - marginX, cursorY);
+      cursorY += 8;
+
+      // Judul
+      docPdf.setFont('helvetica', 'bold');
+      docPdf.setFontSize(12);
+      docPdf.text('KWITANSI PEMBAYARAN', pageWidth / 2, cursorY, { align: 'center' });
+      cursorY += 5;
+      docPdf.setFont('helvetica', 'normal');
+      docPdf.setFontSize(8);
+      docPdf.setTextColor(120);
+      docPdf.text(`Dicetak: ${formatTanggal(new Date().toISOString())}`, pageWidth / 2, cursorY, { align: 'center' });
+      docPdf.setTextColor(0);
+      cursorY += 8;
+
+      // Info jamaah & booking
+      autoTable(docPdf, {
+        startY: cursorY,
+        margin: { left: marginX, right: marginX },
+        theme: 'plain',
+        body: [
+          ['Kode Jamaah', booking.jamaahId ? (session.customerCode || '-') : '-', 'Kode Booking', booking.bookingCode || '-'],
+          ['Nama Jamaah', session.fullName || '-', 'Paket', booking.packageName || '-'],
+          ['Tanggal Keberangkatan', formatTanggal(booking.departureDate), 'Status', (booking.status || 'active') === 'active' ? 'Aktif' : booking.status],
+        ],
+        styles: { fontSize: 8.5, cellPadding: 1 },
+        columnStyles: {
+          0: { fontStyle: 'bold', cellWidth: 40 },
+          2: { fontStyle: 'bold', cellWidth: 35 },
+        },
+      });
+
+      cursorY = docPdf.lastAutoTable.finalY + 8;
+
+      // Rincian setoran
+      docPdf.setFont('helvetica', 'bold');
+      docPdf.setFontSize(10);
+      docPdf.text('Rincian Setoran', marginX, cursorY);
+      cursorY += 4;
+
+      if (payments.length === 0) {
+        docPdf.setFont('helvetica', 'italic');
+        docPdf.setFontSize(9);
+        docPdf.text('Belum ada setoran tercatat.', marginX, cursorY + 4);
+        cursorY += 10;
+      } else {
+        autoTable(docPdf, {
+          startY: cursorY,
+          margin: { left: marginX, right: marginX },
+          head: [['Tanggal', 'Metode', 'Catatan', 'Nominal (Rp)']],
+          body: payments.map((p) => [
+            formatTanggal(p.createdAt),
+            p.paymentMethod || '-',
+            p.notes || '-',
+            (Number(p.amount) || 0).toLocaleString('id-ID'),
+          ]),
+          styles: { fontSize: 8.5, cellPadding: 2 },
+          headStyles: { fillColor: [15, 23, 42] },
+          columnStyles: { 3: { halign: 'right' } },
+        });
+        cursorY = docPdf.lastAutoTable.finalY + 8;
+      }
+
+      // Ringkasan total
+      autoTable(docPdf, {
+        startY: cursorY,
+        margin: { left: marginX, right: marginX },
+        theme: 'plain',
+        body: [
+          ['Total Harga Paket', `Rp ${totalAmount.toLocaleString('id-ID')}`],
+          ['Total Sudah Dibayar', `Rp ${totalPaid.toLocaleString('id-ID')}`],
+          ['Sisa Tagihan', `Rp ${sisaTagihan.toLocaleString('id-ID')}`],
+        ],
+        styles: { fontSize: 9.5, cellPadding: 2 },
+        columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'right', fontStyle: 'bold' } },
+        didParseCell: (data) => {
+          if (data.row.index === 2 && data.section === 'body') {
+            data.cell.styles.textColor = sisaTagihan > 0 ? [217, 119, 6] : [16, 185, 129];
+          }
+        },
+      });
+      cursorY = docPdf.lastAutoTable.finalY + 10;
+
+      docPdf.setFont('helvetica', 'italic');
+      docPdf.setFontSize(7.5);
+      docPdf.setTextColor(140);
+      docPdf.text(
+        'Kwitansi ini digenerate otomatis lewat Portal Jamaah dan sah tanpa tanda tangan basah.',
+        pageWidth / 2, cursorY, { align: 'center' }
+      );
+
+      docPdf.save(`Kwitansi-${booking.bookingCode || booking.id}.pdf`);
+    } catch (err) {
+      console.error('Gagal bikin PDF kwitansi:', err);
+      alert('Gagal membuat kwitansi: ' + (err.message || 'coba lagi sebentar lagi.'));
+    }
+    setGeneratingReceiptId(null);
   };
 
   if (restoringSession) {
@@ -303,6 +595,13 @@ export default function PortalPage() {
           </button>
         </div>
 
+        {uploadError && (
+          <div className="flex items-start gap-2 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs rounded-lg p-3">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{uploadError}</span>
+          </div>
+        )}
+
         {loadingBookings ? (
           <div className="flex items-center justify-center py-16 text-slate-500 text-sm gap-2">
             <Loader2 className="w-4 h-4 animate-spin" /> Memuat data booking...
@@ -318,6 +617,10 @@ export default function PortalPage() {
             const totalPaid = Number(bk.totalPaid) || 0;
             const sisaTagihan = Math.max(0, totalAmount - totalPaid);
             const docs = bk.documents || {};
+            const docFiles = bk.documentFiles || {};
+            const readyCount = DOC_KEYS.filter((key) => docs[key]).length;
+            const readyPercent = Math.round((readyCount / DOC_KEYS.length) * 100);
+            const isReadyComplete = readyCount === DOC_KEYS.length;
 
             return (
               <div key={bk.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
@@ -336,10 +639,42 @@ export default function PortalPage() {
                   </span>
                 </div>
 
+                {/* KESIAPAN BERANGKAT — persentase kelengkapan dokumen, biar
+                    jamaah langsung ngerti seberapa "siap" dia berangkat
+                    tanpa harus nge-scroll & itung-itung sendiri satu-satu. */}
+                <div className="px-5 py-4 border-b border-slate-800">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
+                      <Gauge className="w-3.5 h-3.5 text-emerald-500" /> Kesiapan Berangkat
+                    </p>
+                    <span className={`text-xs font-bold ${isReadyComplete ? 'text-emerald-500' : 'text-amber-500'}`}>
+                      {readyPercent}%
+                    </span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${isReadyComplete ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                      style={{ width: `${readyPercent}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1.5">{readyCount} dari {DOC_KEYS.length} dokumen sudah lengkap.</p>
+                </div>
+
                 <div className="p-5 border-b border-slate-800">
-                  <p className="text-xs font-medium text-slate-300 flex items-center gap-1.5 mb-3">
-                    <Wallet className="w-3.5 h-3.5 text-emerald-500" /> Status Pembayaran
-                  </p>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
+                      <Wallet className="w-3.5 h-3.5 text-emerald-500" /> Status Pembayaran
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadReceipt(bk)}
+                      disabled={generatingReceiptId === bk.id}
+                      className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {generatingReceiptId === bk.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                      Kwitansi
+                    </button>
+                  </div>
                   <div className="grid grid-cols-3 gap-3 text-center">
                     <div>
                       <p className="text-[10px] text-slate-500">Total Paket</p>
@@ -360,13 +695,56 @@ export default function PortalPage() {
                   <p className="text-xs font-medium text-slate-300 flex items-center gap-1.5 mb-3">
                     <FileCheck className="w-3.5 h-3.5 text-emerald-500" /> Kelengkapan Dokumen
                   </p>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {Object.entries(DOC_LABELS).map(([key, label]) => {
+                  <p className="text-[10px] text-slate-500 -mt-2 mb-3">
+                    Belum sempat kirim dokumen ke kami? Upload langsung di sini aja (foto/PDF, maks {MAX_UPLOAD_MB}MB).
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {DOC_KEYS.map((key) => {
+                      const label = DOC_LABELS[key];
                       const done = !!docs[key];
+                      const fileInfo = docFiles[key];
+                      const stateKey = `${bk.id}-${key}`;
+                      const isUploading = uploadingKey === stateKey;
                       return (
-                        <div key={key} className={`flex items-center gap-1.5 text-[11px] rounded-lg px-2 py-1.5 ${done ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800/60 text-slate-500'}`}>
-                          {done ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <XCircle className="w-3.5 h-3.5 shrink-0" />}
-                          <span>{label}</span>
+                        <div key={key} className={`flex items-center justify-between gap-2 text-[11px] rounded-lg px-2.5 py-2 ${done ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800/60 text-slate-500'}`}>
+                          <span className="flex items-center gap-1.5 min-w-0">
+                            {done ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <XCircle className="w-3.5 h-3.5 shrink-0" />}
+                            <span className="truncate">{label}</span>
+                          </span>
+                          <span className="flex items-center gap-1 shrink-0">
+                            {fileInfo?.url && (
+                              <a
+                                href={fileInfo.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Lihat file yang sudah diupload"
+                                className="flex items-center gap-1 bg-slate-950/40 hover:bg-slate-950/70 px-1.5 py-1 rounded text-[10px] font-medium"
+                              >
+                                <Eye className="w-3 h-3" /> Lihat
+                              </a>
+                            )}
+                            <button
+                              type="button"
+                              disabled={isUploading}
+                              onClick={() => fileInputRefs.current[stateKey]?.click()}
+                              title={fileInfo ? 'Ganti file' : 'Upload file'}
+                              className="flex items-center gap-1 bg-slate-950/40 hover:bg-slate-950/70 px-1.5 py-1 rounded text-[10px] font-medium disabled:opacity-60"
+                            >
+                              {isUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                              {fileInfo ? 'Ganti' : 'Upload'}
+                            </button>
+                            <input
+                              ref={(el) => { fileInputRefs.current[stateKey] = el; }}
+                              type="file"
+                              accept={ALLOWED_UPLOAD_TYPES.join(',')}
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                e.target.value = ''; // biar bisa pilih file yg sama lagi kalau perlu re-upload
+                                handleUploadDocument(bk, key, file);
+                              }}
+                            />
+                          </span>
                         </div>
                       );
                     })}
