@@ -1,21 +1,21 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { db, storage } from '@/lib/firebase';
+import { db } from '@/lib/firebase';
 import {
   collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, runTransaction
 } from 'firebase/firestore';
-import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
   LogIn, LogOut, Loader2, AlertTriangle, Plane, Wallet, FileCheck, CheckCircle2,
-  XCircle, Ban, RotateCcw, Clock, ShieldCheck, Upload, Eye, Download, Gauge
+  XCircle, Ban, RotateCcw, Clock, ShieldCheck, Download, Gauge, Upload, Eye
 } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 
 // ============================================================================
-// PORTAL CUSTOMER — Tahap 2 (view + upload dokumen + download kwitansi)
+// PORTAL CUSTOMER — Tahap 2 (view + progress Kesiapan Berangkat + download
+// kwitansi PDF)
 //
 // Login pakai Kode Jamaah (customerCode) + Tanggal Lahir, TANPA password,
 // TANPA akun staf. Sengaja dibikin nggak percaya apapun dari input customer
@@ -28,17 +28,23 @@ import DateFieldID from '@/components/DateFieldID';
 // terpisah 'portalLoginAttempts', dikunci per Kode Jamaah — BUKAN nyimpen
 // data sensitif apapun, cuma counter + waktu kunci.
 //
-// CATATAN buat yang pegang Firebase Console: halaman ini butuh Firestore &
-// Storage Security Rules tambahan — lihat pesan penjelasan yang dikirim
-// bareng file ini. Ringkasannya:
-//   - Firestore: baca collection 'jamaah' & 'bookings' publik, baca-tulis
-//     'portalLoginAttempts' publik (sudah ada dari Tahap 1), DITAMBAH update
-//     terbatas ke collection 'bookings' — HARUS dibatasi cuma boleh nyentuh
-//     field 'documents', 'documentFiles', 'updatedAt' aja (pakai
-//     affectedKeys().hasOnly([...])), supaya customer nggak bisa ngerubah
-//     totalAmount/totalPaid/status booking-nya sendiri lewat upload dokumen.
-//   - Storage: baca-tulis publik ke path 'jamaah-documents/**' (dibatasi
-//     ukuran file & tipe konten di level rules juga, bukan cuma di kode).
+// Upload dokumen dari customer (paspor/KTP/dll) DISIMPEN KE GOOGLE DRIVE,
+// bukan Firebase Storage — sengaja, biar nggak perlu upgrade project
+// Firebase ke plan Blaze (yang butuh kartu kredit). Caranya: file dikirim
+// dari browser customer ke sebuah Google Apps Script Web App (jembatan
+// yang jalan atas nama akun Drive milik WHISys sendiri, jadi customer
+// nggak perlu login Google), yang nyimpen filenya ke folder Drive lalu
+// balikin link-nya buat disimpen ke Firestore. Kode Apps Script-nya ada di
+// file terpisah 'Code.gs' (dikirim bareng file ini) — WAJIB di-deploy
+// dulu di script.google.com, baru tempel URL deployment-nya ke
+// APPS_SCRIPT_URL di bawah sebelum fitur upload ini bisa jalan.
+//
+// CATATAN buat yang pegang Firebase Console: halaman ini butuh Firestore
+// Security Rules tambahan (baca collection 'jamaah' & 'bookings' publik,
+// baca-tulis 'portalLoginAttempts' publik, DAN update terbatas ke
+// 'bookings' — cuma boleh nyentuh field 'documents'/'documentFiles'/
+// 'updatedAt' — lihat firestore.rules yang udah pernah dikirim). Nggak
+// butuh Storage Security Rules sama sekali di skema Google Drive ini.
 // ============================================================================
 
 const ATTEMPT_LIMIT = 5;
@@ -57,12 +63,30 @@ const DOC_LABELS = {
 };
 const DOC_KEYS = Object.keys(DOC_LABELS);
 
-// Batas upload dokumen dari Portal Customer — jaga-jaga biar Storage nggak
-// kebanjiran file gede/aneh-aneh dari HP customer (foto kamera HP jaman
-// sekarang bisa belasan MB). PDF & foto biasa udah lebih dari cukup di
-// bawah batas ini.
+// GANTI dengan URL Web App hasil deploy Code.gs (lihat instruksi di
+// komentar atas file ini / Code.gs). Selama masih placeholder di bawah
+// ini, tombol upload bakal langsung nolak dengan pesan yang jelas —
+// nggak diem-diem gagal.
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzsFlrrSlyfCc7lYx-9mdshwTMT0Ykde5KcsYHzl6v9BWFKMJ8ggX-g3GeSPY44ovHu/exec';
+
+// Batas upload dokumen dari Portal Customer — jaga-jaga biar nggak ada yang
+// ngirim file gede/aneh-aneh (foto kamera HP jaman sekarang bisa belasan
+// MB). PDF & foto biasa udah lebih dari cukup di bawah batas ini.
 const MAX_UPLOAD_MB = 8;
 const ALLOWED_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'];
+
+// Ubah File jadi base64 murni (tanpa prefix "data:...;base64,") — format
+// yang dipahami Code.gs di sisi Apps Script buat di-decode balik jadi file.
+const fileToBase64 = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const result = String(reader.result || '');
+    const base64 = result.includes(',') ? result.split(',')[1] : result;
+    resolve(base64);
+  };
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
 
 // Kop surat buat PDF Kwitansi — pola & helper-nya sama persis kayak yang
 // dipakai FinanceModule buat Laporan Laba Rugi, sengaja diduplikat di sini
@@ -178,12 +202,12 @@ export default function PortalPage() {
   const [loadingBookings, setLoadingBookings] = useState(false);
 
   const [companyProfile, setCompanyProfile] = useState(DEFAULT_COMPANY_PROFILE);
+  const [generatingReceiptId, setGeneratingReceiptId] = useState(null);
   // Key-nya "{bookingId}-{docKey}" — biar tiap tombol upload independen,
   // nggak saling ngunci kalau customer upload 2 dokumen beda booking/jenis
   // hampir bersamaan.
   const [uploadingKey, setUploadingKey] = useState(null);
   const [uploadError, setUploadError] = useState('');
-  const [generatingReceiptId, setGeneratingReceiptId] = useState(null);
   const fileInputRefs = useRef({});
 
   // Pulihkan sesi dari sessionStorage (hilang otomatis kalau tab ditutup) —
@@ -307,16 +331,28 @@ export default function PortalPage() {
   };
 
   // Upload dokumen dari customer sendiri (paspor, KTP, dll) langsung dari
-  // Portal — nggak perlu lagi kirim manual ke staf lewat WhatsApp. Begitu
-  // upload sukses, checklist "documents.{key}" langsung ke-centang otomatis
-  // (uploadnya itu sendiri YANG jadi bukti dokumennya udah "diserahkan"),
-  // dan file-nya kesimpen di documentFiles.{key} biar staf bisa buka &
-  // verifikasi dari dashboard (lihat modal Checklist Dokumen di Booking &
-  // Manifest).
+  // Portal — nggak perlu lagi kirim manual ke staf lewat WhatsApp. File
+  // dikirim ke Google Apps Script (Code.gs) yang nyimpen ke Google Drive
+  // dan balikin link-nya. Begitu sukses, checklist "documents.{key}"
+  // langsung ke-centang otomatis (uploadnya itu sendiri YANG jadi bukti
+  // dokumennya udah "diserahkan"), dan link file-nya kesimpen di
+  // documentFiles.{key} biar staf bisa buka & verifikasi dari dashboard
+  // (lihat modal Checklist Dokumen di Booking & Manifest).
+  //
+  // Dikirim sebagai body string TANPA header Content-Type eksplisit (jadi
+  // browser default-nya text/plain) — SENGAJA, bukan lupa. Kalau pakai
+  // 'application/json', browser bakal ngirim preflight OPTIONS duluan, dan
+  // Google Apps Script Web App nggak nanganin preflight itu (bakal gagal
+  // CORS). Dengan text/plain, request-nya dianggap "simple request" jadi
+  // nggak butuh preflight — sisi Code.gs tetap parse isinya sebagai JSON.
   const handleUploadDocument = async (booking, docKey, file) => {
     if (!file) return;
     setUploadError('');
 
+    if (APPS_SCRIPT_URL.startsWith('GANTI_DENGAN')) {
+      setUploadError('Fitur upload belum aktif — URL Google Apps Script belum dipasang di kode (lihat komentar di atas file portal/page.js).');
+      return;
+    }
     if (!ALLOWED_UPLOAD_TYPES.includes(file.type)) {
       setUploadError(`File "${DOC_LABELS[docKey]}" harus berupa foto (JPG/PNG/HEIC) atau PDF.`);
       return;
@@ -329,16 +365,32 @@ export default function PortalPage() {
     const stateKey = `${booking.id}-${docKey}`;
     setUploadingKey(stateKey);
     try {
-      const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-      const path = `jamaah-documents/${booking.id}/${docKey}-${Date.now()}-${safeName}`;
-      const fileRef = storageRef(storage, path);
-      await uploadBytes(fileRef, file, { contentType: file.type });
-      const url = await getDownloadURL(fileRef);
+      const base64Data = await fileToBase64(file);
+
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        body: JSON.stringify({
+          bookingId: booking.id,
+          bookingCode: booking.bookingCode || '',
+          docKey,
+          fileName: file.name,
+          mimeType: file.type,
+          base64Data,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Server upload merespons status ${res.status}.`);
+      }
+      const result = await res.json();
+      if (!result.success || !result.url) {
+        throw new Error(result.error || 'Upload gagal tanpa keterangan.');
+      }
 
       await updateDoc(doc(db, 'bookings', booking.id), {
         [`documents.${docKey}`]: true,
         [`documentFiles.${docKey}`]: {
-          url,
+          url: result.url,
           fileName: file.name,
           uploadedAt: new Date().toISOString(),
           uploadedBy: 'portal_customer',
@@ -717,7 +769,7 @@ export default function PortalPage() {
                                 href={fileInfo.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                title="Lihat file yang sudah diupload"
+                                title="Lihat file yang sudah diupload (Google Drive)"
                                 className="flex items-center gap-1 bg-slate-950/40 hover:bg-slate-950/70 px-1.5 py-1 rounded text-[10px] font-medium"
                               >
                                 <Eye className="w-3 h-3" /> Lihat
