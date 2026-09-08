@@ -67,7 +67,7 @@ const DOC_KEYS = Object.keys(DOC_LABELS);
 // komentar atas file ini / Code.gs). Selama masih placeholder di bawah
 // ini, tombol upload bakal langsung nolak dengan pesan yang jelas —
 // nggak diem-diem gagal.
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzsFlrrSlyfCc7lYx-9mdshwTMT0Ykde5KcsYHzl6v9BWFKMJ8ggX-g3GeSPY44ovHu/exec';
+const APPS_SCRIPT_URL = 'GANTI_DENGAN_URL_WEB_APP_GOOGLE_APPS_SCRIPT';
 
 // Batas upload dokumen dari Portal Customer — jaga-jaga biar nggak ada yang
 // ngirim file gede/aneh-aneh (foto kamera HP jaman sekarang bisa belasan
@@ -222,13 +222,29 @@ export default function PortalPage() {
     setRestoringSession(false);
   }, []);
 
+  // Ambil booking milik jamaah yang login — dobel query, jamaahId (booking
+  // di mana dia sendiri jadi PESERTA) ATAU ordererId (booking yang DIA
+  // PESANKAN, entah dia ikut berangkat atau enggak). Ini penting buat kasus
+  // rombongan: staf cuma kirim 1x info Portal ke Pemesan (lihat
+  // handleSharePortalInfo di dashboard staf), jadi begitu Pemesan login,
+  // dia harus bisa lihat SEMUA booking peserta yang dia daftarkan, bukan
+  // cuma booking-nya sendiri (yang mungkin malah nggak ada kalau dia nggak
+  // ikut berangkat). Dua query hasilnya digabung & di-dedupe pakai id
+  // booking, biar booking yang dia jadi peserta SEKALIGUS pemesan (kasus
+  // solo/daftar sendiri) nggak nongol dobel.
   const fetchBookings = async (jamaahId) => {
     setLoadingBookings(true);
     try {
-      const q = query(collection(db, 'bookings'), where('jamaahId', '==', jamaahId));
-      const snap = await getDocs(q);
-      const list = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
+      const [asPaxSnap, asOrdererSnap] = await Promise.all([
+        getDocs(query(collection(db, 'bookings'), where('jamaahId', '==', jamaahId))),
+        getDocs(query(collection(db, 'bookings'), where('ordererId', '==', jamaahId))),
+      ]);
+
+      const merged = new Map();
+      asPaxSnap.docs.forEach((d) => merged.set(d.id, { id: d.id, ...d.data() }));
+      asOrdererSnap.docs.forEach((d) => merged.set(d.id, { id: d.id, ...d.data() }));
+
+      const list = Array.from(merged.values())
         .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
       setBookings(list);
     } catch (err) {
@@ -419,6 +435,25 @@ export default function PortalPage() {
         .map((d) => ({ id: d.id, ...d.data() }))
         .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
 
+      // Kode Jamaah punya SI PESERTA booking ini, bukan otomatis kode jamaah
+      // yang lagi login — sejak Pemesan rombongan bisa login & lihat booking
+      // peserta lain (lihat fetchBookings di atas), dua-duanya bisa beda
+      // orang. Kalau kebetulan booking ini emang booking-nya sendiri (dia
+      // login sebagai peserta), pake data session yang udah ada, nggak perlu
+      // fetch ulang.
+      let paxCustomerCode = session?.customerCode || '-';
+      if (booking.jamaahId && booking.jamaahId !== session?.id) {
+        try {
+          const paxSnap = await getDoc(doc(db, 'jamaah', booking.jamaahId));
+          if (paxSnap.exists()) {
+            paxCustomerCode = paxSnap.data().customerCode || '-';
+          }
+        } catch (err) {
+          console.warn('Gagal ambil Kode Jamaah peserta buat kwitansi:', err);
+        }
+      }
+      const paxName = booking.jamaahName || session?.fullName || '-';
+
       const totalAmount = Number(booking.totalAmount) || 0;
       const totalPaid = Number(booking.totalPaid) || 0;
       const sisaTagihan = Math.max(0, totalAmount - totalPaid);
@@ -481,8 +516,8 @@ export default function PortalPage() {
         margin: { left: marginX, right: marginX },
         theme: 'plain',
         body: [
-          ['Kode Jamaah', booking.jamaahId ? (session.customerCode || '-') : '-', 'Kode Booking', booking.bookingCode || '-'],
-          ['Nama Jamaah', session.fullName || '-', 'Paket', booking.packageName || '-'],
+          ['Kode Jamaah', paxCustomerCode, 'Kode Booking', booking.bookingCode || '-'],
+          ['Nama Jamaah', paxName, 'Paket', booking.packageName || '-'],
           ['Tanggal Keberangkatan', formatTanggal(booking.departureDate), 'Status', (booking.status || 'active') === 'active' ? 'Aktif' : booking.status],
         ],
         styles: { fontSize: 8.5, cellPadding: 1 },
@@ -682,6 +717,13 @@ export default function PortalPage() {
                     <h2 className="text-sm font-bold text-white flex items-center gap-2 mt-0.5">
                       <Plane className="w-4 h-4 text-emerald-500" /> {bk.packageName || '-'}
                     </h2>
+                    {/* Nama peserta booking INI — penting ditampilin begitu Pemesan
+                        rombongan bisa login & lihat lebih dari satu booking
+                        sekaligus (punya beberapa peserta), biar nggak keliru
+                        booking siapa yang lagi dilihat. */}
+                    {bk.jamaahName && (
+                      <p className="text-xs text-slate-300 mt-1">Peserta: <span className="font-medium text-white">{bk.jamaahName}</span></p>
+                    )}
                     <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5" /> Keberangkatan: {formatTanggal(bk.departureDate)}
                     </p>
