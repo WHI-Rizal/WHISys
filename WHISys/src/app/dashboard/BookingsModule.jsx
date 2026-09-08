@@ -4853,10 +4853,11 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
             <div className="space-y-2.5 mb-6">
               {REQUIRED_DOCUMENTS.map((docItem) => {
                 const isChecked = docChecklist[docItem.key] || false;
-                // Kalau jamaah upload sendiri lewat Portal Customer, file-nya
-                // kesimpen di documentFiles.{key} (lihat portal/page.js) —
-                // munculin link "Lihat" di sini biar staf bisa langsung buka
-                // & verifikasi filenya tanpa harus minta ulang lewat WA.
+                // Kalau jamaah upload sendiri lewat Portal Customer, link
+                // file-nya (ke Google Drive) kesimpen di
+                // documentFiles.{key} (lihat portal/page.js) — munculin
+                // link "Lihat" di sini biar staf bisa langsung buka &
+                // verifikasi filenya tanpa harus minta ulang lewat WA.
                 const uploadedFile = selectedBookingForDoc?.documentFiles?.[docItem.key];
                 return (
                   <label
@@ -4876,7 +4877,7 @@ Masukan dari Bapak/Ibu sangat berarti buat kami terus meningkatkan kualitas laya
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          title={`Diupload jamaah lewat Portal • ${uploadedFile.fileName || ''}`}
+                          title={`Diupload jamaah lewat Portal (Google Drive) • ${uploadedFile.fileName || ''}`}
                           className="flex items-center gap-1 bg-slate-950/30 hover:bg-slate-950/60 text-emerald-400 px-1.5 py-1 rounded text-[10px] font-medium"
                         >
                           <Eye className="w-3 h-3" /> Lihat
