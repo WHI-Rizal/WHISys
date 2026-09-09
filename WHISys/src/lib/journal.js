@@ -546,3 +546,156 @@ export const runInitialJournalMigration = async ({
 
   return summary;
 };
+
+// =====================================================================
+// KOREKSI DAMPAK RESCHEDULE DI MIGRASI DATA AWAL — lihat catatan
+// MEDIUM-HIGH di Audit Sistem 9 Sep 2026 (§2). Alur reschedule yang
+// LIVE (BookingsModule.jsx handleRescheduleSubmit/handleGroupRescheduleSubmit)
+// udah bener dari awal: begitu booking di-reschedule, booking lama
+// "ditutup buku" (write-off sisa piutang) dan setoran Carry-Over-nya
+// direklas (BUKAN dianggap kas baru). Masalahnya cuma di
+// `runInitialJournalMigration` — itu jurnal SEMUA booking (termasuk yang
+// statusnya udah 'rescheduled' sebelum migrasi jalan) secara penuh tanpa
+// nutup buku booking lamanya, DAN nganggep dokumen payments_income
+// `paymentMethod: 'Carry-Over Reschedule'` sebagai setoran kas beneran
+// (padahal itu cuma catatan pemindahan, bukan uang masuk) — jadi
+// Piutang Jamaah & Kas/Bank di Neraca bisa kelebihan catat untuk
+// booking-booking yang di-reschedule SEBELUM migrasi ini pernah jalan.
+//
+// Dua fungsi di bawah ini READ-ONLY DULU (diagnose) baru APPLY (correction)
+// — dipisah sengaja, biar staf bisa liat dulu angka & daftar booking yang
+// kena dampak sebelum ada jurnal apapun yang diposting, bukan main
+// langsung apply dari balik layar.
+// =====================================================================
+
+// Diagnosa (READ-ONLY, nggak nulis apapun ke Firestore) — nerima data yang
+// UDAH di-fetch pemanggil (LaporanKeuanganModule udah punya semuanya di
+// state), biar nggak query Firestore dua kali. Balikin daftar booking lama
+// yang KEMUNGKINAN masih kena dampak (belum pernah ditutup buku via jurnal
+// `booking_cancel_refund` bersourceDocId `refund_<id>`-nya), lengkap sama
+// nominal potensi koreksinya, plus total keseluruhan.
+export const diagnoseRescheduleMigrationImpact = ({ bookings, paymentsIncome, journalEntries }) => {
+  const bookingById = {};
+  (bookings || []).forEach(b => { bookingById[b.id] = b; });
+
+  // sourceDocId booking_cancel_refund SELALU `refund_<bookingId>` (lihat
+  // postBookingCancelRefund), jadi cukup dicek ada/enggaknya per id, nggak
+  // perlu ngecek isi baris jurnalnya.
+  const writeOffSourceDocIds = new Set(
+    (journalEntries || [])
+      .filter(e => e.source === 'booking_cancel_refund')
+      .map(e => e.sourceDocId)
+  );
+  // sourceDocId booking_reschedule_carryover SELALU id booking BARU (lihat
+  // handleRescheduleSubmit/handleGroupRescheduleSubmit).
+  const carryoverReclassDoneForNewBookingId = new Set(
+    (journalEntries || [])
+      .filter(e => e.source === 'booking_reschedule_carryover')
+      .map(e => e.sourceDocId)
+  );
+
+  const affected = [];
+  let totalWriteOff = 0;
+  let totalGhostCash = 0;
+
+  (bookings || []).forEach(oldBooking => {
+    if (oldBooking.status !== 'rescheduled') return;
+    if (writeOffSourceDocIds.has(`refund_${oldBooking.id}`)) return; // udah pernah ditutup buku (via live code ATAU koreksi sebelumnya) — skip
+
+    const newBooking = oldBooking.rescheduledToBookingId ? bookingById[oldBooking.rescheduledToBookingId] : null;
+    const carryoverPayment = newBooking
+      ? (paymentsIncome || []).find(p => p.bookingId === newBooking.id && p.paymentMethod === 'Carry-Over Reschedule')
+      : null;
+    const carryoverAlreadyReclassed = newBooking ? carryoverReclassDoneForNewBookingId.has(newBooking.id) : false;
+
+    const writeOffAmount = Math.max(0, (Number(oldBooking.totalAmount) || 0) - (Number(oldBooking.totalPaid) || 0));
+    const ghostCashAmount = (!carryoverAlreadyReclassed && carryoverPayment) ? (Number(carryoverPayment.amount) || 0) : 0;
+
+    if (writeOffAmount <= 0 && ghostCashAmount <= 0) return; // nggak ada dampak nominal apapun, aman dilewati
+
+    affected.push({
+      oldBookingId: oldBooking.id,
+      oldBookingCode: oldBooking.bookingCode,
+      oldJamaahName: oldBooking.jamaahName,
+      newBookingId: newBooking?.id || null,
+      newBookingCode: newBooking?.bookingCode || oldBooking.rescheduledToBookingCode || '-',
+      writeOffAmount,
+      ghostCashAmount,
+      carryoverPaymentId: carryoverPayment?.id || null,
+    });
+    totalWriteOff += writeOffAmount;
+    totalGhostCash += ghostCashAmount;
+  });
+
+  return { affected, totalWriteOff, totalGhostCash, count: affected.length };
+};
+
+// Terapkan koreksi (SEKALI per booking, aman dipanggil ulang — tiap item
+// di-cek lagi idempotency-nya sebelum nulis apapun). Nerima `affected`
+// persis dari hasil diagnoseRescheduleMigrationImpact di atas, `packages`
+// buat nentuin isRecognized booking lama (best-effort — pakai status
+// SEKARANG, bukan status persis di detik reschedule terjadi dulu, karena
+// histori itu nggak kesimpen), dan `financialAccounts`/`bookings` cuma
+// buat lookup nama & sinkron.
+export const applyRescheduleMigrationCorrection = async ({ affected, bookings, packages, createdByUid, createdByName }) => {
+  const bookingById = {};
+  (bookings || []).forEach(b => { bookingById[b.id] = b; });
+
+  const summary = { corrected: 0, skipped: 0, errors: [] };
+
+  for (const item of (affected || [])) {
+    try {
+      // Re-cek idempotency langsung ke Firestore (bukan cuma dari snapshot
+      // diagnosa) — jaga-jaga kalau ada 2 tab/staf yang nge-klik "Terapkan
+      // Koreksi" hampir bersamaan, atau data udah berubah sejak diagnosa
+      // ditampilin.
+      const existingWriteOff = await getDocs(query(
+        collection(db, 'journal_entries'),
+        where('source', '==', 'booking_cancel_refund'),
+        where('sourceDocId', '==', `refund_${item.oldBookingId}`)
+      ));
+      const alreadyDone = existingWriteOff.docs.length > 0;
+      if (alreadyDone) { summary.skipped += 1; continue; }
+
+      const oldBooking = bookingById[item.oldBookingId];
+      const oldPkg = (packages || []).find(p => p.id === oldBooking?.packageId);
+
+      // 1. Reklas Carry-Over — samain PERSIS logic yang dipakai alur
+      //    reschedule LIVE: lepas dulu jurnal `income_payment` yang salah
+      //    (migrasi lama nganggep carry-over sebagai kas beneran masuk),
+      //    baru pasang jurnal reklas yang benar (Pendapatan Diterima Dimuka
+      //    booking lama -> pengurang Piutang Jamaah booking baru, BUKAN kas).
+      if (item.ghostCashAmount > 0 && item.carryoverPaymentId) {
+        await deleteJournalEntriesBySource('income_payment', item.carryoverPaymentId);
+        await postJournalEntry({
+          date: new Date().toISOString(),
+          description: `Koreksi Migrasi — Carry-Over Reschedule ${item.oldBookingCode} -> ${item.newBookingCode}`,
+          source: 'booking_reschedule_carryover', sourceDocId: item.newBookingId, reference: item.newBookingCode,
+          lines: [
+            glLine(ACC.PENDAPATAN_DITERIMA_DIMUKA, item.ghostCashAmount, 0),
+            glLine(ACC.PIUTANG_JAMAAH, 0, item.ghostCashAmount),
+          ],
+          createdByUid, createdByName
+        });
+      }
+
+      // 2. Tutup buku booking lama — write-off sisa piutang yang nggak
+      //    akan pernah ketagih (persis pola postBookingCancelRefund yang
+      //    sama dipakai alur reschedule/batal LIVE).
+      if (item.writeOffAmount > 0) {
+        await postBookingCancelRefund({
+          bookingId: item.oldBookingId, bookingCode: item.oldBookingCode,
+          writeOffAmount: item.writeOffAmount, refundAmount: 0,
+          isRecognized: !!(oldPkg && oldPkg.revenueRecognized),
+          date: new Date().toISOString(), createdByUid, createdByName
+        });
+      }
+
+      summary.corrected += 1;
+    } catch (err) {
+      summary.errors.push(`${item.oldBookingCode || item.oldBookingId}: ${err.message}`);
+    }
+  }
+
+  return summary;
+};
