@@ -18,6 +18,7 @@ import {
   Calendar,
   AlertCircle,
   ShieldCheck,
+  Scale,
   MessageSquareHeart,
   ChevronLeft,
   ChevronRight,
@@ -44,6 +45,7 @@ import PackagesModule from './PackagesModule';
 import JamaahModule from './JamaahModule';
 import BookingsModule from './BookingsModule';
 import FinanceModule from './FinanceModule';
+import LaporanKeuanganModule from './LaporanKeuanganModule';
 import AiAnalyzerModule from './AiAnalyzerModule';
 import SettingsModule from './SettingsModule';
 import FeedbackModule from './FeedbackModule';
@@ -81,6 +83,10 @@ export default function DashboardPage() {
   // Rules di server, bukan pengecekan ini.
   const currentRole = (userProfile?.role || '').toLowerCase();
   const canAccessFinance = currentRole.includes('super') || currentRole === 'admin' || currentRole === 'finance';
+  // Modul Laporan Keuangan (Jurnal Umum/Buku Besar/Neraca/dst) akses-nya
+  // disamain sama modul Keuangan & Pelunasan — accounting kerja di sini
+  // adalah Finance/Admin/Super Admin.
+  const canAccessJournal = canAccessFinance;
   // Riwayat Aktivitas Sistem cuma boleh diliat Super Admin — sinkron sama
   // rules 'activity_logs' (allow read: if isSuperAdmin()).
   const canAccessActivityLog = currentRole.includes('super');
@@ -583,6 +589,19 @@ export default function DashboardPage() {
               />
             )}
 
+            {canAccessJournal && (
+              <SidebarItem
+                icon={Scale}
+                label="Laporan Keuangan"
+                menuKey="journal"
+                active={activeMenu === 'journal'}
+                activeClass={currentTheme.activeMenu}
+                subTextClass={currentTheme.subText}
+                collapsed={sidebarCollapsed}
+                onClick={() => changeMenu('journal')}
+              />
+            )}
+
             <SidebarItem
               icon={MessageSquareHeart}
               label="Feedback & Ulasan"
@@ -887,6 +906,20 @@ export default function DashboardPage() {
           />
         )}
 
+        {/* MODUL LAPORAN KEUANGAN — Jurnal Umum/Buku Besar/Neraca/Arus Kas/Piutang & Hutang, dibatasi sama kayak modul Keuangan */}
+        {activeMenu === 'journal' && !canAccessJournal && (
+          <div className={`${currentTheme.card} border ${currentTheme.border} rounded-xl p-8 text-center`}>
+            <ShieldCheck className="w-8 h-8 mx-auto mb-3 text-amber-500" />
+            <h3 className={`text-sm font-bold ${currentTheme.headingText} mb-1`}>Akses Terbatas</h3>
+            <p className={`text-xs ${currentTheme.subText}`}>
+              Modul Laporan Keuangan cuma bisa diakses role Finance & Super Admin. Hubungi Super Admin kalau kamu butuh akses ini.
+            </p>
+          </div>
+        )}
+        {activeMenu === 'journal' && canAccessJournal && (
+          <LaporanKeuanganModule theme={theme} currentUser={userProfile} />
+        )}
+
         {/* MODUL AI BUSINESS INTELLIGENCE */}
         {activeMenu === 'ai-analyzer' && <AiAnalyzerModule theme={theme} />}
 
@@ -922,6 +955,7 @@ export default function DashboardPage() {
          activeMenu !== 'jamaah' &&
          activeMenu !== 'bookings' &&
          activeMenu !== 'finance' &&
+         activeMenu !== 'journal' &&
          activeMenu !== 'ai-analyzer' &&
          activeMenu !== 'feedback' &&
          activeMenu !== 'equipment' &&
