@@ -2620,6 +2620,29 @@ Terimakasih🙏`;
         updatedAt: new Date().toISOString()
       })));
 
+      // Selisih totalAmount tiap pax (biaya tambahan/diskon/kamar bisa
+      // berubah dari Edit Grup ini) disesuaikan ke Piutang Jamaah &
+      // Pendapatan Diterima Dimuka — pola sama persis dengan Edit booking
+      // SATUAN (source `booking_edit_adjustment`), cuma dijalanin per pax
+      // di sini karena Edit Grup nyentuh banyak booking sekaligus.
+      await Promise.all(sortedActiveForExtra.map((item, i) => {
+        const totalAmountDelta = perPaxExtras[i].totalAmount - Number(item.totalAmount || 0);
+        if (totalAmountDelta === 0) return Promise.resolve();
+        return postJournalEntry({
+          date: new Date().toISOString(),
+          description: `Koreksi Total Booking (Edit Grup) ${item.bookingCode}`,
+          source: 'booking_edit_adjustment', sourceDocId: item.id, reference: item.bookingCode,
+          lines: totalAmountDelta > 0 ? [
+            { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: totalAmountDelta, credit: 0 },
+            { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: 0, credit: totalAmountDelta },
+          ] : [
+            { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: -totalAmountDelta, credit: 0 },
+            { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: 0, credit: -totalAmountDelta },
+          ],
+          createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+        }).catch(err => console.error('Gagal posting jurnal koreksi total booking grup:', err));
+      }));
+
       if (packageChanged) {
         // 1 updateDoc per paket pakai increment(activeItems.length) — lebih
         // efisien drpd loop +1/-1 per pax kayak alur hapus per-booking.
