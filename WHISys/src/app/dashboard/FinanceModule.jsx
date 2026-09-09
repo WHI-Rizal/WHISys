@@ -79,6 +79,12 @@ const VENDOR_CATEGORIES = [
 // (Finance & Super Admin), tanpa perlu minta perubahan rules baru.
 const VENDOR_CATEGORY_CONFIG_ID = '_categories_config';
 
+// Sama persis pola-nya kayak VENDOR_CATEGORY_CONFIG_ID di atas, cuma buat
+// daftar Kategori Biaya Operasional — "disamarkan" jadi 1 dokumen di
+// collection 'expenses_operational' sendiri biar ikut hak akses tulis yang
+// udah ada (Finance/Super Admin), nggak perlu Firestore Rules baru.
+const OPEX_CATEGORY_CONFIG_ID = '_categories_config';
+
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
   const date = new Date(dateString);
@@ -328,6 +334,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   const [newCategoryText, setNewCategoryText] = useState('');
   const [savingCategories, setSavingCategories] = useState(false);
 
+  // Kategori Biaya Operasional — pola sama persis kayak Kategori Vendor di
+  // atas, bisa ditambah/diedit/dihapus sendiri lewat "Kelola Kategori".
+  const [operationalCategories, setOperationalCategories] = useState(OPERATIONAL_CATEGORIES);
+  const [showOpexCategoryModal, setShowOpexCategoryModal] = useState(false);
+  const [opexCategoryDraft, setOpexCategoryDraft] = useState([]);
+  const [newOpexCategoryText, setNewOpexCategoryText] = useState('');
+  const [savingOpexCategories, setSavingOpexCategories] = useState(false);
+
   // Modal "Konversi ke Saldo Deposit" — dibuka dari 1 baris riwayat Bayar
   // Vendor yang DP-nya batal dipakai (trip cancel) tapi nggak hangus.
   const [showConvertDepositModal, setShowConvertDepositModal] = useState(false);
@@ -472,7 +486,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       setVendorBills(vbSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       const opSnap = await getDocs(collection(db, 'expenses_operational'));
-      setOperationalExpenses(opSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const opDocs = opSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const opexCategoryConfigDoc = opDocs.find(o => o.id === OPEX_CATEGORY_CONFIG_ID);
+      setOperationalExpenses(opDocs.filter(o => o.id !== OPEX_CATEGORY_CONFIG_ID));
+      if (opexCategoryConfigDoc && Array.isArray(opexCategoryConfigDoc.categories) && opexCategoryConfigDoc.categories.length > 0) {
+        setOperationalCategories(opexCategoryConfigDoc.categories);
+      }
     } catch (err) {
       console.error("Gagal mengambil data keuangan:", err);
     }
@@ -761,6 +780,84 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       alert("Gagal menyimpan daftar kategori: " + err.message);
     }
     setSavingCategories(false);
+  };
+
+  // ============ Kelola Kategori Biaya Operasional (Tambah/Edit/Hapus) ============
+
+  const openOpexCategoryModal = () => {
+    setOpexCategoryDraft(operationalCategories.map((c, i) => ({ key: `existing-${i}`, original: c, value: c })));
+    setNewOpexCategoryText('');
+    setShowOpexCategoryModal(true);
+  };
+
+  const handleAddOpexCategoryDraft = () => {
+    const text = newOpexCategoryText.trim();
+    if (!text) return;
+    const isDuplicate = opexCategoryDraft.some(c => c.value.trim().toLowerCase() === text.toLowerCase());
+    if (isDuplicate) {
+      alert(`Kategori "${text}" udah ada di daftar.`);
+      return;
+    }
+    setOpexCategoryDraft(prev => [...prev, { key: `new-${Date.now()}`, original: null, value: text }]);
+    setNewOpexCategoryText('');
+  };
+
+  const handleRenameOpexCategoryDraft = (key, value) => {
+    setOpexCategoryDraft(prev => prev.map(c => c.key === key ? { ...c, value } : c));
+  };
+
+  const handleRemoveOpexCategoryDraft = (key) => {
+    const target = opexCategoryDraft.find(c => c.key === key);
+    if (!target) return;
+    if (target.original) {
+      const usedCount = operationalExpenses.filter(o => o.category === target.original).length;
+      if (usedCount > 0) {
+        if (!confirm(`Kategori "${target.original}" masih dipakai oleh ${usedCount} catatan biaya operasional. Kalau dihapus dari daftar, catatan-catatan itu tetap tersimpan kategorinya (nggak ikut kehapus/kereset), cuma nggak muncul lagi di pilihan dropdown. Tetap hapus dari daftar?`)) return;
+      }
+    }
+    setOpexCategoryDraft(prev => prev.filter(c => c.key !== key));
+  };
+
+  const handleSaveOpexCategories = async () => {
+    const finalValues = opexCategoryDraft.map(c => c.value.trim()).filter(Boolean);
+    if (finalValues.length === 0) {
+      alert("Minimal harus ada 1 kategori.");
+      return;
+    }
+    const lowerSet = new Set();
+    for (const v of finalValues) {
+      const lower = v.toLowerCase();
+      if (lowerSet.has(lower)) {
+        alert(`Ada kategori yang namanya sama: "${v}". Gabungkan atau ganti dulu salah satunya.`);
+        return;
+      }
+      lowerSet.add(lower);
+    }
+
+    setSavingOpexCategories(true);
+    try {
+      // Rename: kategori lama yang namanya diubah (bukan yang baru ditambah)
+      // ikut disesuaikan ke semua catatan biaya operasional yang masih pakai
+      // nama lama itu, biar data existing tetap konsisten sama daftar terbaru.
+      const renames = opexCategoryDraft.filter(c => c.original && c.value.trim() && c.value.trim() !== c.original);
+      for (const r of renames) {
+        const affected = operationalExpenses.filter(o => o.category === r.original);
+        await Promise.all(affected.map(o => updateDoc(doc(db, 'expenses_operational', o.id), { category: r.value.trim() })));
+      }
+
+      await setDoc(doc(db, 'expenses_operational', OPEX_CATEGORY_CONFIG_ID), {
+        isCategoryConfig: true,
+        categories: finalValues,
+        updatedAt: new Date().toISOString()
+      });
+
+      setOperationalCategories(finalValues);
+      setShowOpexCategoryModal(false);
+      await fetchData();
+    } catch (err) {
+      alert("Gagal menyimpan daftar kategori: " + err.message);
+    }
+    setSavingOpexCategories(false);
   };
 
   // ============ Konversi DP Vendor batal (nggak hangus) -> Saldo Deposit Vendor ============
@@ -1413,7 +1510,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         details: `Mencatat biaya operasional "${operationalForm.category}" senilai Rp ${opAmountVal.toLocaleString('id-ID')}`
       });
       setShowOperationalModal(false);
-      setOperationalForm({ category: OPERATIONAL_CATEGORIES[0], amount: '', accountId: '', notes: '', expenseDate: todayISODate() });
+      setOperationalForm({ category: operationalCategories[0], amount: '', accountId: '', notes: '', expenseDate: todayISODate() });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat biaya operasional: " + err.message);
@@ -2788,6 +2885,78 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         </div>
       )}
 
+      {showOpexCategoryModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowOpexCategoryModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <Settings className="w-5 h-5 text-amber-500" /> Kelola Kategori Biaya Operasional
+            </h3>
+            <p className={`text-[11px] ${styles.textSub} mb-4`}>
+              Ubah nama kategori yang udah ada, hapus yang nggak kepake, atau tambah kategori baru. Perubahan ini langsung kepakai di dropdown Kategori Biaya, dan juga di breakdown per kategori pada Laba Rugi.
+            </p>
+
+            <div className="space-y-2 mb-4">
+              {opexCategoryDraft.map((c) => (
+                <div key={c.key} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
+                    value={c.value}
+                    onChange={e => handleRenameOpexCategoryDraft(c.key, e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveOpexCategoryDraft(c.key)}
+                    className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors shrink-0"
+                    title="Hapus kategori ini"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              {opexCategoryDraft.length === 0 && (
+                <p className={`text-xs ${styles.textSub}`}>Belum ada kategori. Tambahkan minimal 1 di bawah.</p>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 mb-5">
+              <input
+                type="text"
+                placeholder="Nama kategori baru, cth: Katering"
+                className={`w-full ${styles.inputBg} rounded-lg p-2.5 text-xs`}
+                value={newOpexCategoryText}
+                onChange={e => setNewOpexCategoryText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddOpexCategoryDraft(); } }}
+              />
+              <button
+                type="button"
+                onClick={handleAddOpexCategoryDraft}
+                className="flex items-center gap-1 px-3 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-medium shrink-0"
+              >
+                <Plus className="w-4 h-4" /> Tambah
+              </button>
+            </div>
+
+            <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <button type="button" onClick={() => setShowOpexCategoryModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg text-xs`}>
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveOpexCategories}
+                disabled={savingOpexCategories}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-60 text-white rounded-lg text-xs font-medium"
+              >
+                {savingOpexCategories ? 'Menyimpan...' : 'Simpan Kategori'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showVendorDepositAdjustModal && adjustingVendor && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
@@ -3435,13 +3604,22 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             <form onSubmit={handleOperationalSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block mb-1 font-medium">Kategori Biaya</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-medium">Kategori Biaya</label>
+                    <button
+                      type="button"
+                      onClick={openOpexCategoryModal}
+                      className="flex items-center gap-1 text-[10px] text-amber-500 hover:text-amber-400"
+                    >
+                      <Settings className="w-3 h-3" /> Kelola Kategori
+                    </button>
+                  </div>
                   <select
                     className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                     value={operationalForm.category}
                     onChange={e => setOperationalForm({ ...operationalForm, category: e.target.value })}
                   >
-                    {OPERATIONAL_CATEGORIES.map(cat => (
+                    {operationalCategories.map(cat => (
                       <option key={cat} value={cat}>{cat}</option>
                     ))}
                   </select>
