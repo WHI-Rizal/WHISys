@@ -16,7 +16,7 @@ import { calculatePPN } from '../../lib/ppn';
 import {
   COA, ACC, seedChartOfAccounts, fetchAllJournalEntries, fetchChartOfAccounts,
   runInitialJournalMigration, postJournalEntry, postRevenueRecognition, postRevenueUnrecognition,
-  backfillOpexJournalCategories
+  backfillOpexJournalCategories, diagnoseRescheduleMigrationImpact, applyRescheduleMigrationCorrection
 } from '../../lib/journal';
 
 const DEFAULT_COMPANY_PROFILE = {
@@ -211,6 +211,13 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [companyProfile, setCompanyProfile] = useState(DEFAULT_COMPANY_PROFILE);
 
+  // Diagnosa & koreksi dampak reschedule di Migrasi Data Awal — lihat
+  // diagnoseRescheduleMigrationImpact/applyRescheduleMigrationCorrection
+  // di lib/journal.js buat penjelasan lengkap masalahnya.
+  const [showRescheduleDiagnosis, setShowRescheduleDiagnosis] = useState(false);
+  const [rescheduleDiagnosis, setRescheduleDiagnosis] = useState(null);
+  const [applyingRescheduleFix, setApplyingRescheduleFix] = useState(false);
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -285,6 +292,31 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
     setMigrating(false);
   };
 
+  const handleOpenRescheduleDiagnosis = () => {
+    const result = diagnoseRescheduleMigrationImpact({ bookings: bookingsList, paymentsIncome, journalEntries });
+    setRescheduleDiagnosis(result);
+    setShowRescheduleDiagnosis(true);
+  };
+
+  const handleApplyRescheduleFix = async () => {
+    if (!rescheduleDiagnosis || rescheduleDiagnosis.affected.length === 0) return;
+    if (!confirm(`Terapkan koreksi buat ${rescheduleDiagnosis.affected.length} booking hasil reschedule yang kena dampak? Ini bakal posting jurnal koreksi tutup-buku + reklas carry-over per booking (aman diulang, item yang udah pernah dikoreksi otomatis dilewati).`)) return;
+    setApplyingRescheduleFix(true);
+    try {
+      const summary = await applyRescheduleMigrationCorrection({
+        affected: rescheduleDiagnosis.affected, bookings: bookingsList, packages: packagesList,
+        createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      });
+      alert(`Koreksi selesai!\n\nBooking dikoreksi: ${summary.corrected}\nDilewati (udah pernah dikoreksi/nggak kena dampak lagi): ${summary.skipped}\nError: ${summary.errors.length}${summary.errors.length > 0 ? `\n\nDetail error:\n${summary.errors.slice(0, 10).join('\n')}` : ''}`);
+      await fetchData();
+      setShowRescheduleDiagnosis(false);
+      setRescheduleDiagnosis(null);
+    } catch (err) {
+      alert('Gagal menerapkan koreksi: ' + err.message);
+    }
+    setApplyingRescheduleFix(false);
+  };
+
   if (loading) {
     return (
       <div className={`${styles.cardBg} border rounded-xl p-12 text-center`}>
@@ -316,8 +348,78 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
           {isSuperAdmin && migrationDone && (
             <span className="text-[10.5px] text-emerald-500 flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5" /> Migrasi data awal sudah pernah dijalankan.</span>
           )}
+          {isSuperAdmin && migrationDone && (
+            <button
+              onClick={handleOpenRescheduleDiagnosis}
+              className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium rounded-lg flex items-center gap-1.5"
+              title="Cek apakah ada booking hasil reschedule (sebelum migrasi jalan) yang kena dobel-catat di Neraca"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Cek Dampak Reschedule
+            </button>
+          )}
         </div>
       </div>
+
+      {showRescheduleDiagnosis && rescheduleDiagnosis && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className={`${styles.cardBg} border rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-5`}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className={`text-sm font-bold ${styles.textTitle}`}>Dampak Reschedule di Migrasi Data Awal</h3>
+              <button onClick={() => { setShowRescheduleDiagnosis(false); setRescheduleDiagnosis(null); }} className={styles.textSub}><X className="w-4 h-4" /></button>
+            </div>
+            <p className={`text-xs ${styles.textSub} mb-3`}>
+              Migrasi Data Awal nge-jurnal SEMUA booking apa adanya, termasuk booking yang statusnya udah "rescheduled" SEBELUM migrasi jalan — booking lama itu nggak ditutup buku, dan setoran "Carry-Over Reschedule"-nya (bukan uang beneran masuk) sempat ke-jurnal seolah kas beneran nambah. Ini diagnosa read-only dulu, belum ada jurnal apapun yang diposting.
+            </p>
+            {rescheduleDiagnosis.count === 0 ? (
+              <div className={`p-4 rounded-lg ${styles.innerBg} border text-xs ${styles.textSub} flex items-center gap-2`}>
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Nggak ada booking yang kena dampak ini. Neraca kamu aman dari sisi reschedule.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+                    <p className={`text-[10.5px] ${styles.textSub}`}>Booking kena dampak</p>
+                    <p className={`text-lg font-bold ${styles.textTitle}`}>{rescheduleDiagnosis.count}</p>
+                  </div>
+                  <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+                    <p className={`text-[10.5px] ${styles.textSub}`}>Total Piutang belum ditutup buku + kas hantu</p>
+                    <p className="text-lg font-bold text-amber-500">{formatRp(rescheduleDiagnosis.totalWriteOff + rescheduleDiagnosis.totalGhostCash)}</p>
+                  </div>
+                </div>
+                <div className="overflow-x-auto mb-3">
+                  <table className="w-full text-[11px]">
+                    <thead className={styles.tableHeaderBg}>
+                      <tr>
+                        <th className="text-left p-2 font-medium">Booking Lama</th>
+                        <th className="text-left p-2 font-medium">-&gt; Booking Baru</th>
+                        <th className="text-right p-2 font-medium">Piutang belum ditutup</th>
+                        <th className="text-right p-2 font-medium">Kas hantu (carry-over)</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                      {rescheduleDiagnosis.affected.map(item => (
+                        <tr key={item.oldBookingId}>
+                          <td className="p-2">{item.oldBookingCode || item.oldBookingId} <span className={styles.textSub}>({item.oldJamaahName || '-'})</span></td>
+                          <td className="p-2">{item.newBookingCode}</td>
+                          <td className="p-2 text-right">{formatRp(item.writeOffAmount)}</td>
+                          <td className="p-2 text-right">{formatRp(item.ghostCashAmount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  onClick={handleApplyRescheduleFix}
+                  disabled={applyingRescheduleFix}
+                  className="w-full px-3 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg disabled:opacity-60"
+                >
+                  {applyingRescheduleFix ? 'Memproses...' : `Terapkan Koreksi buat ${rescheduleDiagnosis.count} Booking Ini`}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className={`${styles.cardBg} border rounded-xl p-1.5 flex flex-wrap gap-1`}>
         {[
