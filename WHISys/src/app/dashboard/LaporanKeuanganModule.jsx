@@ -240,7 +240,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
       setFinancialAccounts(accSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setPaymentsIncome(incomeSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setPaymentsVendor(vendorPaySnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setOperationalExpenses(opexSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setOperationalExpenses(opexSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(o => !o.isCategoryConfig));
       setMigrationDone(!!(migFlagSnap.exists() && migFlagSnap.data().done));
       if (profileSnap.exists() && profileSnap.data().company) {
         setCompanyProfile({ ...DEFAULT_COMPANY_PROFILE, ...profileSnap.data().company });
