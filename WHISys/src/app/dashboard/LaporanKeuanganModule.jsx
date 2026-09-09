@@ -131,6 +131,20 @@ const formatDateDDMMYYYY = (dateString) => {
 
 const formatRp = (n) => `Rp ${Math.round(Number(n) || 0).toLocaleString('id-ID')}`;
 
+// Label rekening kas/bank: pakai data financial_accounts yang masih aktif
+// SEKARANG (nama akun + nama bank + no. rekening) biar jelas bedanya, bukan
+// cuma "nama akun" hasil snapshot pas jurnal dibuat (yang kadang digenericin
+// sama user jadi sama persis buat lebih dari satu rekening). Dipakai bareng
+// oleh Neraca & Buku Besar biar labelnya konsisten di dua tempat.
+const describeFinancialAccount = (fa, fallbackName) => {
+  if (!fa) return fallbackName || 'Rekening Tanpa Nama';
+  if (fa.type === 'Bank' && fa.bankName) {
+    const tail = fa.accountNumber ? ` ${fa.accountNumber}` : '';
+    return `${fa.name} — ${fa.bankName}${tail}`;
+  }
+  return fa.name || fallbackName || 'Rekening Tanpa Nama';
+};
+
 const getPeriodKey = (dateString) => {
   const d = dateString ? new Date(dateString) : new Date();
   if (isNaN(d.getTime())) return '-';
@@ -314,7 +328,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
         <JournalTab styles={styles} isDark={isDark} journalEntries={journalEntries} chartOfAccounts={chartOfAccounts} currentUser={currentUser} onRefresh={fetchData} />
       )}
       {activeTab === 'ledger' && (
-        <LedgerTab styles={styles} isDark={isDark} journalEntries={journalEntries} chartOfAccounts={chartOfAccounts} companyProfile={companyProfile} />
+        <LedgerTab styles={styles} isDark={isDark} journalEntries={journalEntries} chartOfAccounts={chartOfAccounts} financialAccounts={financialAccounts} companyProfile={companyProfile} />
       )}
       {activeTab === 'balance_sheet' && (
         <BalanceSheetTab styles={styles} isDark={isDark} journalEntries={journalEntries} chartOfAccounts={chartOfAccounts} financialAccounts={financialAccounts} companyProfile={companyProfile} generatingPdf={generatingPdf} setGeneratingPdf={setGeneratingPdf} />
@@ -539,19 +553,39 @@ function JournalTab({ styles, isDark, journalEntries, chartOfAccounts, currentUs
 // =====================================================================
 // TAB 2: BUKU BESAR
 // =====================================================================
-function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, companyProfile }) {
+function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, financialAccounts, companyProfile }) {
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [accountCode, setAccountCode] = useState(chartOfAccounts[0]?.code || '');
+  const [subAccountId, setSubAccountId] = useState(''); // '' = semua rekening (khusus 1101 - Kas & Bank)
   const [filterStart, setFilterStart] = useState('');
   const [filterEnd, setFilterEnd] = useState('');
 
   const account = chartOfAccounts.find(a => a.code === accountCode);
+  const isKasBank = accountCode === ACC.KAS_BANK;
+
+  // Khusus 1101 - Kas & Bank: 1 akun COA ini nampung banyak rekening
+  // (financial_accounts) sekaligus, jadi dikasih dropdown tambahan buat
+  // milih rekening spesifik atau lihat semuanya digabung.
+  const kasBankAccountOptions = isKasBank ? (() => {
+    const byId = {};
+    financialAccounts.forEach(fa => { byId[fa.id] = { accountId: fa.id, label: describeFinancialAccount(fa) }; });
+    journalEntries.forEach(e => (e.lines || []).forEach(l => {
+      if (l.accountCode !== ACC.KAS_BANK || !l.accountId || byId[l.accountId]) return;
+      byId[l.accountId] = { accountId: l.accountId, label: l.financialAccountName || 'Rekening Tanpa Nama' };
+    }));
+    return Object.values(byId);
+  })() : [];
+
+  const handleAccountCodeChange = (code) => {
+    setAccountCode(code);
+    setSubAccountId('');
+  };
 
   // Semua baris jurnal yang nyentuh akun terpilih, diurutkan tanggal ASC,
   // dihitung saldo berjalan (running balance) sesuai normalBalance akun
   // (debit-normal: +debit -credit; credit-normal: +credit -debit).
   const rows = journalEntries
-    .filter(e => (e.lines || []).some(l => l.accountCode === accountCode))
+    .filter(e => (e.lines || []).some(l => l.accountCode === accountCode && (!isKasBank || !subAccountId || l.accountId === subAccountId)))
     .filter(e => {
       const d = (e.date || '').slice(0, 10);
       if (filterStart && d < filterStart) return false;
@@ -559,10 +593,12 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, companyPro
       return true;
     })
     .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
-    .flatMap(e => (e.lines || []).filter(l => l.accountCode === accountCode).map(l => ({
-      date: e.date, description: e.description, source: e.source,
-      debit: l.debit || 0, credit: l.credit || 0, financialAccountName: l.financialAccountName
-    })));
+    .flatMap(e => (e.lines || [])
+      .filter(l => l.accountCode === accountCode && (!isKasBank || !subAccountId || l.accountId === subAccountId))
+      .map(l => ({
+        date: e.date, description: e.description, source: e.source,
+        debit: l.debit || 0, credit: l.credit || 0, financialAccountName: l.financialAccountName
+      })));
 
   let running = 0;
   const isDebitNormal = !account || account.normalBalance === 'debit';
@@ -571,13 +607,17 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, companyPro
     return { ...r, balance: running };
   });
 
+  const selectedSubAccountLabel = isKasBank && subAccountId
+    ? (kasBankAccountOptions.find(o => o.accountId === subAccountId)?.label || '')
+    : '';
+
   const handleExportPdf = async () => {
     setGeneratingPdf(true);
     try {
       const docPdf = new jsPDF({ unit: 'mm', format: 'a4' });
       const { cursorY } = await addPdfLetterhead(
         docPdf, companyProfile,
-        `BUKU BESAR - ${account?.code || ''} ${account?.name || ''}`,
+        `BUKU BESAR - ${account?.code || ''} ${account?.name || ''}${selectedSubAccountLabel ? ' — ' + selectedSubAccountLabel : ''}`,
         `Dicetak: ${formatDateDDMMYYYY(new Date().toISOString())}`
       );
       autoTable(docPdf, {
@@ -594,7 +634,7 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, companyPro
         headStyles: { fillColor: [15, 23, 42] },
         columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } }
       });
-      docPdf.save(`Buku-Besar-${account?.code || ''}-${todayISODate()}.pdf`);
+      docPdf.save(`Buku-Besar-${account?.code || ''}${subAccountId ? '-' + subAccountId.slice(-6) : ''}-${todayISODate()}.pdf`);
     } catch (err) {
       alert('Gagal membuat PDF Buku Besar: ' + err.message);
     }
@@ -606,10 +646,19 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, companyPro
       <div className={`${styles.cardBg} border rounded-xl p-4 flex flex-wrap items-end gap-3`}>
         <div>
           <label className={`block mb-1 text-[10.5px] font-medium ${styles.textSub}`}>Pilih Akun</label>
-          <select className={`${styles.inputBg} rounded-lg p-2 text-xs border min-w-[220px]`} value={accountCode} onChange={e => setAccountCode(e.target.value)}>
+          <select className={`${styles.inputBg} rounded-lg p-2 text-xs border min-w-[220px]`} value={accountCode} onChange={e => handleAccountCodeChange(e.target.value)}>
             {chartOfAccounts.map(a => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
           </select>
         </div>
+        {isKasBank && (
+          <div>
+            <label className={`block mb-1 text-[10.5px] font-medium ${styles.textSub}`}>Rekening</label>
+            <select className={`${styles.inputBg} rounded-lg p-2 text-xs border min-w-[220px]`} value={subAccountId} onChange={e => setSubAccountId(e.target.value)}>
+              <option value="">Semua Rekening (Digabung)</option>
+              {kasBankAccountOptions.map(o => <option key={o.accountId} value={o.accountId}>{o.label}</option>)}
+            </select>
+          </div>
+        )}
         <div>
           <label className={`block mb-1 text-[10.5px] font-medium ${styles.textSub}`}>Dari Tanggal</label>
           <input type="date" className={`${styles.inputBg} rounded-lg p-2 text-xs border`} value={filterStart} onChange={e => setFilterStart(e.target.value)} />
@@ -668,7 +717,7 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, companyPro
 // =====================================================================
 // TAB 3: NERACA (BALANCE SHEET)
 // =====================================================================
-function BalanceSheetTab({ styles, isDark, journalEntries, chartOfAccounts, financialAccounts, generatingPdf, setGeneratingPdf }) {
+function BalanceSheetTab({ styles, isDark, journalEntries, chartOfAccounts, financialAccounts, companyProfile, generatingPdf, setGeneratingPdf }) {
   const [asOfDate, setAsOfDate] = useState(todayISODate());
 
   // Saldo tiap akun s/d tanggal terpilih — jumlahin semua baris jurnal yang
@@ -690,30 +739,18 @@ function BalanceSheetTab({ styles, isDark, journalEntries, chartOfAccounts, fina
         if (l.accountCode === ACC.KAS_BANK) {
           const key = l.accountId || '__tanpa_rekening__';
           if (!kasBankByAccountId[key]) {
-            kasBankByAccountId[key] = { accountId: l.accountId || null, accountName: l.accountName || 'Rekening Tanpa Nama', balance: 0 };
+            kasBankByAccountId[key] = { accountId: l.accountId || null, accountName: l.financialAccountName || 'Rekening Tanpa Nama', balance: 0 };
           }
           kasBankByAccountId[key].balance += delta;
         }
       });
     });
-  // Label rekening: pakai data financial_accounts yang masih aktif SEKARANG
-  // (nama akun + nama bank + no. rekening) biar jelas bedanya, bukan cuma
-  // "nama akun" hasil snapshot pas jurnal dibuat (yang kadang digenericin
-  // sama user jadi "Kas & Bank" doang buat lebih dari satu rekening).
-  const describeAccount = (fa, fallbackName) => {
-    if (!fa) return fallbackName || 'Rekening Tanpa Nama';
-    if (fa.type === 'Bank' && fa.bankName) {
-      const tail = fa.accountNumber ? ` ${fa.accountNumber}` : '';
-      return `${fa.name} — ${fa.bankName}${tail}`;
-    }
-    return fa.name || fallbackName || 'Rekening Tanpa Nama';
-  };
   // Urutkan ikutin urutan financial_accounts yang masih aktif dulu, baru
   // sisanya (misal rekening yang udah dihapus tapi masih ada histori jurnal).
   const kasBankRows = [
     ...financialAccounts
       .filter(fa => kasBankByAccountId[fa.id])
-      .map(fa => ({ ...kasBankByAccountId[fa.id], accountName: describeAccount(fa, kasBankByAccountId[fa.id].accountName) })),
+      .map(fa => ({ ...kasBankByAccountId[fa.id], accountName: describeFinancialAccount(fa, kasBankByAccountId[fa.id].accountName) })),
     ...Object.entries(kasBankByAccountId)
       .filter(([key]) => !financialAccounts.some(fa => fa.id === key))
       .map(([, v]) => v),
