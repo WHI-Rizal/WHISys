@@ -52,6 +52,66 @@ const resolveBankName = (bankName, customBankName) => {
   return bankName || '';
 };
 
+// Kop surat PDF — dipakai bareng oleh semua export (Buku Besar, Neraca, P&L,
+// dst) biar tampilannya konsisten: logo + nama PT + PPIU + alamat + kontak,
+// garis pembatas, terus judul laporan center. Balikin posisi Y abis kop biar
+// pemanggil tinggal lanjut nulis isi laporan dari situ.
+const addPdfLetterhead = async (docPdf, companyProfile, title, subtitle) => {
+  const profile = companyProfile || DEFAULT_COMPANY_PROFILE;
+  const pageWidth = docPdf.internal.pageSize.getWidth();
+  const marginX = 14;
+  let cursorY = 16;
+
+  try {
+    const logoDataUrl = await loadImageAsDataURL('/logo.png');
+    docPdf.addImage(logoDataUrl, 'PNG', marginX, cursorY - 4, 18, 18);
+  } catch (err) {
+    console.warn('Logo tidak berhasil dimuat untuk PDF:', err);
+  }
+
+  const textStartX = marginX + 22;
+  docPdf.setFont('helvetica', 'bold');
+  docPdf.setFontSize(13);
+  docPdf.text(profile.name || DEFAULT_COMPANY_PROFILE.name, textStartX, cursorY);
+
+  docPdf.setFont('helvetica', 'normal');
+  docPdf.setFontSize(8.5);
+  let subY = cursorY + 5;
+  if (profile.ppiuNumber) {
+    docPdf.text(profile.ppiuNumber, textStartX, subY);
+    subY += 4;
+  }
+  if (profile.address) {
+    docPdf.text(profile.address, textStartX, subY, { maxWidth: pageWidth - textStartX - marginX });
+    subY += 4;
+  }
+  const contactLine = [profile.phone, profile.email].filter(Boolean).join('  •  ');
+  if (contactLine) {
+    docPdf.text(contactLine, textStartX, subY);
+    subY += 4;
+  }
+
+  cursorY = Math.max(cursorY + 18, subY) + 2;
+  docPdf.setDrawColor(180);
+  docPdf.line(marginX, cursorY, pageWidth - marginX, cursorY);
+  cursorY += 8;
+
+  docPdf.setFont('helvetica', 'bold');
+  docPdf.setFontSize(12);
+  docPdf.text(title, pageWidth / 2, cursorY, { align: 'center' });
+  cursorY += 6;
+
+  if (subtitle) {
+    docPdf.setFont('helvetica', 'normal');
+    docPdf.setFontSize(9);
+    docPdf.text(subtitle, pageWidth / 2, cursorY, { align: 'center' });
+    cursorY += 4.5;
+  }
+
+  docPdf.setTextColor(0);
+  return { cursorY, pageWidth, marginX };
+};
+
 // ---------------------------------------------------------------------
 // Helper tanggal/format kecil — duplikat sengaja dari FinanceModule.jsx
 // (bukan di-share lewat import) biar modul ini tetap independen & nggak
@@ -134,6 +194,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
   const [migrating, setMigrating] = useState(false);
   const [migrationDone, setMigrationDone] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [companyProfile, setCompanyProfile] = useState(DEFAULT_COMPANY_PROFILE);
 
   const fetchData = async () => {
     setLoading(true);
@@ -141,7 +202,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
       await seedChartOfAccounts();
       const [
         jeList, coaList, bookSnap, pkgSnap, billSnap, vendorSnap, accSnap,
-        incomeSnap, vendorPaySnap, opexSnap, migFlagSnap
+        incomeSnap, vendorPaySnap, opexSnap, migFlagSnap, profileSnap
       ] = await Promise.all([
         fetchAllJournalEntries(),
         fetchChartOfAccounts(),
@@ -154,6 +215,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
         getDocs(collection(db, 'payments_vendor')),
         getDocs(collection(db, 'expenses_operational')),
         getDoc(doc(db, 'settings', 'journal_migration')),
+        getDoc(doc(db, 'settings', 'company_profile')),
       ]);
       setJournalEntries(jeList);
       setChartOfAccounts(coaList);
@@ -166,6 +228,9 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
       setPaymentsVendor(vendorPaySnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setOperationalExpenses(opexSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setMigrationDone(!!(migFlagSnap.exists() && migFlagSnap.data().done));
+      if (profileSnap.exists() && profileSnap.data().company) {
+        setCompanyProfile({ ...DEFAULT_COMPANY_PROFILE, ...profileSnap.data().company });
+      }
     } catch (err) {
       console.error('Gagal memuat data Laporan Keuangan:', err);
     }
@@ -249,10 +314,10 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
         <JournalTab styles={styles} isDark={isDark} journalEntries={journalEntries} chartOfAccounts={chartOfAccounts} currentUser={currentUser} onRefresh={fetchData} />
       )}
       {activeTab === 'ledger' && (
-        <LedgerTab styles={styles} isDark={isDark} journalEntries={journalEntries} chartOfAccounts={chartOfAccounts} />
+        <LedgerTab styles={styles} isDark={isDark} journalEntries={journalEntries} chartOfAccounts={chartOfAccounts} companyProfile={companyProfile} />
       )}
       {activeTab === 'balance_sheet' && (
-        <BalanceSheetTab styles={styles} isDark={isDark} journalEntries={journalEntries} chartOfAccounts={chartOfAccounts} financialAccounts={financialAccounts} generatingPdf={generatingPdf} setGeneratingPdf={setGeneratingPdf} />
+        <BalanceSheetTab styles={styles} isDark={isDark} journalEntries={journalEntries} chartOfAccounts={chartOfAccounts} financialAccounts={financialAccounts} companyProfile={companyProfile} generatingPdf={generatingPdf} setGeneratingPdf={setGeneratingPdf} />
       )}
       {activeTab === 'cash_flow' && (
         <CashFlowTab styles={styles} isDark={isDark} journalEntries={journalEntries} financialAccounts={financialAccounts} />
@@ -474,7 +539,8 @@ function JournalTab({ styles, isDark, journalEntries, chartOfAccounts, currentUs
 // =====================================================================
 // TAB 2: BUKU BESAR
 // =====================================================================
-function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts }) {
+function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, companyProfile }) {
+  const [generatingPdf, setGeneratingPdf] = useState(false);
   const [accountCode, setAccountCode] = useState(chartOfAccounts[0]?.code || '');
   const [filterStart, setFilterStart] = useState('');
   const [filterEnd, setFilterEnd] = useState('');
@@ -505,31 +571,34 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts }) {
     return { ...r, balance: running };
   });
 
-  const handleExportPdf = () => {
-    const docPdf = new jsPDF({ unit: 'mm', format: 'a4' });
-    docPdf.setFont('helvetica', 'bold');
-    docPdf.setFontSize(12);
-    docPdf.text(`BUKU BESAR - ${account?.code || ''} ${account?.name || ''}`, 14, 16);
-    docPdf.setFont('helvetica', 'normal');
-    docPdf.setFontSize(8);
-    docPdf.setTextColor(120);
-    docPdf.text(`Dicetak: ${formatDateDDMMYYYY(new Date().toISOString())}`, 14, 21);
-    docPdf.setTextColor(0);
-    autoTable(docPdf, {
-      startY: 26,
-      margin: { left: 14, right: 14 },
-      head: [['Tanggal', 'Deskripsi', 'Debit', 'Kredit', 'Saldo']],
-      body: rowsWithBalance.map(r => [
-        formatDateDDMMYYYY(r.date), r.description,
-        r.debit > 0 ? r.debit.toLocaleString('id-ID') : '-',
-        r.credit > 0 ? r.credit.toLocaleString('id-ID') : '-',
-        r.balance.toLocaleString('id-ID')
-      ]),
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [15, 23, 42] },
-      columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } }
-    });
-    docPdf.save(`Buku-Besar-${account?.code || ''}-${todayISODate()}.pdf`);
+  const handleExportPdf = async () => {
+    setGeneratingPdf(true);
+    try {
+      const docPdf = new jsPDF({ unit: 'mm', format: 'a4' });
+      const { cursorY } = await addPdfLetterhead(
+        docPdf, companyProfile,
+        `BUKU BESAR - ${account?.code || ''} ${account?.name || ''}`,
+        `Dicetak: ${formatDateDDMMYYYY(new Date().toISOString())}`
+      );
+      autoTable(docPdf, {
+        startY: cursorY + 2,
+        margin: { left: 14, right: 14 },
+        head: [['Tanggal', 'Deskripsi', 'Debit', 'Kredit', 'Saldo']],
+        body: rowsWithBalance.map(r => [
+          formatDateDDMMYYYY(r.date), r.description,
+          r.debit > 0 ? r.debit.toLocaleString('id-ID') : '-',
+          r.credit > 0 ? r.credit.toLocaleString('id-ID') : '-',
+          r.balance.toLocaleString('id-ID')
+        ]),
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [15, 23, 42] },
+        columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } }
+      });
+      docPdf.save(`Buku-Besar-${account?.code || ''}-${todayISODate()}.pdf`);
+    } catch (err) {
+      alert('Gagal membuat PDF Buku Besar: ' + err.message);
+    }
+    setGeneratingPdf(false);
   };
 
   return (
@@ -550,8 +619,8 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts }) {
           <input type="date" className={`${styles.inputBg} rounded-lg p-2 text-xs border`} value={filterEnd} onChange={e => setFilterEnd(e.target.value)} />
         </div>
         <div className="flex-1" />
-        <button onClick={handleExportPdf} className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium rounded-lg flex items-center gap-1.5">
-          <Download className="w-3.5 h-3.5" /> Export PDF
+        <button onClick={handleExportPdf} disabled={generatingPdf} className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 disabled:opacity-60">
+          <Download className="w-3.5 h-3.5" /> {generatingPdf ? 'Membuat...' : 'Export PDF'}
         </button>
       </div>
 
@@ -685,12 +754,9 @@ function BalanceSheetTab({ styles, isDark, journalEntries, chartOfAccounts, fina
     setGeneratingPdf(true);
     try {
       const docPdf = new jsPDF({ unit: 'mm', format: 'a4' });
-      docPdf.setFont('helvetica', 'bold');
-      docPdf.setFontSize(12);
-      docPdf.text('NERACA (BALANCE SHEET)', 105, 16, { align: 'center' });
-      docPdf.setFont('helvetica', 'normal');
-      docPdf.setFontSize(9);
-      docPdf.text(`Per Tanggal: ${formatDateDDMMYYYY(asOfDate)}`, 105, 22, { align: 'center' });
+      const { cursorY: tableStartY } = await addPdfLetterhead(
+        docPdf, companyProfile, 'NERACA (BALANCE SHEET)', `Per Tanggal: ${formatDateDDMMYYYY(asOfDate)}`
+      );
 
       const assetRows = [];
       (byType['Aset'] || []).forEach(a => {
@@ -701,7 +767,7 @@ function BalanceSheetTab({ styles, isDark, journalEntries, chartOfAccounts, fina
       });
       assetRows.push(['TOTAL ASET', totalAset.toLocaleString('id-ID')]);
       autoTable(docPdf, {
-        startY: 28, margin: { left: 14, right: 110 },
+        startY: tableStartY, margin: { left: 14, right: 110 },
         head: [['Aset', 'Rp']], body: assetRows,
         styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: [15, 23, 42] },
         columnStyles: { 1: { halign: 'right' } },
@@ -712,13 +778,13 @@ function BalanceSheetTab({ styles, isDark, journalEntries, chartOfAccounts, fina
       liabRows.push(['TOTAL LIABILITAS', totalLiabilitas.toLocaleString('id-ID')]);
       const eqRows = [...(byType['Ekuitas'] || []).map(a => [`${a.code} - ${a.name}`, a.balance.toLocaleString('id-ID')]), ['Laba Berjalan', labaBerjalan.toLocaleString('id-ID')], ['TOTAL EKUITAS', totalEkuitas.toLocaleString('id-ID')]];
       autoTable(docPdf, {
-        startY: 28, margin: { left: 110, right: 14 },
+        startY: tableStartY, margin: { left: 110, right: 14 },
         head: [['Liabilitas & Ekuitas', 'Rp']], body: [...liabRows, ['', ''], ...eqRows],
         styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: [15, 23, 42] },
         columnStyles: { 1: { halign: 'right' } }
       });
 
-      const finalY = Math.max(docPdf.lastAutoTable.finalY, 28) + 10;
+      const finalY = Math.max(docPdf.lastAutoTable.finalY, tableStartY) + 10;
       docPdf.setFontSize(9);
       docPdf.text(`Selisih Aset vs (Liabilitas + Ekuitas): Rp ${selisih.toLocaleString('id-ID')} ${Math.abs(selisih) < 2 ? '(Balance)' : '(TIDAK BALANCE — cek jurnal)'}`, 14, finalY);
 
