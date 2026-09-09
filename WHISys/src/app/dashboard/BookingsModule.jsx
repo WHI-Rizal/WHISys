@@ -356,6 +356,12 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   // booking-nya "ada"). null kalau belum ada setoran sama sekali.
   const [editBookingMinPaymentDate, setEditBookingMinPaymentDate] = useState(null);
   const [editingPaymentId, setEditingPaymentId] = useState(null);
+  // Guard double-submit + race condition di edit setoran (satuan MAUPUN
+  // grup, dua-duanya pakai flag yang sama karena cuma 1 baris yang bisa
+  // dalam mode edit dalam satu waktu) — dulu tombol Simpan-nya nggak
+  // di-disable pas proses async jalan, double-klik bisa nerapin delta
+  // saldo akun dua kali. Lihat audit "Kualitas Kode & Bug" §MEDIUM-HIGH.
+  const [savingPaymentEdit, setSavingPaymentEdit] = useState(false);
 
   // State Monitoring Dokumen
   const [showDocModal, setShowDocModal] = useState(false);
@@ -994,6 +1000,8 @@ Terimakasih🙏`;
       alert(`Tanggal setoran nggak boleh sebelum tanggal pemesanan ${selectedBookingForHistory?.bookingCode || ''} dibuat (${minDate.split('-').reverse().join('/')}).`);
       return;
     }
+    if (savingPaymentEdit) return; // cegah double-klik nerapin delta saldo akun dua kali
+    setSavingPaymentEdit(true);
     try {
       await updateDoc(doc(db, 'payments_income', payId), {
         amount: Number(paymentEditForm.amount),
@@ -1034,7 +1042,10 @@ Terimakasih🙏`;
         accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '',
         date: paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : oldPay?.createdAt,
         createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-      }).catch(err => console.error('Gagal posting ulang jurnal edit setoran:', err));
+      }).catch(err => {
+        console.error('Gagal posting ulang jurnal edit setoran:', err);
+        alert(`Setoran berhasil diedit, TAPI jurnal koreksinya GAGAL diposting ulang (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk setoran ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+      });
 
       setEditingPaymentId(null);
       await syncBookingTotalPaid(selectedBookingForHistory.id, selectedBookingForHistory.totalAmount);
@@ -1051,6 +1062,8 @@ Terimakasih🙏`;
       });
     } catch (err) {
       alert("Gagal memperbarui pembayaran: " + err.message);
+    } finally {
+      setSavingPaymentEdit(false);
     }
   };
 
@@ -2208,6 +2221,8 @@ Terimakasih🙏`;
       alert(`Tanggal setoran nggak boleh sebelum tanggal pemesanan ${bookingItemForDate?.bookingCode || ''} dibuat (${minDate.split('-').reverse().join('/')}).`);
       return;
     }
+    if (savingPaymentEdit) return;
+    setSavingPaymentEdit(true);
     try {
       await updateDoc(doc(db, 'payments_income', pay.id), {
         amount: Number(paymentEditForm.amount),
@@ -2237,7 +2252,10 @@ Terimakasih🙏`;
         accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '',
         date: paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : pay?.createdAt,
         createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-      }).catch(err => console.error('Gagal posting ulang jurnal edit setoran grup:', err));
+      }).catch(err => {
+        console.error('Gagal posting ulang jurnal edit setoran grup:', err);
+        alert(`Setoran berhasil diedit, TAPI jurnal koreksinya GAGAL diposting ulang (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk setoran ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+      });
 
       setEditingGroupPaymentId(null);
       if (bookingItem) await syncBookingTotalPaid(bookingItem.id, bookingItem.totalAmount);
@@ -2254,6 +2272,8 @@ Terimakasih🙏`;
       });
     } catch (err) {
       alert("Gagal memperbarui pembayaran: " + err.message);
+    } finally {
+      setSavingPaymentEdit(false);
     }
   };
 
@@ -6117,8 +6137,8 @@ Terimakasih🙏`;
                               )}
                             </td>
                             <td className="p-2 text-center">
-                              <button onClick={() => handleSavePaymentEdit(pay.id)} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded mr-1">
-                                Simpan
+                              <button onClick={() => handleSavePaymentEdit(pay.id)} disabled={savingPaymentEdit} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded mr-1 disabled:opacity-60">
+                                {savingPaymentEdit ? 'Menyimpan...' : 'Simpan'}
                               </button>
                               <button onClick={() => setEditingPaymentId(null)} className={`px-2 py-1 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-200 text-slate-700'} text-[10px] rounded`}>
                                 Batal
@@ -6219,8 +6239,8 @@ Terimakasih🙏`;
                           </select>
                         )}
                         <div className="flex flex-wrap gap-2 pt-1">
-                          <button onClick={() => handleSavePaymentEdit(pay.id)} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded">
-                            Simpan
+                          <button onClick={() => handleSavePaymentEdit(pay.id)} disabled={savingPaymentEdit} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded disabled:opacity-60">
+                            {savingPaymentEdit ? 'Menyimpan...' : 'Simpan'}
                           </button>
                           <button onClick={() => setEditingPaymentId(null)} className={`px-2 py-1 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-200 text-slate-700'} text-[10px] rounded`}>
                             Batal
@@ -6631,8 +6651,8 @@ Terimakasih🙏`;
                                 )}
                               </td>
                               <td className="p-2 text-center">
-                                <button onClick={() => handleSaveGroupPaymentEdit(singlePay)} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded mr-1">
-                                  Simpan
+                                <button onClick={() => handleSaveGroupPaymentEdit(singlePay)} disabled={savingPaymentEdit} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded mr-1 disabled:opacity-60">
+                                  {savingPaymentEdit ? 'Menyimpan...' : 'Simpan'}
                                 </button>
                                 <button onClick={() => setEditingGroupPaymentId(null)} className={`px-2 py-1 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-200 text-slate-700'} text-[10px] rounded`}>
                                   Batal
@@ -6745,8 +6765,8 @@ Terimakasih🙏`;
                             </select>
                           )}
                           <div className="flex flex-wrap gap-2 pt-1">
-                            <button onClick={() => handleSaveGroupPaymentEdit(singlePay)} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded">
-                              Simpan
+                            <button onClick={() => handleSaveGroupPaymentEdit(singlePay)} disabled={savingPaymentEdit} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded disabled:opacity-60">
+                              {savingPaymentEdit ? 'Menyimpan...' : 'Simpan'}
                             </button>
                             <button onClick={() => setEditingGroupPaymentId(null)} className={`px-2 py-1 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-200 text-slate-700'} text-[10px] rounded`}>
                               Batal
