@@ -7,6 +7,7 @@ import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, Hi
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN, addPPN } from '../../lib/ppn';
 import { getNextCustomerCode } from '../../lib/customerCode';
+import { postBookingCreated, postIncomePayment, postBookingCancelRefund, postJournalEntry, ACC } from '../../lib/journal';
 
 // Firestore where(..., 'in', [...]) cuma dukung maks 30 nilai sekaligus —
 // buat query yang array-nya bisa aja lebih dari itu (grup rombongan gede),
@@ -1752,6 +1753,25 @@ Terimakasih🙏`;
         });
       }
 
+      // Jurnal batal/refund — sisa piutang yang nggak akan ketagih di-write
+      // off, refund (kalau ada) dikreditkan dari Pendapatan Diterima Dimuka/
+      // Pendapatan (tergantung status pengakuan pendapatan paketnya). Selisih
+      // antara totalPaid dan refundAmount (kalau ada DP yang dihanguskan)
+      // otomatis nempel jadi pendapatan perusahaan — lihat penjelasan di journal.js.
+      {
+        const cancelPkg = packagesList.find(p => p.id === selectedBookingForAction.packageId);
+        const cancelWriteOff = Math.max(0, Number(selectedBookingForAction.totalAmount || 0) - Number(selectedBookingForAction.totalPaid || 0));
+        await postBookingCancelRefund({
+          bookingId: selectedBookingForAction.id, bookingCode: selectedBookingForAction.bookingCode,
+          writeOffAmount: cancelWriteOff, refundAmount: refundAmountVal,
+          isRecognized: !!(cancelPkg && cancelPkg.revenueRecognized),
+          refundToDeposit: cancelForm.refundMethod === 'Deposit / Saldo Akun',
+          accountId: cancelForm.refundAccountId,
+          accountName: financialAccounts.find(a => a.id === cancelForm.refundAccountId)?.name || '',
+          date: new Date().toISOString(), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+        }).catch(err => console.error('Gagal posting jurnal batal/refund booking:', err));
+      }
+
       // Kuota seat yang dibatalkan dikembalikan ke paket
       await releaseQuotaToPackage(selectedBookingForAction.packageId);
 
@@ -1854,6 +1874,13 @@ Terimakasih🙏`;
         createdAt: new Date().toISOString()
       });
 
+      // Jurnal booking baru — piutang & pendapatan diterima dimuka penuh
+      // sebesar newPrice, sama kayak booking normal.
+      await postBookingCreated({
+        bookingId: newBookingRef.id, bookingCode: newBookingCode, totalAmount: newPrice,
+        date: new Date().toISOString(), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => console.error('Gagal posting jurnal booking reschedule:', err));
+
       // 2. Pindahkan setoran yang sudah dibayar sebagai carry-over ke booking baru
       if (carryOverAmount > 0) {
         await addDoc(collection(db, 'payments_income'), {
@@ -1867,6 +1894,42 @@ Terimakasih🙏`;
           notes: `Pindahan setoran dari booking ${oldBooking.bookingCode} (reschedule)`,
           createdAt: new Date().toISOString()
         });
+        // Carry-over BUKAN kas baru masuk (uangnya udah dicatat di booking
+        // lama) — jadi bukan postIncomePayment biasa (itu bakal ganda-catat
+        // Kas/Bank). Sebagai gantinya: lepas Pendapatan Diterima Dimuka yang
+        // nempel di booking lama sebesar carryOverAmount, pindahin jadi
+        // pengurang Piutang Jamaah booking BARU (bukan kas). Dikombinasikan
+        // dengan write-off sisa piutang booking lama di bawah, total
+        // Pendapatan Diterima Dimuka booking lama jadi nol bersih (tutup buku).
+        await postJournalEntry({
+          date: new Date().toISOString(),
+          description: `Carry-Over Reschedule ${oldBooking.bookingCode} -> ${newBookingCode}`,
+          source: 'booking_reschedule_carryover', sourceDocId: newBookingRef.id, reference: newBookingCode,
+          lines: [
+            { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: carryOverAmount, credit: 0 },
+            { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: 0, credit: carryOverAmount },
+          ],
+          createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+        }).catch(err => console.error('Gagal posting jurnal carry-over reschedule:', err));
+      }
+
+      // Tutup buku booking lama — sisa piutang yang belum dibayar (nggak
+      // akan pernah ketagih lewat booking lama karena udah di-reschedule)
+      // di-write-off, dikreditkan ke Pendapatan Diterima Dimuka/Pendapatan
+      // (tergantung status pengakuan pendapatan paket lama) persis kayak
+      // pola pembatalan booking — bukan pembatalan beneran, tapi booking
+      // lama emang nggak lanjut lagi jadi piutangnya harus ditutup.
+      {
+        const oldWriteOff = Math.max(0, Number(oldBooking.totalAmount || 0) - Number(oldBooking.totalPaid || 0));
+        if (oldWriteOff > 0) {
+          const oldPkg = packagesList.find(p => p.id === oldBooking.packageId);
+          await postBookingCancelRefund({
+            bookingId: oldBooking.id, bookingCode: oldBooking.bookingCode,
+            writeOffAmount: oldWriteOff, refundAmount: 0,
+            isRecognized: !!(oldPkg && oldPkg.revenueRecognized),
+            date: new Date().toISOString(), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+          }).catch(err => console.error('Gagal posting jurnal tutup buku booking lama (reschedule):', err));
+        }
       }
 
       // 3. Tandai booking lama sebagai rescheduled & kembalikan kuota paket lama
@@ -1978,7 +2041,7 @@ Terimakasih🙏`;
         const paxShare = baseShare + (i === 0 ? remainder : 0);
 
         if (paxShare > 0) {
-          await addDoc(collection(db, 'payments_income'), {
+          const gPayRef = await addDoc(collection(db, 'payments_income'), {
             bookingId: item.id,
             bookingCode: item.bookingCode,
             jamaahName: item.jamaahName,
@@ -1991,6 +2054,13 @@ Terimakasih🙏`;
             createdAt: resolvePaymentCreatedAt(groupPaymentForm.date),
             groupTransactionId
           });
+          await postIncomePayment({
+            paymentId: gPayRef.id, bookingCode: item.bookingCode, amount: paxShare,
+            paymentMethod: groupPaymentForm.paymentMethod,
+            accountId: groupPaymentForm.accountId, accountName: groupPaymentAccount?.name || '',
+            date: resolvePaymentCreatedAt(groupPaymentForm.date),
+            createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+          }).catch(err => console.error('Gagal posting jurnal setoran grup:', err));
         }
 
         // Sinkronkan totalPaid/paymentStatus tiap pax dari data payments_income
@@ -2331,7 +2401,7 @@ Terimakasih🙏`;
         bank_statement: false, vaccine_cert: false, visa: false, ticket: false
       };
 
-      await addDoc(collection(db, 'bookings'), {
+      const addPaxBookingRef = await addDoc(collection(db, 'bookings'), {
         bookingCode,
         groupBookingCode: groupEditTarget.code,
         groupPaxIndex: newIndex,
@@ -2362,6 +2432,11 @@ Terimakasih🙏`;
         leadSource: groupEditTarget.primary?.leadSource || '',
         createdAt: new Date().toISOString()
       });
+
+      await postBookingCreated({
+        bookingId: addPaxBookingRef.id, bookingCode, totalAmount: price,
+        date: new Date().toISOString(), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => console.error('Gagal posting jurnal tambah pax grup:', err));
 
       // Sinkronkan groupTotalPax ke semua booking lain di grup ini juga,
       // biar badge "Grup X/Y" di tiap baris peserta tetap akurat.
@@ -2544,7 +2619,7 @@ Terimakasih🙏`;
           const item = sortedActive[i];
           const share = baseShare + (i === 0 ? remainder : 0);
           if (share > 0) {
-            await addDoc(collection(db, 'payments_income'), {
+            const geIncomeRef = await addDoc(collection(db, 'payments_income'), {
               bookingId: item.id,
               bookingCode: item.bookingCode,
               jamaahName: item.jamaahName,
@@ -2557,6 +2632,13 @@ Terimakasih🙏`;
               createdAt: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
               groupTransactionId
             });
+            await postIncomePayment({
+              paymentId: geIncomeRef.id, bookingCode: item.bookingCode, amount: share,
+              paymentMethod: groupEditForm.addPaymentMethod,
+              accountId: groupEditForm.addAccountId, accountName: groupEditAccount?.name || '',
+              date: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
+              createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+            }).catch(err => console.error('Gagal posting jurnal setoran grup (edit):', err));
           }
         }
 
@@ -2706,6 +2788,11 @@ Terimakasih🙏`;
           createdAt: nowIso
         });
 
+        await postBookingCreated({
+          bookingId: newBookingRef.id, bookingCode: newBookingCode, totalAmount: newPrice,
+          date: nowIso, createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+        }).catch(err => console.error('Gagal posting jurnal booking reschedule grup:', err));
+
         if (carryOverAmount > 0) {
           await addDoc(collection(db, 'payments_income'), {
             bookingId: newBookingRef.id,
@@ -2718,6 +2805,34 @@ Terimakasih🙏`;
             notes: `Pindahan setoran dari booking ${oldBooking.bookingCode} (reschedule grup ${groupRescheduleTarget.code})`,
             createdAt: nowIso
           });
+          // Sama kayak reschedule per-peserta: carry-over BUKAN kas baru,
+          // jadi bukan postIncomePayment — lepas Pendapatan Diterima Dimuka
+          // booking lama, pindahin jadi pengurang Piutang Jamaah booking baru.
+          await postJournalEntry({
+            date: nowIso,
+            description: `Carry-Over Reschedule Grup ${oldBooking.bookingCode} -> ${newBookingCode}`,
+            source: 'booking_reschedule_carryover', sourceDocId: newBookingRef.id, reference: newBookingCode,
+            lines: [
+              { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: carryOverAmount, credit: 0 },
+              { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: 0, credit: carryOverAmount },
+            ],
+            createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+          }).catch(err => console.error('Gagal posting jurnal carry-over reschedule grup:', err));
+        }
+
+        // Tutup buku booking lama — write-off sisa piutang yang nggak akan
+        // ketagih lewat booking lama (pola sama kayak reschedule per-peserta).
+        {
+          const oldWriteOff = Math.max(0, Number(oldBooking.totalAmount || 0) - Number(oldBooking.totalPaid || 0));
+          if (oldWriteOff > 0) {
+            const oldPkgForWriteOff = packagesList.find(p => p.id === oldBooking.packageId);
+            await postBookingCancelRefund({
+              bookingId: oldBooking.id, bookingCode: oldBooking.bookingCode,
+              writeOffAmount: oldWriteOff, refundAmount: 0,
+              isRecognized: !!(oldPkgForWriteOff && oldPkgForWriteOff.revenueRecognized),
+              date: nowIso, createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+            }).catch(err => console.error('Gagal posting jurnal tutup buku booking lama (reschedule grup):', err));
+          }
         }
 
         await updateDoc(doc(db, 'bookings', oldBooking.id), {
@@ -2857,6 +2972,24 @@ Terimakasih🙏`;
           sourceDocId: `refund_${groupCancelTarget.code}`
         });
       }
+
+      // Jurnal batal/refund per-pax (bukan digabung 1 baris) — tiap pax bisa
+      // beda status pengakuan pendapatan paketnya & beda sisa piutang, jadi
+      // dipakai helper yang sama persis dengan pembatalan per-peserta,
+      // dipanggil satu-satu pakai share refund masing-masing.
+      await Promise.all(sortedActive.map((item, i) => {
+        const share = baseShare + (i === 0 ? remainder : 0);
+        const cancelPkg = packagesList.find(p => p.id === item.packageId);
+        const writeOff = Math.max(0, Number(item.totalAmount || 0) - Number(item.totalPaid || 0));
+        return postBookingCancelRefund({
+          bookingId: item.id, bookingCode: item.bookingCode,
+          writeOffAmount: writeOff, refundAmount: share,
+          isRecognized: !!(cancelPkg && cancelPkg.revenueRecognized),
+          refundToDeposit: groupCancelForm.refundMethod === 'Deposit / Saldo Akun',
+          accountId: groupCancelForm.refundAccountId, accountName: refundAccount?.name || '',
+          date: nowIso, createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+        }).catch(err => console.error('Gagal posting jurnal batal/refund booking grup:', err));
+      }));
 
       // Kuota seat yang dibatalkan dikembalikan ke paket — 1 updateDoc pakai
       // increment(sortedActive.length), bukan loop +1 per pax.
@@ -3917,6 +4050,28 @@ Terimakasih🙏`;
           updatedAt: new Date().toISOString()
         });
 
+        // Kalau totalAmount berubah gara-gara edit biaya/diskon, sesuaikan
+        // Piutang Jamaah & Pendapatan Diterima Dimuka selisihnya (bisa naik
+        // atau turun) — biar tetap nyambung sama totalAmount booking yg baru.
+        {
+          const totalAmountDelta = editedTotalAmount - Number(currentBooking?.totalAmount || 0);
+          if (totalAmountDelta !== 0) {
+            await postJournalEntry({
+              date: new Date().toISOString(),
+              description: `Koreksi Total Booking ${currentBooking.bookingCode}`,
+              source: 'booking_edit_adjustment', sourceDocId: editingBookingId, reference: currentBooking.bookingCode,
+              lines: totalAmountDelta > 0 ? [
+                { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: totalAmountDelta, credit: 0 },
+                { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: 0, credit: totalAmountDelta },
+              ] : [
+                { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: -totalAmountDelta, credit: 0 },
+                { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: 0, credit: -totalAmountDelta },
+              ],
+              createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+            }).catch(err => console.error('Gagal posting jurnal koreksi total booking:', err));
+          }
+        }
+
         if (paymentVal > 0) {
           const payRef = await addDoc(collection(db, 'payments_income'), {
             bookingId: editingBookingId,
@@ -3930,6 +4085,12 @@ Terimakasih🙏`;
             notes: formData.paymentNotes,
             createdAt: resolvePaymentCreatedAt(formData.paymentDate)
           });
+          await postIncomePayment({
+            paymentId: payRef.id, bookingCode: currentBooking.bookingCode, amount: paymentVal,
+            paymentMethod: formData.paymentMethod, accountId: formData.accountId, accountName: payAccount?.name || '',
+            date: resolvePaymentCreatedAt(formData.paymentDate),
+            createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+          }).catch(err => console.error('Gagal posting jurnal setoran edit booking:', err));
           if (formData.paymentMethod === 'Saldo Deposit') {
             await adjustDepositBalance(ordererId, ordererName, -paymentVal, 'usage', `Bayar setoran booking ${currentBooking.bookingCode}`, currentBooking.bookingCode);
           } else {
@@ -4021,6 +4182,11 @@ Terimakasih🙏`;
             createdAt: resolvePaymentCreatedAt(formData.paymentDate)
           });
 
+          await postBookingCreated({
+            bookingId: newBookingRef.id, bookingCode, totalAmount: singleTotalAmount,
+            date: resolvePaymentCreatedAt(formData.paymentDate), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+          }).catch(err => console.error('Gagal posting jurnal booking baru:', err));
+
           if (paymentVal > 0) {
             const payRef = await addDoc(collection(db, 'payments_income'), {
               bookingId: newBookingRef.id,
@@ -4034,6 +4200,12 @@ Terimakasih🙏`;
               notes: formData.paymentNotes,
               createdAt: resolvePaymentCreatedAt(formData.paymentDate)
             });
+            await postIncomePayment({
+              paymentId: payRef.id, bookingCode, amount: paymentVal,
+              paymentMethod: formData.paymentMethod, accountId: formData.accountId, accountName: payAccount?.name || '',
+              date: resolvePaymentCreatedAt(formData.paymentDate),
+              createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+            }).catch(err => console.error('Gagal posting jurnal DP booking baru:', err));
             if (formData.paymentMethod === 'Saldo Deposit') {
               await adjustDepositBalance(ordererId, ordererName, -paymentVal, 'usage', `Bayar DP booking ${bookingCode}`, bookingCode);
             } else {
@@ -4131,8 +4303,13 @@ Terimakasih🙏`;
               createdAt: resolvePaymentCreatedAt(formData.paymentDate)
             });
 
+            await postBookingCreated({
+              bookingId: newBookingRef.id, bookingCode, totalAmount: paxTotalAmount,
+              date: resolvePaymentCreatedAt(formData.paymentDate), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+            }).catch(err => console.error('Gagal posting jurnal booking grup baru:', err));
+
             if (paxShare > 0) {
-              await addDoc(collection(db, 'payments_income'), {
+              const groupNewPayRef = await addDoc(collection(db, 'payments_income'), {
                 bookingId: newBookingRef.id,
                 bookingCode,
                 jamaahName: pax.jamaahName,
@@ -4145,6 +4322,12 @@ Terimakasih🙏`;
                 createdAt: resolvePaymentCreatedAt(formData.paymentDate),
                 groupTransactionId
               });
+              await postIncomePayment({
+                paymentId: groupNewPayRef.id, bookingCode, amount: paxShare,
+                paymentMethod: formData.paymentMethod, accountId: formData.accountId, accountName: payAccount?.name || '',
+                date: resolvePaymentCreatedAt(formData.paymentDate),
+                createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+              }).catch(err => console.error('Gagal posting jurnal DP booking grup baru:', err));
             }
           }
 
