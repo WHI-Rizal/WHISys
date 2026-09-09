@@ -448,6 +448,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     notes: '',
     expenseDate: todayISODate()
   });
+  // null = mode catat baru, diisi id doc `expenses_operational` = mode edit
+  // (misal salah pilih kategori/akun pas nyatet).
+  const [editingOperationalId, setEditingOperationalId] = useState(null);
 
 
   const fetchData = async () => {
@@ -1467,6 +1470,21 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     }
   };
 
+  // Buka form Catat Biaya Operasional dalam mode EDIT — dipake pas ada
+  // salah pilih kategori/akun/nominal pas nyatet, jadi nggak perlu
+  // hapus-lalu-catat-ulang manual.
+  const handleEditOperationalExpense = (op) => {
+    setEditingOperationalId(op.id);
+    setOperationalForm({
+      category: op.category || operationalCategories[0],
+      amount: String(op.amount ?? ''),
+      accountId: op.accountId || '',
+      notes: op.notes || '',
+      expenseDate: (op.expenseDate || (op.createdAt || '').slice(0, 10) || todayISODate())
+    });
+    setShowOperationalModal(true);
+  };
+
   const handleOperationalSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -1476,44 +1494,93 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       }
       const opAccount = financialAccounts.find(a => a.id === operationalForm.accountId);
       const opAmountVal = Number(operationalForm.amount);
+      const expenseDateVal = operationalForm.expenseDate || todayISODate();
+      const journalDate = resolvePaymentCreatedAt(expenseDateVal);
 
-      const opRef = await addDoc(collection(db, 'expenses_operational'), {
-        category: operationalForm.category,
-        amount: opAmountVal,
-        accountId: operationalForm.accountId,
-        accountName: opAccount?.name || '',
-        notes: operationalForm.notes,
-        expenseDate: operationalForm.expenseDate || todayISODate(),
-        createdAt: new Date().toISOString()
-      });
-      await adjustAccountBalance(operationalForm.accountId, -opAmountVal, {
-        description: `Biaya Operasional - ${operationalForm.category}`,
-        reference: operationalForm.category || '',
-        source: 'operational_expense',
-        date: operationalForm.expenseDate ? resolvePaymentCreatedAt(operationalForm.expenseDate) : undefined,
-        sourceDocId: opRef.id
-      });
-      await postOperationalExpense({
-        expenseId: opRef.id, category: operationalForm.category, amount: opAmountVal,
-        accountId: operationalForm.accountId, accountName: opAccount?.name || '',
-        date: operationalForm.expenseDate ? resolvePaymentCreatedAt(operationalForm.expenseDate) : new Date().toISOString(),
-        createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-      }).catch(err => console.error('Gagal posting jurnal biaya operasional:', err));
+      if (editingOperationalId) {
+        // Mode EDIT: cari data lama dulu buat tau akun & nominal SEBELUM
+        // diubah, biar bisa dibalik dulu (kembaliin saldo akun lama +
+        // hapus riwayat mutasi & jurnal lama) sebelum nerapin nilai baru —
+        // pola yang sama kayak hapus-lalu-catat-ulang, cuma digabung jadi
+        // 1 langkah biar user nggak perlu 2 aksi terpisah.
+        const oldOp = operationalExpenses.find(o => o.id === editingOperationalId);
+        if (oldOp?.accountId) {
+          await removeAccountMutationBySource(oldOp.accountId, editingOperationalId, Number(oldOp.amount) || 0);
+        }
+        await deleteJournalEntriesBySource('operational_expense', editingOperationalId);
 
-      logActivity({
-        userId: currentUser?.uid,
-        userName: currentUser?.fullName || currentUser?.email,
-        userRole: currentUser?.role,
-        action: 'create',
-        module: 'Pengeluaran Operasional',
-        targetLabel: operationalForm.category,
-        details: `Mencatat biaya operasional "${operationalForm.category}" senilai Rp ${opAmountVal.toLocaleString('id-ID')}`
-      });
+        await updateDoc(doc(db, 'expenses_operational', editingOperationalId), {
+          category: operationalForm.category,
+          amount: opAmountVal,
+          accountId: operationalForm.accountId,
+          accountName: opAccount?.name || '',
+          notes: operationalForm.notes,
+          expenseDate: expenseDateVal
+        });
+        await adjustAccountBalance(operationalForm.accountId, -opAmountVal, {
+          description: `Biaya Operasional - ${operationalForm.category}`,
+          reference: operationalForm.category || '',
+          source: 'operational_expense',
+          date: journalDate,
+          sourceDocId: editingOperationalId
+        });
+        await postOperationalExpense({
+          expenseId: editingOperationalId, category: operationalForm.category, amount: opAmountVal,
+          accountId: operationalForm.accountId, accountName: opAccount?.name || '',
+          date: journalDate,
+          createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+        }).catch(err => console.error('Gagal posting jurnal biaya operasional:', err));
+
+        logActivity({
+          userId: currentUser?.uid,
+          userName: currentUser?.fullName || currentUser?.email,
+          userRole: currentUser?.role,
+          action: 'update',
+          module: 'Pengeluaran Operasional',
+          targetLabel: operationalForm.category,
+          details: `Mengubah catatan biaya operasional "${oldOp?.category || '-'}" (Rp ${Number(oldOp?.amount || 0).toLocaleString('id-ID')}) jadi "${operationalForm.category}" (Rp ${opAmountVal.toLocaleString('id-ID')})`
+        });
+      } else {
+        const opRef = await addDoc(collection(db, 'expenses_operational'), {
+          category: operationalForm.category,
+          amount: opAmountVal,
+          accountId: operationalForm.accountId,
+          accountName: opAccount?.name || '',
+          notes: operationalForm.notes,
+          expenseDate: expenseDateVal,
+          createdAt: new Date().toISOString()
+        });
+        await adjustAccountBalance(operationalForm.accountId, -opAmountVal, {
+          description: `Biaya Operasional - ${operationalForm.category}`,
+          reference: operationalForm.category || '',
+          source: 'operational_expense',
+          date: journalDate,
+          sourceDocId: opRef.id
+        });
+        await postOperationalExpense({
+          expenseId: opRef.id, category: operationalForm.category, amount: opAmountVal,
+          accountId: operationalForm.accountId, accountName: opAccount?.name || '',
+          date: journalDate,
+          createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+        }).catch(err => console.error('Gagal posting jurnal biaya operasional:', err));
+
+        logActivity({
+          userId: currentUser?.uid,
+          userName: currentUser?.fullName || currentUser?.email,
+          userRole: currentUser?.role,
+          action: 'create',
+          module: 'Pengeluaran Operasional',
+          targetLabel: operationalForm.category,
+          details: `Mencatat biaya operasional "${operationalForm.category}" senilai Rp ${opAmountVal.toLocaleString('id-ID')}`
+        });
+      }
+
       setShowOperationalModal(false);
+      setEditingOperationalId(null);
       setOperationalForm({ category: operationalCategories[0], amount: '', accountId: '', notes: '', expenseDate: todayISODate() });
       fetchData();
     } catch (err) {
-      alert("Gagal mencatat biaya operasional: " + err.message);
+      alert("Gagal menyimpan biaya operasional: " + err.message);
     }
   };
 
@@ -1764,7 +1831,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             <ArrowUpRight className="w-4 h-4" /> + Bayar Vendor
           </button>
           <button
-            onClick={() => setShowOperationalModal(true)}
+            onClick={() => { setEditingOperationalId(null); setOperationalForm({ category: operationalCategories[0], amount: '', accountId: '', notes: '', expenseDate: todayISODate() }); setShowOperationalModal(true); }}
             className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
           >
             <Building2 className="w-4 h-4" /> + Biaya Operasional Kantor
@@ -2269,13 +2336,22 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                         - Rp {Number(op.amount).toLocaleString('id-ID')}
                       </td>
                       <td className="p-4 text-center">
-                        <button
-                          onClick={() => handleDeleteOperationalExpense(op)}
-                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
-                          title="Hapus Biaya Operasional"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => handleEditOperationalExpense(op)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                            title="Edit Biaya Operasional"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteOperationalExpense(op)}
+                            className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                            title="Hapus Biaya Operasional"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -2306,6 +2382,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                     <div className="font-bold text-amber-500">- Rp {Number(op.amount).toLocaleString('id-ID')}</div>
                   </div>
                   <div className="flex flex-wrap gap-2 pt-1">
+                    <button
+                      onClick={() => handleEditOperationalExpense(op)}
+                      className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                      title="Edit Biaya Operasional"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
                     <button
                       onClick={() => handleDeleteOperationalExpense(op)}
                       className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
@@ -3591,11 +3674,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       {showOperationalModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
-            <button onClick={() => setShowOperationalModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+            <button onClick={() => { setShowOperationalModal(false); setEditingOperationalId(null); }} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
             <h3 className={`text-lg font-bold ${styles.textTitle} mb-4 flex items-center gap-2`}>
-              <Building2 className="w-5 h-5 text-amber-500" /> Catat Biaya Operasional Kantor
+              <Building2 className="w-5 h-5 text-amber-500" /> {editingOperationalId ? 'Edit Biaya Operasional Kantor' : 'Catat Biaya Operasional Kantor'}
             </h3>
             <p className={`text-xs ${styles.textSub} mb-4`}>
               Khusus buat pengeluaran yang bukan biaya trip/vendor — misalnya sewa kantor, gaji staff, listrik, ATK, dll.
@@ -3672,11 +3755,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
               </div>
 
               <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                <button type="button" onClick={() => setShowOperationalModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                <button type="button" onClick={() => { setShowOperationalModal(false); setEditingOperationalId(null); }} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
                 <button type="submit" className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium">
-                  Simpan Biaya Operasional
+                  {editingOperationalId ? 'Simpan Perubahan' : 'Simpan Biaya Operasional'}
                 </button>
               </div>
             </form>
