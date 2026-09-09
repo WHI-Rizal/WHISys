@@ -15,7 +15,8 @@ import { logActivity } from '../../lib/activityLog';
 import { calculatePPN } from '../../lib/ppn';
 import {
   COA, ACC, seedChartOfAccounts, fetchAllJournalEntries, fetchChartOfAccounts,
-  runInitialJournalMigration, postJournalEntry, postRevenueRecognition, postRevenueUnrecognition
+  runInitialJournalMigration, postJournalEntry, postRevenueRecognition, postRevenueUnrecognition,
+  backfillOpexJournalCategories
 } from '../../lib/journal';
 
 const DEFAULT_COMPANY_PROFILE = {
@@ -231,7 +232,8 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
         getDoc(doc(db, 'settings', 'journal_migration')),
         getDoc(doc(db, 'settings', 'company_profile')),
       ]);
-      setJournalEntries(jeList);
+      const opexList = opexSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(o => !o.isCategoryConfig);
+
       setChartOfAccounts(coaList);
       setBookingsList(bookSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setPackagesList(pkgSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -240,10 +242,23 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
       setFinancialAccounts(accSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setPaymentsIncome(incomeSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setPaymentsVendor(vendorPaySnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setOperationalExpenses(opexSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(o => !o.isCategoryConfig));
+      setOperationalExpenses(opexList);
       setMigrationDone(!!(migFlagSnap.exists() && migFlagSnap.data().done));
       if (profileSnap.exists() && profileSnap.data().company) {
         setCompanyProfile({ ...DEFAULT_COMPANY_PROFILE, ...profileSnap.data().company });
+      }
+
+      // Tambal baris jurnal Beban Operasional lama yang belum punya field
+      // `category` (dibuat sebelum fitur breakdown-per-kategori ada) —
+      // idempotent, cuma nambal yang bolong. Kalau ada yang ditambal,
+      // jurnalnya di-fetch ulang biar Buku Besar/breakdown langsung
+      // kepakai versi yang udah lengkap tanpa perlu reload manual.
+      try {
+        const patched = await backfillOpexJournalCategories(opexList);
+        setJournalEntries(patched > 0 ? await fetchAllJournalEntries() : jeList);
+      } catch (err) {
+        console.error('Gagal menambal kategori jurnal biaya operasional lama:', err);
+        setJournalEntries(jeList);
       }
     } catch (err) {
       console.error('Gagal memuat data Laporan Keuangan:', err);
@@ -562,6 +577,7 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, financialA
 
   const account = chartOfAccounts.find(a => a.code === accountCode);
   const isKasBank = accountCode === ACC.KAS_BANK;
+  const isOpex = accountCode === ACC.OPEX;
 
   // Khusus 1101 - Kas & Bank: 1 akun COA ini nampung banyak rekening
   // (financial_accounts) sekaligus, jadi dikasih dropdown tambahan buat
@@ -576,16 +592,35 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, financialA
     return Object.values(byId);
   })() : [];
 
+  // Khusus 5201 - Beban Operasional: sama persis pola-nya kayak Kas & Bank
+  // di atas, cuma yang dipecah bukan rekening tapi kategori biaya — ditarik
+  // langsung dari kategori yang nempel di baris jurnal (l.category), jadi
+  // kategori baru yang ditambah lewat "Kelola Kategori" otomatis kebaca di
+  // sini juga begitu ada transaksi pertamanya, nggak perlu setting tambahan.
+  const opexCategoryOptions = isOpex ? (() => {
+    const set = new Set();
+    journalEntries.forEach(e => (e.lines || []).forEach(l => {
+      if (l.accountCode === ACC.OPEX && l.category) set.add(l.category);
+    }));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  })() : [];
+
   const handleAccountCodeChange = (code) => {
     setAccountCode(code);
     setSubAccountId('');
+  };
+
+  const matchesSubFilter = (l) => {
+    if (isKasBank) return !subAccountId || l.accountId === subAccountId;
+    if (isOpex) return !subAccountId || l.category === subAccountId;
+    return true;
   };
 
   // Semua baris jurnal yang nyentuh akun terpilih, diurutkan tanggal ASC,
   // dihitung saldo berjalan (running balance) sesuai normalBalance akun
   // (debit-normal: +debit -credit; credit-normal: +credit -debit).
   const rows = journalEntries
-    .filter(e => (e.lines || []).some(l => l.accountCode === accountCode && (!isKasBank || !subAccountId || l.accountId === subAccountId)))
+    .filter(e => (e.lines || []).some(l => l.accountCode === accountCode && matchesSubFilter(l)))
     .filter(e => {
       const d = (e.date || '').slice(0, 10);
       if (filterStart && d < filterStart) return false;
@@ -594,7 +629,7 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, financialA
     })
     .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
     .flatMap(e => (e.lines || [])
-      .filter(l => l.accountCode === accountCode && (!isKasBank || !subAccountId || l.accountId === subAccountId))
+      .filter(l => l.accountCode === accountCode && matchesSubFilter(l))
       .map(l => ({
         date: e.date, description: e.description, source: e.source,
         debit: l.debit || 0, credit: l.credit || 0, financialAccountName: l.financialAccountName
@@ -609,7 +644,7 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, financialA
 
   const selectedSubAccountLabel = isKasBank && subAccountId
     ? (kasBankAccountOptions.find(o => o.accountId === subAccountId)?.label || '')
-    : '';
+    : (isOpex && subAccountId ? subAccountId : '');
 
   const handleExportPdf = async () => {
     setGeneratingPdf(true);
@@ -634,7 +669,8 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, financialA
         headStyles: { fillColor: [15, 23, 42] },
         columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } }
       });
-      docPdf.save(`Buku-Besar-${account?.code || ''}${subAccountId ? '-' + subAccountId.slice(-6) : ''}-${todayISODate()}.pdf`);
+      const fileSuffix = subAccountId ? '-' + (isKasBank ? subAccountId.slice(-6) : subAccountId.replace(/[^a-zA-Z0-9]+/g, '-')) : '';
+      docPdf.save(`Buku-Besar-${account?.code || ''}${fileSuffix}-${todayISODate()}.pdf`);
     } catch (err) {
       alert('Gagal membuat PDF Buku Besar: ' + err.message);
     }
@@ -656,6 +692,15 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, financialA
             <select className={`${styles.inputBg} rounded-lg p-2 text-xs border min-w-[220px]`} value={subAccountId} onChange={e => setSubAccountId(e.target.value)}>
               <option value="">Semua Rekening (Digabung)</option>
               {kasBankAccountOptions.map(o => <option key={o.accountId} value={o.accountId}>{o.label}</option>)}
+            </select>
+          </div>
+        )}
+        {isOpex && (
+          <div>
+            <label className={`block mb-1 text-[10.5px] font-medium ${styles.textSub}`}>Kategori</label>
+            <select className={`${styles.inputBg} rounded-lg p-2 text-xs border min-w-[220px]`} value={subAccountId} onChange={e => setSubAccountId(e.target.value)}>
+              <option value="">Semua Kategori (Digabung)</option>
+              {opexCategoryOptions.map(cat => <option key={cat} value={cat}>{cat}</option>)}
             </select>
           </div>
         )}
