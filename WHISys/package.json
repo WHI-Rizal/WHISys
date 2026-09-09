@@ -12,6 +12,7 @@
     "@google/genai": "^2.16.0",
     "autoprefixer": "^10.4.19",
     "firebase": "^10.0.0",
+    "firebase-admin": "^14.3.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "lucide-react": "^0.378.0",
