@@ -213,6 +213,45 @@ const mergeExtraLists = (items, key) => {
 // Kapasitas orang per tipe kamar (dipakai untuk Rooming List)
 const ROOM_CAPACITY = { Quad: 4, Triple: 3, Double: 2 };
 
+// Baca Tanggal Lahir (& jenis kelamin) dari 16 digit NIK KTP — dipakai di
+// SEMUA form "tambah jamaah cepat" (Pemesan Baru / Peserta Baru) di modul
+// ini, biar staf nggak perlu ngetik ulang Tanggal Lahir kalau NIK-nya udah
+// diisi. Formatnya: digit ke-7—8 = tanggal lahir (perempuan +40), digit
+// ke-9—10 = bulan, digit ke-11—12 = 2 digit terakhir tahun lahir.
+//
+// PENTING: ini cuma DEFAULT/BANTUAN — field Tanggal Lahir di form tetap
+// bisa diisi/dikoreksi manual (misal NIK-nya nggak lengkap/salah ketik,
+// atau emang jamaah belum punya NIK). Login Portal Jamaah WAJIB Tanggal
+// Lahir cocok, jadi field ini yang bikin fitur itu jalan buat jamaah baru.
+const deriveBirthInfoFromNik = (nik) => {
+  const digits = String(nik || '').replace(/\D/g, '');
+  if (digits.length !== 16) return null;
+
+  let tanggal = parseInt(digits.slice(6, 8), 10);
+  const bulan = parseInt(digits.slice(8, 10), 10);
+  const tahun2Digit = parseInt(digits.slice(10, 12), 10);
+  if (Number.isNaN(tanggal) || Number.isNaN(bulan) || Number.isNaN(tahun2Digit)) return null;
+
+  let gender = 'L';
+  if (tanggal > 40) {
+    tanggal -= 40;
+    gender = 'P';
+  }
+  if (tanggal < 1 || tanggal > 31 || bulan < 1 || bulan > 12) return null;
+
+  // NIK cuma nyimpen 2 digit tahun — asumsikan orang yang masih aktif
+  // ngurus dokumen umroh/travel nggak ada yang lahir di atas ~100 tahun
+  // lalu, jadi kalau 2 digitnya lebih besar dari 2 digit tahun sekarang,
+  // anggap kelahiran 19xx, selain itu 20xx.
+  const currentYear2Digit = new Date().getFullYear() % 100;
+  const abad = tahun2Digit > currentYear2Digit ? 1900 : 2000;
+  const tahun = abad + tahun2Digit;
+
+  const mm = String(bulan).padStart(2, '0');
+  const dd = String(tanggal).padStart(2, '0');
+  return { birthDate: `${tahun}-${mm}-${dd}`, gender };
+};
+
 // Daftar Dokumen Persyaratan Standard Travel (8 Dokumen)
 const REQUIRED_DOCUMENTS = [
   { key: 'passport', label: 'Paspor Asli (Min. 6 Bln)' },
@@ -336,7 +375,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     ordererId: '',
     // Daftar Peserta: array of { jamaahId: '' | '__new__' | <jamaah doc id>, newJamaah: { fullName, phone, nik, passportNumber } }.
     // Panjang list ini SELALU sama dengan paxCount (Pax 1 nggak lagi field terpisah).
-    pesertaList: [{ jamaahId: '', newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '' } }],
+    pesertaList: [{ jamaahId: '', newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '', birthDate: '' } }],
     roomType: 'Quad',
     busGroup: 'Bus 1',
     paxCount: 1,
@@ -390,7 +429,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   // Pemesan cuma metadata booking (siapa yang mendaftarkan), bukan otomatis ikut
   // sebagai peserta/jamaah yang berangkat — makanya form-nya dipisah dari peserta.
   const [newOrdererForm, setNewOrdererForm] = useState({
-    fullName: '', phone: '', nik: '', passportNumber: ''
+    fullName: '', phone: '', nik: '', passportNumber: '', birthDate: ''
   });
 
   // State grup mana yang lagi dibuka detailnya di Booking & Manifest (null = tampilan ringkasan grup)
@@ -484,7 +523,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [groupDiscountDraft, setGroupDiscountDraft] = useState({ name: '', amount: '', notes: '' });
   const [editingGroupDiscountId, setEditingGroupDiscountId] = useState(null);
   const [groupEditNewOrdererForm, setGroupEditNewOrdererForm] = useState({
-    fullName: '', phone: '', nik: '', passportNumber: ''
+    fullName: '', phone: '', nik: '', passportNumber: '', birthDate: ''
   });
 
   // "Tambah Peserta Baru" di dalam modal Edit Grup — buat peserta yang nyusul
@@ -494,7 +533,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   // yang berlaku ke SEMUA pax — nambah 1 peserta baru itu aksi independen.
   const [addPaxForm, setAddPaxForm] = useState({
     jamaahId: '',
-    newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '' },
+    newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '', birthDate: '' },
     roomType: 'Quad'
   });
 
@@ -995,7 +1034,7 @@ Terimakasih🙏`;
   };
 
   // Bikin satu slot kosong Daftar Peserta (dipakai pas nambah pax / buka modal Tambah Booking)
-  const emptyPesertaEntry = () => ({ jamaahId: '', newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '' } });
+  const emptyPesertaEntry = () => ({ jamaahId: '', newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '', birthDate: '' } });
 
   const handleOpenAddModal = () => {
     setEditingBookingId(null);
@@ -1013,7 +1052,7 @@ Terimakasih🙏`;
     setEditingChargeId(null);
     setDiscountDraft({ name: '', amount: '', notes: '' });
     setEditingDiscountId(null);
-    setNewOrdererForm({ fullName: '', phone: '', nik: '', passportNumber: '' });
+    setNewOrdererForm({ fullName: '', phone: '', nik: '', passportNumber: '', birthDate: '' });
     setShowModal(true);
   };
 
@@ -1043,7 +1082,7 @@ Terimakasih🙏`;
       ordererId: item.ordererId || (item.ordererName ? '__new__' : ''),
       // Edit selalu berkaitan sama 1 booking/pax existing — Daftar Peserta cuma 1
       // entry, di-preselect ke jamaahId booking ini, tapi tetap bisa diganti.
-      pesertaList: [{ jamaahId: item.jamaahId || '', newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '' } }],
+      pesertaList: [{ jamaahId: item.jamaahId || '', newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '', birthDate: '' } }],
       roomType: item.roomType || 'Quad',
       busGroup: item.busGroup || 'Bus 1',
       paxCount: 1,
@@ -1078,7 +1117,7 @@ Terimakasih🙏`;
     setEditingChargeId(null);
     setDiscountDraft({ name: '', amount: '', notes: '' });
     setEditingDiscountId(null);
-    setNewOrdererForm({ fullName: item.ordererName || '', phone: '', nik: '', passportNumber: '' });
+    setNewOrdererForm({ fullName: item.ordererName || '', phone: '', nik: '', passportNumber: '', birthDate: '' });
     setShowModal(true);
   };
 
@@ -1267,7 +1306,7 @@ Terimakasih🙏`;
       }
       setFormData(prev => {
         const updated = [...prev.pesertaList];
-        updated[idx] = { ...updated[idx], jamaahId: '__same_as_orderer__', newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '' } };
+        updated[idx] = { ...updated[idx], jamaahId: '__same_as_orderer__', newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '', birthDate: '' } };
         return { ...prev, pesertaList: updated };
       });
       return;
@@ -1283,7 +1322,15 @@ Terimakasih🙏`;
   const handlePesertaNewJamaahChange = (idx, field, value) => {
     setFormData(prev => {
       const updated = [...prev.pesertaList];
-      updated[idx] = { ...updated[idx], newJamaah: { ...updated[idx].newJamaah, [field]: value } };
+      const nextNewJamaah = { ...updated[idx].newJamaah, [field]: value };
+      // Auto-isi Tanggal Lahir dari NIK begitu NIK-nya lengkap 16 digit —
+      // CUMA kalau field Tanggal Lahir-nya masih kosong, biar nggak nimpa
+      // koreksi manual yang udah diketik staf sebelumnya.
+      if (field === 'nik' && !nextNewJamaah.birthDate) {
+        const nikInfo = deriveBirthInfoFromNik(value);
+        if (nikInfo) nextNewJamaah.birthDate = nikInfo.birthDate;
+      }
+      updated[idx] = { ...updated[idx], newJamaah: nextNewJamaah };
       return { ...prev, pesertaList: updated };
     });
   };
@@ -2199,10 +2246,10 @@ Terimakasih🙏`;
     setEditingGroupChargeId(null);
     setGroupDiscountDraft({ name: '', amount: '', notes: '' });
     setEditingGroupDiscountId(null);
-    setGroupEditNewOrdererForm({ fullName: group.primary?.ordererName || '', phone: '', nik: '', passportNumber: '' });
+    setGroupEditNewOrdererForm({ fullName: group.primary?.ordererName || '', phone: '', nik: '', passportNumber: '', birthDate: '' });
     setAddPaxForm({
       jamaahId: '',
-      newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '' },
+      newJamaah: { fullName: '', phone: '', nik: '', passportNumber: '', birthDate: '' },
       roomType: group.primary?.roomType || 'Quad'
     });
     setShowGroupEditModal(true);
@@ -2246,11 +2293,16 @@ Terimakasih🙏`;
       let newJamaahData;
       if (addPaxForm.jamaahId === '__new__') {
         const newCode = await getNextCustomerCode();
+        // Tanggal Lahir WAJIB buat login Portal Jamaah nanti — prioritas dari
+        // field Tanggal Lahir yang diisi manual staf, kalau kosong baru coba
+        // baca otomatis dari NIK (lihat deriveBirthInfoFromNik di atas).
+        const addPaxNikInfo = deriveBirthInfoFromNik(addPaxForm.newJamaah.nik);
         const newJamaahRef = await addDoc(collection(db, 'jamaah'), {
           customerCode: newCode,
           fullName: addPaxForm.newJamaah.fullName.trim(),
           nik: addPaxForm.newJamaah.nik || '',
-          gender: 'L',
+          gender: addPaxNikInfo?.gender || 'L',
+          birthDate: addPaxForm.newJamaah.birthDate || addPaxNikInfo?.birthDate || '',
           phone: addPaxForm.newJamaah.phone || '',
           passportNumber: addPaxForm.newJamaah.passportNumber || '',
           passportExpiry: '',
@@ -2374,11 +2426,16 @@ Terimakasih🙏`;
       let selectedOrderer = null;
       if (groupEditForm.ordererId === '__new__') {
         const newOrdererCode = await getNextCustomerCode();
+        // Tanggal Lahir WAJIB buat login Portal Jamaah nanti — prioritas dari
+        // field Tanggal Lahir yang diisi manual staf, kalau kosong baru coba
+        // baca otomatis dari NIK (lihat deriveBirthInfoFromNik di atas).
+        const groupEditOrdererNikInfo = deriveBirthInfoFromNik(groupEditNewOrdererForm.nik);
         const newOrdererRef = await addDoc(collection(db, 'jamaah'), {
           customerCode: newOrdererCode,
           fullName: groupEditNewOrdererForm.fullName.trim(),
           nik: groupEditNewOrdererForm.nik || '',
-          gender: 'L',
+          gender: groupEditOrdererNikInfo?.gender || 'L',
+          birthDate: groupEditNewOrdererForm.birthDate || groupEditOrdererNikInfo?.birthDate || '',
           phone: groupEditNewOrdererForm.phone || '',
           passportNumber: groupEditNewOrdererForm.passportNumber || '',
           passportExpiry: '',
@@ -3679,11 +3736,16 @@ Terimakasih🙏`;
       let selectedOrderer = null;
       if (formData.ordererId === '__new__') {
         const newOrdererCode = await getNextCustomerCode();
+        // Tanggal Lahir WAJIB buat login Portal Jamaah nanti — prioritas dari
+        // field Tanggal Lahir yang diisi manual staf, kalau kosong baru coba
+        // baca otomatis dari NIK (lihat deriveBirthInfoFromNik di atas).
+        const newOrdererNikInfo = deriveBirthInfoFromNik(newOrdererForm.nik);
         const newOrdererRef = await addDoc(collection(db, 'jamaah'), {
           customerCode: newOrdererCode,
           fullName: newOrdererForm.fullName.trim(),
           nik: newOrdererForm.nik || '',
-          gender: 'L',
+          gender: newOrdererNikInfo?.gender || 'L',
+          birthDate: newOrdererForm.birthDate || newOrdererNikInfo?.birthDate || '',
           phone: newOrdererForm.phone || '',
           passportNumber: newOrdererForm.passportNumber || '',
           passportExpiry: '',
@@ -3719,11 +3781,17 @@ Terimakasih🙏`;
           paxList.push({ jamaahId: selectedOrderer.id, jamaahName: selectedOrderer.fullName, passportNumber: selectedOrderer.passportNumber || '-' });
         } else if (entry.jamaahId === '__new__') {
           const newCode = await getNextCustomerCode();
+          // Tanggal Lahir WAJIB buat login Portal Jamaah nanti — prioritas
+          // dari field Tanggal Lahir yang diisi manual staf, kalau kosong
+          // baru coba baca otomatis dari NIK (lihat deriveBirthInfoFromNik
+          // di atas).
+          const pesertaNikInfo = deriveBirthInfoFromNik(entry.newJamaah.nik);
           const newJamaahRef = await addDoc(collection(db, 'jamaah'), {
             customerCode: newCode,
             fullName: entry.newJamaah.fullName.trim(),
             nik: entry.newJamaah.nik || '',
-            gender: 'L',
+            gender: pesertaNikInfo?.gender || 'L',
+            birthDate: entry.newJamaah.birthDate || pesertaNikInfo?.birthDate || '',
             phone: entry.newJamaah.phone || '',
             passportNumber: entry.newJamaah.passportNumber || '',
             passportExpiry: '',
@@ -5117,7 +5185,14 @@ Terimakasih🙏`;
                       placeholder="NIK"
                       className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                       value={newOrdererForm.nik}
-                      onChange={e => setNewOrdererForm({ ...newOrdererForm, nik: e.target.value })}
+                      onChange={e => {
+                        const nik = e.target.value;
+                        const nikInfo = deriveBirthInfoFromNik(nik);
+                        setNewOrdererForm(prev => ({
+                          ...prev, nik,
+                          birthDate: prev.birthDate || nikInfo?.birthDate || prev.birthDate
+                        }));
+                      }}
                     />
                   </div>
                   <input
@@ -5127,6 +5202,15 @@ Terimakasih🙏`;
                     value={newOrdererForm.passportNumber}
                     onChange={e => setNewOrdererForm({ ...newOrdererForm, passportNumber: e.target.value })}
                   />
+                  <div>
+                    <label className="text-[10px] opacity-70 block mb-1">Tanggal Lahir (wajib — dipakai buat login Portal Jamaah)</label>
+                    <input
+                      type="date"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={newOrdererForm.birthDate}
+                      onChange={e => setNewOrdererForm({ ...newOrdererForm, birthDate: e.target.value })}
+                    />
+                  </div>
                   <p className="text-[10px] opacity-70">Data lengkap lainnya (KTP, alamat, dll) bisa dilengkapi belakangan di menu Data Master Jamaah.</p>
                 </div>
               )}
@@ -5209,6 +5293,15 @@ Terimakasih🙏`;
                           value={entry.newJamaah.passportNumber}
                           onChange={e => handlePesertaNewJamaahChange(idx, 'passportNumber', e.target.value)}
                         />
+                        <div>
+                          <label className="text-[10px] opacity-70 block mb-1">Tanggal Lahir (wajib — dipakai buat login Portal Jamaah)</label>
+                          <input
+                            type="date"
+                            className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                            value={entry.newJamaah.birthDate}
+                            onChange={e => handlePesertaNewJamaahChange(idx, 'birthDate', e.target.value)}
+                          />
+                        </div>
                         <p className="text-[10px] opacity-70">Data lengkap lainnya (KTP, alamat, dll) bisa dilengkapi belakangan di menu Data Master Jamaah.</p>
                       </div>
                     )}
@@ -6528,7 +6621,17 @@ Terimakasih🙏`;
                       placeholder="NIK"
                       className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                       value={addPaxForm.newJamaah.nik}
-                      onChange={e => setAddPaxForm({ ...addPaxForm, newJamaah: { ...addPaxForm.newJamaah, nik: e.target.value } })}
+                      onChange={e => {
+                        const nik = e.target.value;
+                        const nikInfo = deriveBirthInfoFromNik(nik);
+                        setAddPaxForm(prev => ({
+                          ...prev,
+                          newJamaah: {
+                            ...prev.newJamaah, nik,
+                            birthDate: prev.newJamaah.birthDate || nikInfo?.birthDate || prev.newJamaah.birthDate
+                          }
+                        }));
+                      }}
                     />
                   </div>
                   <input
@@ -6538,6 +6641,15 @@ Terimakasih🙏`;
                     value={addPaxForm.newJamaah.passportNumber}
                     onChange={e => setAddPaxForm({ ...addPaxForm, newJamaah: { ...addPaxForm.newJamaah, passportNumber: e.target.value } })}
                   />
+                  <div>
+                    <label className="text-[10px] opacity-70 block mb-1">Tanggal Lahir (wajib — dipakai buat login Portal Jamaah)</label>
+                    <input
+                      type="date"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={addPaxForm.newJamaah.birthDate}
+                      onChange={e => setAddPaxForm({ ...addPaxForm, newJamaah: { ...addPaxForm.newJamaah, birthDate: e.target.value } })}
+                    />
+                  </div>
                 </div>
               )}
 
@@ -6630,7 +6742,14 @@ Terimakasih🙏`;
                       placeholder="NIK"
                       className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                       value={groupEditNewOrdererForm.nik}
-                      onChange={e => setGroupEditNewOrdererForm({ ...groupEditNewOrdererForm, nik: e.target.value })}
+                      onChange={e => {
+                        const nik = e.target.value;
+                        const nikInfo = deriveBirthInfoFromNik(nik);
+                        setGroupEditNewOrdererForm(prev => ({
+                          ...prev, nik,
+                          birthDate: prev.birthDate || nikInfo?.birthDate || prev.birthDate
+                        }));
+                      }}
                     />
                   </div>
                   <input
@@ -6640,6 +6759,15 @@ Terimakasih🙏`;
                     value={groupEditNewOrdererForm.passportNumber}
                     onChange={e => setGroupEditNewOrdererForm({ ...groupEditNewOrdererForm, passportNumber: e.target.value })}
                   />
+                  <div>
+                    <label className="text-[10px] opacity-70 block mb-1">Tanggal Lahir (wajib — dipakai buat login Portal Jamaah)</label>
+                    <input
+                      type="date"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={groupEditNewOrdererForm.birthDate}
+                      onChange={e => setGroupEditNewOrdererForm({ ...groupEditNewOrdererForm, birthDate: e.target.value })}
+                    />
+                  </div>
                 </div>
               )}
 
