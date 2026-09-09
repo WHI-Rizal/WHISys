@@ -1,10 +1,6 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { db } from '@/lib/firebase';
-import {
-  collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, runTransaction
-} from 'firebase/firestore';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
@@ -18,15 +14,22 @@ import DateFieldID from '@/components/DateFieldID';
 // kwitansi PDF)
 //
 // Login pakai Kode Jamaah (customerCode) + Tanggal Lahir, TANPA password,
-// TANPA akun staf. Sengaja dibikin nggak percaya apapun dari input customer
-// begitu aja — data ditampilin cuma kalau kombinasi kode + tanggal lahirnya
-// beneran cocok sama data di Firestore (mirip pola verifikasi di halaman
-// feedback publik /feedback/[bookingCode] yang udah jalan).
+// TANPA akun staf. SEMUA akses data (login, ambil booking, upload dokumen,
+// data kwitansi) sekarang lewat API route server (src/app/api/portal/**,
+// pakai Firebase Admin SDK) — BUKAN lagi query Firestore langsung dari
+// browser customer kayak versi sebelumnya. Browser cuma nyimpen 1 token
+// sesi (hasil sign server, lihat src/lib/portalSession.js) di
+// sessionStorage, bukan data mentah jamaah lagi.
 //
-// Rate-limit percobaan login (biar nggak gampang di-brute-force, soalnya
-// Kode Jamaah formatnya berurutan/gampang ditebak) disimpan di collection
-// terpisah 'portalLoginAttempts', dikunci per Kode Jamaah — BUKAN nyimpen
-// data sensitif apapun, cuma counter + waktu kunci.
+// Kenapa diubah: skema lama itu butuh Firestore Rules yang bikin collection
+// 'jamaah', 'bookings', 'payments_income' bisa dibaca PUBLIK (siapa aja,
+// dari mana aja, tanpa login apapun) — itu celah keamanan yang ditemukan di
+// audit sistem 9 Sep 2026. Sekarang rules-nya udah dikunci lagi, portal baca
+// data lewat endpoint server yang verifikasi sesi + kepemilikan data dulu.
+//
+// Rate-limit percobaan login tetap ada, sekarang dihitung di server
+// (src/app/api/portal/login/route.js) pakai collection 'portalLoginAttempts'
+// (yang lewat Admin SDK, bukan dibuka publik lagi di rules).
 //
 // Upload dokumen dari customer (paspor/KTP/dll) DISIMPEN KE GOOGLE DRIVE,
 // bukan Firebase Storage — sengaja, biar nggak perlu upgrade project
@@ -34,21 +37,19 @@ import DateFieldID from '@/components/DateFieldID';
 // dari browser customer ke sebuah Google Apps Script Web App (jembatan
 // yang jalan atas nama akun Drive milik WHISys sendiri, jadi customer
 // nggak perlu login Google), yang nyimpen filenya ke folder Drive lalu
-// balikin link-nya buat disimpen ke Firestore. Kode Apps Script-nya ada di
-// file terpisah 'Code.gs' (dikirim bareng file ini) — WAJIB di-deploy
-// dulu di script.google.com, baru tempel URL deployment-nya ke
-// APPS_SCRIPT_URL di bawah sebelum fitur upload ini bisa jalan.
+// balikin link-nya. Link itu baru disimpen ke Firestore lewat
+// /api/portal/documents (server), bukan updateDoc langsung dari browser
+// lagi. Kode Apps Script-nya ada di file terpisah 'Code.gs' (dikirim bareng
+// file ini) — WAJIB di-deploy dulu di script.google.com, baru tempel URL
+// deployment-nya ke APPS_SCRIPT_URL di bawah sebelum fitur upload ini bisa
+// jalan.
 //
-// CATATAN buat yang pegang Firebase Console: halaman ini butuh Firestore
-// Security Rules tambahan (baca collection 'jamaah' & 'bookings' publik,
-// baca-tulis 'portalLoginAttempts' publik, DAN update terbatas ke
-// 'bookings' — cuma boleh nyentuh field 'documents'/'documentFiles'/
-// 'updatedAt' — lihat firestore.rules yang udah pernah dikirim). Nggak
-// butuh Storage Security Rules sama sekali di skema Google Drive ini.
+// SETUP YANG DIBUTUHKAN biar portal ini jalan: env var
+// FIREBASE_SERVICE_ACCOUNT_KEY dan PORTAL_SESSION_SECRET di server (lihat
+// instruksi lengkap di src/lib/firebaseAdmin.js). Nggak butuh Storage
+// Security Rules sama sekali di skema Google Drive ini.
 // ============================================================================
 
-const ATTEMPT_LIMIT = 5;
-const LOCK_MINUTES = 15;
 const SESSION_KEY = 'whi_portal_session';
 
 const DOC_LABELS = {
@@ -147,42 +148,6 @@ const formatTanggal = (iso) => {
   return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
 };
 
-const checkPortalLoginAllowed = async (code) => {
-  const snap = await getDoc(doc(db, 'portalLoginAttempts', code));
-  if (snap.exists()) {
-    const data = snap.data();
-    if (data.lockedUntil && new Date(data.lockedUntil).getTime() > Date.now()) {
-      const remainingMin = Math.max(1, Math.ceil((new Date(data.lockedUntil).getTime() - Date.now()) / 60000));
-      throw new Error(`Terlalu banyak percobaan gagal buat kode ini. Coba lagi dalam ${remainingMin} menit, atau hubungi kami kalau butuh bantuan.`);
-    }
-  }
-};
-
-// Transaction biar aman dari race condition kalau ada 2 percobaan gagal
-// hampir bersamaan dari kode jamaah yang sama.
-const recordPortalLoginFailure = async (code) => {
-  const ref = doc(db, 'portalLoginAttempts', code);
-  await runTransaction(db, async (transaction) => {
-    const snap = await transaction.get(ref);
-    const prevCount = snap.exists() ? (Number(snap.data().count) || 0) : 0;
-    const count = prevCount + 1;
-    const payload = { count, updatedAt: new Date().toISOString() };
-    if (count >= ATTEMPT_LIMIT) {
-      payload.lockedUntil = new Date(Date.now() + LOCK_MINUTES * 60000).toISOString();
-      payload.count = 0; // reset — jendela kunci di atas yang jadi penghalangnya
-    }
-    transaction.set(ref, payload, { merge: true });
-  });
-};
-
-const resetPortalLoginAttempts = async (code) => {
-  try {
-    await setDoc(doc(db, 'portalLoginAttempts', code), { count: 0, updatedAt: new Date().toISOString() }, { merge: true });
-  } catch {
-    // Gagal reset counter bukan hal fatal — nggak perlu ganggu customer yang udah berhasil login.
-  }
-};
-
 const statusBadge = (status) => {
   const s = status || 'active';
   if (s === 'cancelled') return { label: 'Dibatalkan', className: 'bg-rose-500/15 text-rose-400', Icon: Ban };
@@ -222,60 +187,43 @@ export default function PortalPage() {
     setRestoringSession(false);
   }, []);
 
-  // Ambil booking milik jamaah yang login — dobel query, jamaahId (booking
-  // di mana dia sendiri jadi PESERTA) ATAU ordererId (booking yang DIA
-  // PESANKAN, entah dia ikut berangkat atau enggak). Ini penting buat kasus
-  // rombongan: staf cuma kirim 1x info Portal ke Pemesan (lihat
-  // handleSharePortalInfo di dashboard staf), jadi begitu Pemesan login,
-  // dia harus bisa lihat SEMUA booking peserta yang dia daftarkan, bukan
-  // cuma booking-nya sendiri (yang mungkin malah nggak ada kalau dia nggak
-  // ikut berangkat). Dua query hasilnya digabung & di-dedupe pakai id
-  // booking, biar booking yang dia jadi peserta SEKALIGUS pemesan (kasus
-  // solo/daftar sendiri) nggak nongol dobel.
-  const fetchBookings = async (jamaahId) => {
+  // Ambil booking + profil perusahaan sekaligus dari /api/portal/data —
+  // server yang nentuin booking mana aja yang boleh diliat (jamaahId ATAU
+  // ordererId cocok sama identitas di token), bukan lagi query Firestore
+  // bebas dari browser. Dipanggil pakai token yang kesimpen di sesi, BUKAN
+  // pakai id jamaah mentah (server yang nentuin siapa "kamu" dari token,
+  // bukan dari parameter yang bisa diubah-ubah client).
+  const fetchPortalData = async (token) => {
     setLoadingBookings(true);
     try {
-      const [asPaxSnap, asOrdererSnap] = await Promise.all([
-        getDocs(query(collection(db, 'bookings'), where('jamaahId', '==', jamaahId))),
-        getDocs(query(collection(db, 'bookings'), where('ordererId', '==', jamaahId))),
-      ]);
-
-      const merged = new Map();
-      asPaxSnap.docs.forEach((d) => merged.set(d.id, { id: d.id, ...d.data() }));
-      asOrdererSnap.docs.forEach((d) => merged.set(d.id, { id: d.id, ...d.data() }));
-
-      const list = Array.from(merged.values())
-        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-      setBookings(list);
+      const res = await fetch('/api/portal/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        throw new Error(result.error || 'Gagal memuat data booking.');
+      }
+      setBookings(result.bookings || []);
+      if (result.companyProfile) {
+        setCompanyProfile({ ...DEFAULT_COMPANY_PROFILE, ...result.companyProfile });
+      }
     } catch (err) {
       console.error('Gagal ambil data booking portal:', err);
+      // Token basi/nggak valid — paksa logout biar customer login ulang
+      // daripada nyangkut di halaman kosong.
+      if (String(err.message || '').includes('Sesi')) {
+        handleLogout();
+      }
     }
     setLoadingBookings(false);
   };
 
   useEffect(() => {
-    if (!session?.id) return;
-    fetchBookings(session.id);
-  }, [session?.id]);
-
-  // Profil perusahaan (kop surat) — dipakai buat header PDF Kwitansi. Cukup
-  // diambil sekali begitu login, sama kayak yang FinanceModule lakuin di
-  // dashboard staf. Kalau gagal/belum di-setting, tetap jalan pakai
-  // DEFAULT_COMPANY_PROFILE (nggak bikin gagal fitur download kwitansi-nya).
-  useEffect(() => {
-    if (!session?.id) return;
-    const fetchCompanyProfile = async () => {
-      try {
-        const profileSnap = await getDoc(doc(db, 'settings', 'company_profile'));
-        if (profileSnap.exists() && profileSnap.data().company) {
-          setCompanyProfile({ ...DEFAULT_COMPANY_PROFILE, ...profileSnap.data().company });
-        }
-      } catch (err) {
-        console.error('Gagal ambil profil perusahaan buat kwitansi:', err);
-      }
-    };
-    fetchCompanyProfile();
-  }, [session?.id]);
+    if (!session?.token) return;
+    fetchPortalData(session.token);
+  }, [session?.token]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -288,49 +236,35 @@ export default function PortalPage() {
 
     setLoggingIn(true);
     try {
-      await checkPortalLoginAllowed(code);
-
-      // CATATAN: idealnya Kode Jamaah unik per orang, tapi ada data lama yang
-      // ternyata sempat kesimpen dobel dengan customerCode yang sama persis
-      // (kejadian sebelum penomoran kode dipindah ke counter atomik). Makanya
-      // di sini kita nggak boleh cuma ambil SATU dokumen pertama (limit(1))
-      // terus langsung dianggap itu orangnya — kalau kebetulan yang ke-ambil
-      // itu dokumen "kembar"-nya yang beda orang, customer yang datanya bener
-      // jadi nggak akan pernah bisa cocok. Jadi di sini kita cek SEMUA
-      // dokumen yang punya kode itu, siapa tau salah satunya beneran cocok.
-      const q = query(collection(db, 'jamaah'), where('customerCode', '==', code));
-      const snap = await getDocs(q);
-
-      if (snap.size > 1) {
-        console.warn(`[Portal] Kode Jamaah "${code}" dipakai lebih dari satu data jamaah (${snap.size}) — perlu dibenerin di Data Master Jamaah biar unik lagi.`);
-      }
-
-      let matched = null;
-      snap.forEach((docSnap) => {
-        if (matched) return;
-        const data = docSnap.data();
-        if (data.birthDate && normalizeDateOnly(data.birthDate) === normalizeDateOnly(loginForm.birthDate)) {
-          matched = { id: docSnap.id, customerCode: data.customerCode, fullName: data.fullName || '' };
-        }
+      const res = await fetch('/api/portal/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerCode: code, birthDate: loginForm.birthDate }),
       });
+      const result = await res.json();
 
-      if (!matched) {
-        await recordPortalLoginFailure(code);
-        // Pesan sengaja nggak nyebut "kode salah" atau "tanggal salah" secara
-        // spesifik — biar orang luar nggak bisa nebak-nebak kode jamaah mana
-        // yang valid cuma dari respons error-nya.
-        setLoginError('Kode Jamaah atau Tanggal Lahir belum cocok. Coba cek lagi, atau hubungi tim kami kalau butuh bantuan.');
+      if (!res.ok) {
+        setLoginError(result.error || 'Gagal memproses login, coba lagi sebentar lagi.');
         setLoggingIn(false);
         return;
       }
 
-      await resetPortalLoginAttempts(code);
+      // Sesi yang disimpen di browser sekarang cuma token (ditandatangani
+      // server) + profil ringkas buat ditampilin — BUKAN lagi apapun yang
+      // bisa dipalsuin/diubah manual terus dipakai buat nyamar jadi jamaah
+      // lain (server selalu verifikasi ulang token itu di tiap request).
+      const nextSession = {
+        id: result.jamaahId,
+        customerCode: result.customerCode,
+        fullName: result.fullName,
+        token: result.token,
+      };
       try {
-        sessionStorage.setItem(SESSION_KEY, JSON.stringify(matched));
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
       } catch {
         // ignore — kalau browser blokir sessionStorage, login tetap jalan buat sesi ini
       }
-      setSession(matched);
+      setSession(nextSession);
     } catch (err) {
       setLoginError(err.message || 'Gagal memproses login, coba lagi sebentar lagi.');
     } finally {
@@ -403,18 +337,23 @@ export default function PortalPage() {
         throw new Error(result.error || 'Upload gagal tanpa keterangan.');
       }
 
-      await updateDoc(doc(db, 'bookings', booking.id), {
-        [`documents.${docKey}`]: true,
-        [`documentFiles.${docKey}`]: {
-          url: result.url,
+      const saveRes = await fetch('/api/portal/documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: session.token,
+          bookingId: booking.id,
+          docKey,
+          fileUrl: result.url,
           fileName: file.name,
-          uploadedAt: new Date().toISOString(),
-          uploadedBy: 'portal_customer',
-        },
-        updatedAt: new Date().toISOString(),
+        }),
       });
+      const saveResult = await saveRes.json();
+      if (!saveRes.ok) {
+        throw new Error(saveResult.error || 'Gagal simpan dokumen.');
+      }
 
-      await fetchBookings(session.id);
+      await fetchPortalData(session.token);
     } catch (err) {
       console.error('Gagal upload dokumen dari portal:', err);
       setUploadError(`Gagal upload "${DOC_LABELS[docKey]}": ${err.message || 'coba lagi sebentar lagi.'}`);
@@ -429,29 +368,22 @@ export default function PortalPage() {
   const handleDownloadReceipt = async (booking) => {
     setGeneratingReceiptId(booking.id);
     try {
-      const payQ = query(collection(db, 'payments_income'), where('bookingId', '==', booking.id));
-      const paySnap = await getDocs(payQ);
-      const payments = paySnap.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
-
-      // Kode Jamaah punya SI PESERTA booking ini, bukan otomatis kode jamaah
-      // yang lagi login — sejak Pemesan rombongan bisa login & lihat booking
-      // peserta lain (lihat fetchBookings di atas), dua-duanya bisa beda
-      // orang. Kalau kebetulan booking ini emang booking-nya sendiri (dia
-      // login sebagai peserta), pake data session yang udah ada, nggak perlu
-      // fetch ulang.
-      let paxCustomerCode = session?.customerCode || '-';
-      if (booking.jamaahId && booking.jamaahId !== session?.id) {
-        try {
-          const paxSnap = await getDoc(doc(db, 'jamaah', booking.jamaahId));
-          if (paxSnap.exists()) {
-            paxCustomerCode = paxSnap.data().customerCode || '-';
-          }
-        } catch (err) {
-          console.warn('Gagal ambil Kode Jamaah peserta buat kwitansi:', err);
-        }
+      // Data pembayaran + Kode Jamaah peserta sekarang diambil lewat
+      // /api/portal/receipt (server verifikasi token + kepemilikan booking
+      // dulu sebelum ngasih data payments_income) — bukan query Firestore
+      // langsung dari browser lagi.
+      const res = await fetch('/api/portal/receipt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: session.token, bookingId: booking.id }),
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        throw new Error(result.error || 'Gagal memuat data kwitansi.');
       }
+
+      const payments = result.payments || [];
+      const paxCustomerCode = result.paxCustomerCode || '-';
       const paxName = booking.jamaahName || session?.fullName || '-';
 
       const totalAmount = Number(booking.totalAmount) || 0;
