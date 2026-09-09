@@ -252,7 +252,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
         <LedgerTab styles={styles} isDark={isDark} journalEntries={journalEntries} chartOfAccounts={chartOfAccounts} />
       )}
       {activeTab === 'balance_sheet' && (
-        <BalanceSheetTab styles={styles} isDark={isDark} journalEntries={journalEntries} chartOfAccounts={chartOfAccounts} generatingPdf={generatingPdf} setGeneratingPdf={setGeneratingPdf} />
+        <BalanceSheetTab styles={styles} isDark={isDark} journalEntries={journalEntries} chartOfAccounts={chartOfAccounts} financialAccounts={financialAccounts} generatingPdf={generatingPdf} setGeneratingPdf={setGeneratingPdf} />
       )}
       {activeTab === 'cash_flow' && (
         <CashFlowTab styles={styles} isDark={isDark} journalEntries={journalEntries} financialAccounts={financialAccounts} />
@@ -599,13 +599,17 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts }) {
 // =====================================================================
 // TAB 3: NERACA (BALANCE SHEET)
 // =====================================================================
-function BalanceSheetTab({ styles, isDark, journalEntries, chartOfAccounts, generatingPdf, setGeneratingPdf }) {
+function BalanceSheetTab({ styles, isDark, journalEntries, chartOfAccounts, financialAccounts, generatingPdf, setGeneratingPdf }) {
   const [asOfDate, setAsOfDate] = useState(todayISODate());
 
   // Saldo tiap akun s/d tanggal terpilih — jumlahin semua baris jurnal yang
   // tanggalnya <= asOfDate, arah saldo sesuai normalBalance akun.
   const balanceByAccount = {};
   chartOfAccounts.forEach(a => { balanceByAccount[a.code] = 0; });
+  // 1101 - Kas & Bank juga dipecah per rekening (accountId di tiap baris
+  // jurnal, dari financial_accounts), biar Neraca nggak nge-gabung semua
+  // rekening jadi satu angka doang.
+  const kasBankByAccountId = {};
   journalEntries
     .filter(e => (e.date || '').slice(0, 10) <= asOfDate)
     .forEach(e => {
@@ -614,8 +618,25 @@ function BalanceSheetTab({ styles, isDark, journalEntries, chartOfAccounts, gene
         if (!acc) return;
         const delta = acc.normalBalance === 'debit' ? (l.debit - l.credit) : (l.credit - l.debit);
         balanceByAccount[l.accountCode] = (balanceByAccount[l.accountCode] || 0) + delta;
+        if (l.accountCode === ACC.KAS_BANK) {
+          const key = l.accountId || '__tanpa_rekening__';
+          if (!kasBankByAccountId[key]) {
+            kasBankByAccountId[key] = { accountId: l.accountId || null, accountName: l.accountName || 'Rekening Tanpa Nama', balance: 0 };
+          }
+          kasBankByAccountId[key].balance += delta;
+        }
       });
     });
+  // Urutkan ikutin urutan financial_accounts yang masih aktif dulu, baru
+  // sisanya (misal rekening yang udah dihapus tapi masih ada histori jurnal).
+  const kasBankRows = [
+    ...financialAccounts
+      .map(fa => kasBankByAccountId[fa.id])
+      .filter(Boolean),
+    ...Object.entries(kasBankByAccountId)
+      .filter(([key]) => !financialAccounts.some(fa => fa.id === key))
+      .map(([, v]) => v),
+  ].filter(r => Math.abs(r.balance) >= 1 || financialAccounts.some(fa => fa.id === r.accountId));
 
   const byType = {};
   ACCOUNT_TYPE_ORDER.forEach(t => { byType[t] = []; });
@@ -649,7 +670,13 @@ function BalanceSheetTab({ styles, isDark, journalEntries, chartOfAccounts, gene
       docPdf.setFontSize(9);
       docPdf.text(`Per Tanggal: ${formatDateDDMMYYYY(asOfDate)}`, 105, 22, { align: 'center' });
 
-      const assetRows = (byType['Aset'] || []).map(a => [`${a.code} - ${a.name}`, a.balance.toLocaleString('id-ID')]);
+      const assetRows = [];
+      (byType['Aset'] || []).forEach(a => {
+        assetRows.push([`${a.code} - ${a.name}`, a.balance.toLocaleString('id-ID')]);
+        if (a.code === ACC.KAS_BANK) {
+          kasBankRows.forEach(r => assetRows.push([`   - ${r.accountName}`, r.balance.toLocaleString('id-ID')]));
+        }
+      });
       assetRows.push(['TOTAL ASET', totalAset.toLocaleString('id-ID')]);
       autoTable(docPdf, {
         startY: 28, margin: { left: 14, right: 110 },
@@ -704,10 +731,25 @@ function BalanceSheetTab({ styles, isDark, journalEntries, chartOfAccounts, gene
           <table className="w-full text-xs">
             <tbody className={`divide-y ${styles.tableRowBorder}`}>
               {(byType['Aset'] || []).map(a => (
-                <tr key={a.code}>
-                  <td className={`p-3 ${styles.textSub}`}>{a.code} - {a.name}</td>
-                  <td className={`p-3 text-right ${styles.textTitle}`}>{formatRp(a.balance)}</td>
-                </tr>
+                a.code === ACC.KAS_BANK ? (
+                  <React.Fragment key={a.code}>
+                    <tr>
+                      <td className={`p-3 font-semibold ${styles.textTitle}`}>{a.code} - {a.name}</td>
+                      <td className={`p-3 text-right font-semibold ${styles.textTitle}`}>{formatRp(a.balance)}</td>
+                    </tr>
+                    {kasBankRows.map(r => (
+                      <tr key={r.accountId || r.accountName}>
+                        <td className={`p-3 pl-6 text-[11px] ${styles.textSub}`}>— {r.accountName}</td>
+                        <td className={`p-3 text-right text-[11px] ${styles.textSub}`}>{formatRp(r.balance)}</td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                ) : (
+                  <tr key={a.code}>
+                    <td className={`p-3 ${styles.textSub}`}>{a.code} - {a.name}</td>
+                    <td className={`p-3 text-right ${styles.textTitle}`}>{formatRp(a.balance)}</td>
+                  </tr>
+                )
               ))}
             </tbody>
             <tfoot>
