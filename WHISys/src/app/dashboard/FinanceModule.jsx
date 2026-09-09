@@ -9,6 +9,11 @@ import autoTable from 'jspdf-autotable';
 import DateFieldID from '@/components/DateFieldID';
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN } from '../../lib/ppn';
+import {
+  postIncomePayment, postDepositTopup, postVendorBillCreated, postVendorPayment,
+  postOperationalExpense, postRevenueRecognition, postRevenueUnrecognition,
+  deleteJournalEntriesBySource
+} from '../../lib/journal';
 
 const DEFAULT_COMPANY_PROFILE = {
   name: 'PT. WISATA HALAL INTERNASIONAL',
@@ -413,8 +418,27 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     payMethod: 'Kas/Bank',
     amount: '',
     accountId: '',
+    billId: '',
     notes: 'DP Booking Seat',
     paymentDate: todayISODate()
+  });
+
+  // Tagihan Vendor (vendor_bills) — invoice yang diterima dari vendor
+  // SEBELUM dibayar, biar Hutang Usaha ke vendor beneran ke-catat (nggak
+  // cuma keliatan pas udah dibayar kayak sebelumnya). Bayar Vendor yang
+  // udah ada tetap bisa dipakai tanpa pilih tagihan (ad-hoc, backward
+  // compatible) — pilih tagihan itu OPSIONAL.
+  const [vendorBills, setVendorBills] = useState([]);
+  const [showVendorBillModal, setShowVendorBillModal] = useState(false);
+  const [vendorBillForm, setVendorBillForm] = useState({
+    vendorId: '',
+    packageId: '',
+    billNumber: '',
+    category: VENDOR_CATEGORIES[0],
+    amount: '',
+    billDate: todayISODate(),
+    dueDate: '',
+    notes: ''
   });
 
   const [operationalForm, setOperationalForm] = useState({
@@ -475,6 +499,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
       const vpSnap = await getDocs(collection(db, 'payments_vendor'));
       setVendorPayments(vpSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      const vbSnap = await getDocs(collection(db, 'vendor_bills'));
+      setVendorBills(vbSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       const opSnap = await getDocs(collection(db, 'expenses_operational'));
       setOperationalExpenses(opSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -1088,6 +1115,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         source: 'deposit_topup',
         date: resolvePaymentCreatedAt(depositForm.date)
       });
+      await postDepositTopup({
+        sourceDocId: `deposit_${customer.id}_${Date.now()}`, jamaahName: customer.fullName, amount: amountVal,
+        accountId: depositForm.accountId, accountName: account?.name || '',
+        date: resolvePaymentCreatedAt(depositForm.date),
+        createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => console.error('Gagal posting jurnal titip deposit:', err));
       setShowDepositModal(false);
       setDepositForm({ customerId: '', amount: '', accountId: '', notes: 'Titip Deposit (belum ada booking)', date: todayISODate() });
       fetchData();
@@ -1121,6 +1154,17 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         // baris mutasinya ikut hilang dari riwayat (bukan nambah baris "koreksi").
         await removeAccountMutationBySource(vp.accountId, vp.id, Number(vp.amount) || 0);
       }
+      // Kalau pembayaran ini tadinya dilink ke Tagihan Vendor, kembaliin lagi
+      // sisa tagihannya (amountPaid dikurangi, status dihitung ulang).
+      if (vp.billId) {
+        const linkedBill = vendorBills.find(b => b.id === vp.billId);
+        if (linkedBill) {
+          const revertedAmountPaid = Math.max(0, Number(linkedBill.amountPaid || 0) - (Number(vp.amount) || 0));
+          const revertedStatus = revertedAmountPaid <= 0 ? 'unpaid' : (revertedAmountPaid >= Number(linkedBill.amount) - 1 ? 'paid' : 'partial');
+          await updateDoc(doc(db, 'vendor_bills', vp.billId), { amountPaid: revertedAmountPaid, status: revertedStatus });
+        }
+      }
+      await deleteJournalEntriesBySource('vendor_payment', vp.id);
       logActivity({
         userId: currentUser?.uid,
         userName: currentUser?.fullName || currentUser?.email,
@@ -1141,6 +1185,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     try {
       await deleteDoc(doc(db, 'expenses_operational', op.id));
       if (op.accountId) await removeAccountMutationBySource(op.accountId, op.id, Number(op.amount) || 0);
+      await deleteJournalEntriesBySource('operational_expense', op.id);
       logActivity({
         userId: currentUser?.uid,
         userName: currentUser?.fullName || currentUser?.email,
@@ -1161,10 +1206,25 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     if (!confirm(confirmMsg)) return;
 
     try {
+      // Hitung total setoran/pembayaran vendor paket ini PERSIS pakai metrik
+      // yang sama dgn P&L (packageId, fallback packageName) — biar jurnal
+      // reversal-nya sama persis nilainya dgn yang tadinya diposting pas
+      // "Akui Pendapatan".
+      const incomeTotal = transactions
+        .filter(tx => (tx.packageId ? tx.packageId === pkg.id : tx.packageName === pkg.name))
+        .reduce((acc, tx) => acc + (Number(tx.amount) || 0), 0);
+      const vendorTotal = vendorPayments
+        .filter(vp => (vp.packageId ? vp.packageId === pkg.id : vp.packageName === pkg.name))
+        .reduce((acc, vp) => acc + (Number(vp.amount) || 0), 0);
+
       await updateDoc(doc(db, 'packages', pkg.id), {
         revenueRecognized: false,
         recognizedAt: null
       });
+      await postRevenueUnrecognition({
+        packageId: pkg.id, packageName: pkg.name, incomeTotal, vendorTotal,
+        date: new Date().toISOString(), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => console.error('Gagal posting jurnal batal pengakuan pendapatan:', err));
       await fetchData();
       setSelectedPackageForDetail(prev =>
         prev && prev.id === pkg.id ? { ...prev, revenueRecognized: false, recognizedAt: null } : prev
@@ -1191,10 +1251,21 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
     try {
       const isoDate = new Date(recognizeDateInput).toISOString();
+      const incomeTotal = transactions
+        .filter(tx => (tx.packageId ? tx.packageId === pkgToRecognize.id : tx.packageName === pkgToRecognize.name))
+        .reduce((acc, tx) => acc + (Number(tx.amount) || 0), 0);
+      const vendorTotal = vendorPayments
+        .filter(vp => (vp.packageId ? vp.packageId === pkgToRecognize.id : vp.packageName === pkgToRecognize.name))
+        .reduce((acc, vp) => acc + (Number(vp.amount) || 0), 0);
+
       await updateDoc(doc(db, 'packages', pkgToRecognize.id), {
         revenueRecognized: true,
         recognizedAt: isoDate
       });
+      await postRevenueRecognition({
+        packageId: pkgToRecognize.id, packageName: pkgToRecognize.name, incomeTotal, vendorTotal,
+        date: isoDate, createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => console.error('Gagal posting jurnal akui pendapatan:', err));
       await fetchData();
       setSelectedPackageForDetail(prev =>
         prev && prev.id === pkgToRecognize.id ? { ...prev, revenueRecognized: true, recognizedAt: isoDate } : prev
@@ -1278,6 +1349,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             ...(isGroup ? { groupTransactionId } : {})
           });
           if (!firstPayRefId) firstPayRefId = payRef.id;
+          await postIncomePayment({
+            paymentId: payRef.id, bookingCode: item.bookingCode, amount: paxShare,
+            paymentMethod: incomeForm.paymentMethod, accountId: incomeForm.accountId, accountName: incomeAccount?.name || '',
+            date: resolvePaymentCreatedAt(incomeForm.date),
+            createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+          }).catch(err => console.error('Gagal posting jurnal setoran:', err));
         }
 
         await syncBookingTotalPaid(item.id);
@@ -1339,6 +1416,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     if (!confirm(confirmMsg)) return;
     try {
       await Promise.all(row.docs.map(d => deleteDoc(doc(db, 'payments_income', d.id))));
+      await Promise.all(row.docs.map(d => deleteJournalEntriesBySource('income_payment', d.id)));
       // Uang yang beneran masuk ke Kas/Bank dicatat SATU baris mutasi per
       // transaksi setoran asli (lihat handleIncomeSubmit) — jadi pas
       // transaksinya dihapus, baris mutasi itu juga cuma perlu dihapus SEKALI
@@ -1375,6 +1453,98 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     }
   };
 
+  // Catat Tagihan Vendor baru (invoice yang diterima, BELUM dibayar) —
+  // ini yang bikin Hutang Usaha ke vendor beneran ke-hitung di Neraca,
+  // nggak nunggu sampai duitnya keluar.
+  const handleVendorBillSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const selectedVendor = vendorsList.find(v => v.id === vendorBillForm.vendorId);
+      if (!selectedVendor) {
+        alert("Pilih vendornya dulu dari Data Master Vendor.");
+        return;
+      }
+      const selectedPkg = packagesList.find(p => p.id === vendorBillForm.packageId);
+      const billAmountVal = Number(vendorBillForm.amount);
+      if (!billAmountVal || billAmountVal <= 0) {
+        alert("Isi nominal tagihan yang valid.");
+        return;
+      }
+
+      const billDateResolved = resolvePaymentCreatedAt(vendorBillForm.billDate);
+      const billRef = await addDoc(collection(db, 'vendor_bills'), {
+        vendorId: selectedVendor.id,
+        vendorName: selectedVendor.name,
+        packageId: selectedPkg?.id || '',
+        packageName: selectedPkg?.name || '',
+        billNumber: vendorBillForm.billNumber || '',
+        category: vendorBillForm.category,
+        amount: billAmountVal,
+        amountPaid: 0,
+        status: 'unpaid',
+        billDate: vendorBillForm.billDate || todayISODate(),
+        dueDate: vendorBillForm.dueDate || '',
+        notes: vendorBillForm.notes || '',
+        createdByUid: currentUser?.uid || '',
+        createdByName: currentUser?.fullName || currentUser?.email || '',
+        createdAt: billDateResolved
+      });
+
+      await postVendorBillCreated({
+        billId: billRef.id,
+        vendorName: selectedVendor.name,
+        amount: billAmountVal,
+        date: billDateResolved,
+        createdByUid: currentUser?.uid,
+        createdByName: currentUser?.fullName || currentUser?.email
+      });
+
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'create',
+        module: 'Tagihan Vendor',
+        targetLabel: selectedVendor.name,
+        details: `Mencatat tagihan vendor "${selectedVendor.name}" (${vendorBillForm.category}) senilai Rp ${billAmountVal.toLocaleString('id-ID')}${vendorBillForm.billNumber ? ` (No. ${vendorBillForm.billNumber})` : ''}`
+      });
+      setShowVendorBillModal(false);
+      setVendorBillForm({ vendorId: '', packageId: '', billNumber: '', category: vendorCategories[0], amount: '', billDate: todayISODate(), dueDate: '', notes: '' });
+      fetchData();
+    } catch (err) {
+      alert("Gagal mencatat tagihan vendor: " + err.message);
+    }
+  };
+
+  // Hapus Tagihan Vendor — CUMA boleh kalau belum ada pembayaran yang
+  // nempel ke tagihan ini (amountPaid === 0). Kalau udah ada pembayaran
+  // yang di-link, hapus dulu/lepas link pembayarannya baru bisa hapus
+  // tagihannya — biar nggak ninggalin payments_vendor yang nunjuk ke
+  // tagihan yang udah nggak ada.
+  const handleDeleteVendorBill = async (bill) => {
+    if (Number(bill.amountPaid) > 0) {
+      alert(`Tagihan ini udah ada pembayaran senilai Rp ${Number(bill.amountPaid).toLocaleString('id-ID')} yang nempel. Nggak bisa dihapus langsung — hapus dulu pembayaran vendor yang terkait tagihan ini di tab "Riwayat Bayar Vendor".`);
+      return;
+    }
+    if (!confirm(`Yakin mau hapus tagihan vendor "${bill.vendorName}" senilai Rp ${Number(bill.amount).toLocaleString('id-ID')}?`)) return;
+    try {
+      await deleteDoc(doc(db, 'vendor_bills', bill.id));
+      await deleteJournalEntriesBySource('vendor_bill_created', bill.id);
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Tagihan Vendor',
+        targetLabel: bill.vendorName,
+        details: `Menghapus tagihan vendor "${bill.vendorName}" senilai Rp ${Number(bill.amount).toLocaleString('id-ID')}`
+      });
+      fetchData();
+    } catch (err) {
+      alert("Gagal menghapus tagihan vendor: " + err.message);
+    }
+  };
+
   const handleVendorSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -1402,7 +1572,20 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         return;
       }
       const vendorAccount = financialAccounts.find(a => a.id === vendorForm.accountId);
+      const selectedBill = vendorForm.billId ? vendorBills.find(b => b.id === vendorForm.billId) : null;
+      if (vendorForm.billId && !selectedBill) {
+        alert("Tagihan yang dipilih nggak ketemu (mungkin udah dihapus) — pilih ulang atau kosongkan pilihan tagihan.");
+        return;
+      }
+      if (selectedBill) {
+        const sisaTagihan = Number(selectedBill.amount) - Number(selectedBill.amountPaid || 0);
+        if (vendorAmountVal > sisaTagihan + 1) {
+          alert(`Nominal pembayaran (Rp ${vendorAmountVal.toLocaleString('id-ID')}) lebih besar dari sisa tagihan "${selectedBill.billNumber || selectedBill.category}" (Rp ${sisaTagihan.toLocaleString('id-ID')}). Kurangi nominalnya atau bayar sisanya lewat tagihan lain.`);
+          return;
+        }
+      }
 
+      const paymentDateResolved = resolvePaymentCreatedAt(vendorForm.paymentDate);
       const vendorRef = await addDoc(collection(db, 'payments_vendor'), {
         packageId: selectedPkg.id,
         packageName: selectedPkg.name,
@@ -1412,8 +1595,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         amount: vendorAmountVal,
         payMethod: vendorForm.payMethod,
         ...(isDepositPay ? {} : { accountId: vendorForm.accountId, accountName: vendorAccount?.name || '' }),
+        ...(selectedBill ? { billId: selectedBill.id } : {}),
         notes: vendorForm.notes,
-        createdAt: resolvePaymentCreatedAt(vendorForm.paymentDate)
+        createdAt: paymentDateResolved
       });
 
       if (isDepositPay) {
@@ -1424,17 +1608,38 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           'usage',
           `Bayar ${vendorForm.category} - ${selectedPkg.name}`,
           selectedPkg.name,
-          resolvePaymentCreatedAt(vendorForm.paymentDate)
+          paymentDateResolved
         );
       } else {
         await adjustAccountBalance(vendorForm.accountId, -vendorAmountVal, {
           description: `Bayar Vendor - ${selectedVendor.name} (${vendorForm.category})`,
           reference: selectedVendor.name,
           source: 'vendor_payment',
-          date: resolvePaymentCreatedAt(vendorForm.paymentDate),
+          date: paymentDateResolved,
           sourceDocId: vendorRef.id
         });
       }
+
+      // Kalau pembayaran ini dilink ke Tagihan Vendor, kurangi sisa
+      // tagihannya & update status (unpaid/partial/paid) sekalian.
+      if (selectedBill) {
+        const newAmountPaid = Number(selectedBill.amountPaid || 0) + vendorAmountVal;
+        const newStatus = newAmountPaid >= Number(selectedBill.amount) - 1 ? 'paid' : (newAmountPaid > 0 ? 'partial' : 'unpaid');
+        await updateDoc(doc(db, 'vendor_bills', selectedBill.id), { amountPaid: newAmountPaid, status: newStatus });
+      }
+
+      await postVendorPayment({
+        paymentId: vendorRef.id,
+        vendorName: selectedVendor.name,
+        amount: vendorAmountVal,
+        payMethod: vendorForm.payMethod,
+        accountId: isDepositPay ? null : vendorForm.accountId,
+        accountName: isDepositPay ? null : (vendorAccount?.name || ''),
+        billId: selectedBill?.id || null,
+        date: paymentDateResolved,
+        createdByUid: currentUser?.uid,
+        createdByName: currentUser?.fullName || currentUser?.email
+      });
 
       logActivity({
         userId: currentUser?.uid,
@@ -1443,10 +1648,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         action: 'create',
         module: 'Pembayaran Vendor',
         targetLabel: selectedVendor.name,
-        details: `Mencatat pembayaran vendor "${selectedVendor.name}" (${vendorForm.category}) senilai Rp ${vendorAmountVal.toLocaleString('id-ID')} untuk paket "${selectedPkg.name}"`
+        details: `Mencatat pembayaran vendor "${selectedVendor.name}" (${vendorForm.category}) senilai Rp ${vendorAmountVal.toLocaleString('id-ID')} untuk paket "${selectedPkg.name}"${selectedBill ? ` (bayar tagihan ${selectedBill.billNumber || selectedBill.category})` : ''}`
       });
       setShowVendorModal(false);
-      setVendorForm({ packageId: '', vendorId: '', vendorName: '', category: vendorCategories[0], payMethod: 'Kas/Bank', amount: '', accountId: '', notes: 'DP Booking Seat', paymentDate: todayISODate() });
+      setVendorForm({ packageId: '', vendorId: '', vendorName: '', category: vendorCategories[0], payMethod: 'Kas/Bank', amount: '', accountId: '', billId: '', notes: 'DP Booking Seat', paymentDate: todayISODate() });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat pembayaran vendor: " + err.message);
@@ -1479,6 +1684,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         date: operationalForm.expenseDate ? resolvePaymentCreatedAt(operationalForm.expenseDate) : undefined,
         sourceDocId: opRef.id
       });
+      await postOperationalExpense({
+        expenseId: opRef.id, category: operationalForm.category, amount: opAmountVal,
+        accountId: operationalForm.accountId, accountName: opAccount?.name || '',
+        date: operationalForm.expenseDate ? resolvePaymentCreatedAt(operationalForm.expenseDate) : new Date().toISOString(),
+        createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => console.error('Gagal posting jurnal biaya operasional:', err));
 
       logActivity({
         userId: currentUser?.uid,
@@ -2023,6 +2234,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           Riwayat Bayar Vendor ({vendorPayments.length})
         </button>
         <button
+          onClick={() => setActiveTab('vendor_bills')}
+          className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${
+            activeTab === 'vendor_bills' ? `${styles.tabActive} text-orange-500 border` : `${styles.textSub} hover:${styles.textTitle}`
+          }`}
+        >
+          Tagihan Vendor ({vendorBills.filter(b => b.status !== 'paid').length})
+        </button>
+        <button
           onClick={() => setActiveTab('operational')}
           className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${
             activeTab === 'operational' ? `${styles.tabActive} text-amber-500 border` : `${styles.textSub} hover:${styles.textTitle}`
@@ -2311,6 +2530,130 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                   </div>
                 </div>
               ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'vendor_bills' && (
+        <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
+          <div className="p-4 flex justify-end">
+            <button
+              onClick={() => setShowVendorBillModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-xs font-medium"
+            >
+              <Plus className="w-3.5 h-3.5" /> Catat Tagihan Vendor Baru
+            </button>
+          </div>
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <tr>
+                  <th className="p-4">Vendor / No. Tagihan</th>
+                  <th className="p-4">Kategori</th>
+                  <th className="p-4">Paket Terkait</th>
+                  <th className="p-4">Tgl Tagihan / Jatuh Tempo</th>
+                  <th className="p-4 text-right">Nominal / Sisa</th>
+                  <th className="p-4 text-center">Status</th>
+                  <th className="p-4 text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                {vendorBills.length === 0 ? (
+                  <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada tagihan vendor tercatat.</td></tr>
+                ) : (
+                  vendorBills
+                    .slice()
+                    .sort((a, b) => new Date(b.billDate || b.createdAt || 0) - new Date(a.billDate || a.createdAt || 0))
+                    .map((bill) => {
+                      const sisa = Number(bill.amount) - Number(bill.amountPaid || 0);
+                      const statusStyle = bill.status === 'paid'
+                        ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                        : bill.status === 'partial'
+                          ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                          : 'bg-rose-500/10 text-rose-500 border-rose-500/20';
+                      const statusLabel = bill.status === 'paid' ? 'Lunas' : bill.status === 'partial' ? 'Sebagian' : 'Belum Dibayar';
+                      return (
+                        <tr key={bill.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                          <td className={`p-4 font-semibold ${styles.textTitle}`}>
+                            {bill.vendorName}
+                            {bill.billNumber && <span className={`block text-[10px] font-normal ${styles.textSub}`}>No. {bill.billNumber}</span>}
+                          </td>
+                          <td className="p-4">
+                            <span className="bg-orange-500/10 text-orange-500 border border-orange-500/20 px-2.5 py-1 rounded-full font-medium">{bill.category}</span>
+                          </td>
+                          <td className={`p-4 ${styles.textSub}`}>{bill.packageName || '-'}</td>
+                          <td className={`p-4 ${styles.textSub}`}>
+                            {formatDateDDMMYYYY(bill.billDate)}
+                            {bill.dueDate && <span className="block text-[10px]">Jatuh tempo: {formatDateDDMMYYYY(bill.dueDate)}</span>}
+                          </td>
+                          <td className="p-4 text-right">
+                            <div className={`font-bold ${styles.textTitle}`}>Rp {Number(bill.amount).toLocaleString('id-ID')}</div>
+                            {sisa > 0 && bill.status !== 'unpaid' && (
+                              <div className="text-[10px] text-amber-500">Sisa Rp {sisa.toLocaleString('id-ID')}</div>
+                            )}
+                          </td>
+                          <td className="p-4 text-center">
+                            <span className={`px-2.5 py-1 rounded-full border font-medium ${statusStyle}`}>{statusLabel}</span>
+                          </td>
+                          <td className="p-4 text-center">
+                            <button
+                              onClick={() => handleDeleteVendorBill(bill)}
+                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                              title="Hapus Tagihan Vendor"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="md:hidden space-y-3 p-3">
+            {vendorBills.length === 0 ? (
+              <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada tagihan vendor tercatat.</p>
+            ) : (
+              vendorBills
+                .slice()
+                .sort((a, b) => new Date(b.billDate || b.createdAt || 0) - new Date(a.billDate || a.createdAt || 0))
+                .map((bill) => {
+                  const sisa = Number(bill.amount) - Number(bill.amountPaid || 0);
+                  const statusStyle = bill.status === 'paid'
+                    ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                    : bill.status === 'partial'
+                      ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                      : 'bg-rose-500/10 text-rose-500 border-rose-500/20';
+                  const statusLabel = bill.status === 'paid' ? 'Lunas' : bill.status === 'partial' ? 'Sebagian' : 'Belum Dibayar';
+                  return (
+                    <div key={bill.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
+                      <div className="flex justify-between items-start">
+                        <div className={`font-semibold ${styles.textTitle}`}>
+                          {bill.vendorName}
+                          {bill.billNumber && <span className={`block text-[10px] font-normal ${styles.textSub}`}>No. {bill.billNumber}</span>}
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full border font-medium text-[10px] ${statusStyle}`}>{statusLabel}</span>
+                      </div>
+                      <div><span className="bg-orange-500/10 text-orange-500 border border-orange-500/20 px-2.5 py-1 rounded-full font-medium">{bill.category}</span></div>
+                      <div className={styles.textSub}>Paket: {bill.packageName || '-'}</div>
+                      <div className={styles.textSub}>
+                        {formatDateDDMMYYYY(bill.billDate)}
+                        {bill.dueDate && ` • Jatuh tempo: ${formatDateDDMMYYYY(bill.dueDate)}`}
+                      </div>
+                      <div className={`font-bold ${styles.textTitle}`}>Rp {Number(bill.amount).toLocaleString('id-ID')}</div>
+                      {sisa > 0 && bill.status !== 'unpaid' && <div className="text-amber-500">Sisa Rp {sisa.toLocaleString('id-ID')}</div>}
+                      <button
+                        onClick={() => handleDeleteVendorBill(bill)}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                        title="Hapus Tagihan Vendor"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                })
             )}
           </div>
         </div>
@@ -4209,7 +4552,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                   value={vendorForm.vendorId}
                   onChange={e => {
                     const v = vendorsList.find(x => x.id === e.target.value);
-                    setVendorForm({ ...vendorForm, vendorId: e.target.value, category: v?.category || vendorForm.category });
+                    setVendorForm({ ...vendorForm, vendorId: e.target.value, category: v?.category || vendorForm.category, billId: '' });
                   }}
                 >
                   <option value="">-- Pilih Vendor --</option>
@@ -4221,6 +4564,27 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                   <p className="text-[10px] mt-1 text-amber-500">Belum ada vendor. Tambahkan dulu lewat tab "Data Vendor".</p>
                 )}
               </div>
+
+              {vendorForm.vendorId && vendorBills.filter(b => b.vendorId === vendorForm.vendorId && b.status !== 'paid').length > 0 && (
+                <div>
+                  <label className="block mb-1 font-medium">Bayar Tagihan Mana? <span className="font-normal text-[10px]">(opsional)</span></label>
+                  <select
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={vendorForm.billId}
+                    onChange={e => setVendorForm({ ...vendorForm, billId: e.target.value })}
+                  >
+                    <option value="">-- Bayar Ad-hoc (Tanpa Tagihan) --</option>
+                    {vendorBills.filter(b => b.vendorId === vendorForm.vendorId && b.status !== 'paid').map(b => (
+                      <option key={b.id} value={b.id}>
+                        {b.billNumber || '(tanpa no. tagihan)'} — Sisa Rp {Number((b.amount || 0) - (b.amountPaid || 0)).toLocaleString('id-ID')}
+                      </option>
+                    ))}
+                  </select>
+                  <p className={`text-[10.5px] ${styles.textSub} mt-1`}>
+                    Kalau dipilih, pembayaran ini otomatis ngurangin sisa tagihan vendor ini.
+                  </p>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -4318,6 +4682,141 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 </button>
                 <button type="submit" className="px-4 py-2 bg-rose-600 text-white rounded-lg font-medium">
                   Simpan Pengeluaran Vendor
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showVendorBillModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowVendorBillModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-4 flex items-center gap-2`}>
+              <ArrowUpRight className="w-5 h-5 text-orange-500" /> Catat Tagihan Vendor Baru
+            </h3>
+            <p className={`text-[10.5px] ${styles.textSub} mb-4`}>
+              Catat invoice/tagihan dari vendor begitu diterima, sebelum dibayar. Nanti pas bayar, pilih tagihan ini di form "Catat Pembayaran Vendor".
+            </p>
+
+            <form onSubmit={handleVendorBillSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div>
+                <label className="block mb-1 font-medium">Vendor / Perusahaan</label>
+                <select
+                  required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={vendorBillForm.vendorId}
+                  onChange={e => {
+                    const v = vendorsList.find(x => x.id === e.target.value);
+                    setVendorBillForm({ ...vendorBillForm, vendorId: e.target.value, category: v?.category || vendorBillForm.category });
+                  }}
+                >
+                  <option value="">-- Pilih Vendor --</option>
+                  {vendorsList.map(v => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                </select>
+                {vendorsList.length === 0 && (
+                  <p className="text-[10px] mt-1 text-amber-500">Belum ada vendor. Tambahkan dulu lewat tab "Data Vendor".</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Paket Keberangkatan Terkait <span className="font-normal text-[10px]">(opsional)</span></label>
+                <select
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={vendorBillForm.packageId}
+                  onChange={e => setVendorBillForm({ ...vendorBillForm, packageId: e.target.value })}
+                >
+                  <option value="">-- Nggak Terkait Paket Tertentu --</option>
+                  {packagesList.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Nomor Tagihan / Invoice</label>
+                <input
+                  type="text" placeholder="INV-2026-001"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={vendorBillForm.billNumber}
+                  onChange={e => setVendorBillForm({ ...vendorBillForm, billNumber: e.target.value })}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-medium">Kategori</label>
+                    <button
+                      type="button"
+                      onClick={openCategoryModal}
+                      className="text-[10px] text-rose-500 hover:underline flex items-center gap-1"
+                    >
+                      <Settings className="w-3 h-3" /> Kelola
+                    </button>
+                  </div>
+                  <select
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={vendorBillForm.category}
+                    onChange={e => setVendorBillForm({ ...vendorBillForm, category: e.target.value })}
+                  >
+                    {vendorCategories.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Nominal Tagihan (Rp)</label>
+                  <input
+                    type="number" required placeholder="50000000"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={vendorBillForm.amount}
+                    onChange={e => setVendorBillForm({ ...vendorBillForm, amount: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1 font-medium">Tanggal Tagihan</label>
+                  <DateFieldID
+                    required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={vendorBillForm.billDate}
+                    onChange={(val) => setVendorBillForm({ ...vendorBillForm, billDate: val })}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Jatuh Tempo <span className="font-normal text-[10px]">(opsional)</span></label>
+                  <DateFieldID
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={vendorBillForm.dueDate}
+                    onChange={(val) => setVendorBillForm({ ...vendorBillForm, dueDate: val })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Keterangan Catatan</label>
+                <input
+                  type="text" placeholder="Tiket Group 45 Pax Keberangkatan Maret"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={vendorBillForm.notes}
+                  onChange={e => setVendorBillForm({ ...vendorBillForm, notes: e.target.value })}
+                />
+              </div>
+
+              <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowVendorBillModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" className="px-4 py-2 bg-orange-600 text-white rounded-lg font-medium">
+                  Simpan Tagihan Vendor
                 </button>
               </div>
             </form>
