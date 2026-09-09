@@ -7,7 +7,7 @@ import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, Hi
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN, addPPN } from '../../lib/ppn';
 import { getNextCustomerCode } from '../../lib/customerCode';
-import { postBookingCreated, postIncomePayment, postBookingCancelRefund, postJournalEntry, ACC } from '../../lib/journal';
+import { postBookingCreated, postIncomePayment, postBookingCancelRefund, postJournalEntry, deleteJournalEntriesBySource, ACC } from '../../lib/journal';
 
 // Firestore where(..., 'in', [...]) cuma dukung maks 30 nilai sekaligus —
 // buat query yang array-nya bisa aja lebih dari itu (grup rombongan gede),
@@ -958,6 +958,10 @@ Terimakasih🙏`;
           await removeAccountMutationBySource(oldPay.accountId, payId, -(Number(oldPay.amount) || 0));
         }
       }
+      // Hapus juga jurnal yang nempel ke setoran ini — kalau nggak, Piutang
+      // Jamaah & Kas/Bank di Neraca/Buku Besar tetap keitung seolah setoran
+      // ini masih ada, padahal dokumennya udah kehapus.
+      await deleteJournalEntriesBySource('income_payment', payId);
       await syncBookingTotalPaid(selectedBookingForHistory.id, selectedBookingForHistory.totalAmount);
       await fetchPaymentHistory(selectedBookingForHistory.id);
       fetchData();
@@ -1015,6 +1019,22 @@ Terimakasih🙏`;
           await updateAccountMutationAmount(oldPay.accountId, payId, Number(paymentEditForm.amount), delta);
         }
       }
+
+      // Jurnal lama buat setoran ini nggak bisa di-update langsung (jurnal
+      // sengaja immutable), jadi dihapus terus diposting ulang pakai nominal
+      // & akun yang baru — biar Piutang Jamaah & Kas/Bank di Neraca/Buku
+      // Besar ikut kekoreksi, bukan nyangkut di nominal lama selamanya.
+      await deleteJournalEntriesBySource('income_payment', payId);
+      await postIncomePayment({
+        paymentId: payId,
+        bookingCode: selectedBookingForHistory?.bookingCode,
+        amount: Number(paymentEditForm.amount),
+        paymentMethod: paymentEditForm.paymentMethod,
+        accountId: paymentEditForm.accountId,
+        accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '',
+        date: paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : oldPay?.createdAt,
+        createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => console.error('Gagal posting ulang jurnal edit setoran:', err));
 
       setEditingPaymentId(null);
       await syncBookingTotalPaid(selectedBookingForHistory.id, selectedBookingForHistory.totalAmount);
@@ -2154,6 +2174,7 @@ Terimakasih🙏`;
     try {
       await deleteDoc(doc(db, 'payments_income', pay.id));
       if (pay.accountId) await removeAccountMutationBySource(pay.accountId, pay.id, -(Number(pay.amount) || 0));
+      await deleteJournalEntriesBySource('income_payment', pay.id);
       const bookingItem = groupHistoryItems.find(b => b.id === pay.bookingId);
       if (bookingItem) await syncBookingTotalPaid(bookingItem.id, bookingItem.totalAmount);
       await fetchGroupHistoryPayments(groupHistoryItems);
@@ -2201,8 +2222,24 @@ Terimakasih🙏`;
         await updateAccountMutationAmount(pay.accountId, pay.id, Number(paymentEditForm.amount), delta);
       }
 
-      setEditingGroupPaymentId(null);
       const bookingItem = groupHistoryItems.find(b => b.id === pay.bookingId);
+
+      // Sama kayak handleSavePaymentEdit — jurnal lama dihapus & diposting
+      // ulang pakai nominal/akun barunya, biar Neraca/Buku Besar ikut
+      // kekoreksi.
+      await deleteJournalEntriesBySource('income_payment', pay.id);
+      await postIncomePayment({
+        paymentId: pay.id,
+        bookingCode: bookingItem?.bookingCode || pay.bookingCode,
+        amount: Number(paymentEditForm.amount),
+        paymentMethod: paymentEditForm.paymentMethod,
+        accountId: paymentEditForm.accountId,
+        accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '',
+        date: paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : pay?.createdAt,
+        createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => console.error('Gagal posting ulang jurnal edit setoran grup:', err));
+
+      setEditingGroupPaymentId(null);
       if (bookingItem) await syncBookingTotalPaid(bookingItem.id, bookingItem.totalAmount);
       await fetchGroupHistoryPayments(groupHistoryItems);
       fetchData();
@@ -2235,6 +2272,10 @@ Terimakasih🙏`;
     try {
       const totalAmount = docs.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
       await Promise.all(docs.map(d => deleteDoc(doc(db, 'payments_income', d.id))));
+      // Tiap pecahan pax di transaksi gabungan ini punya jurnal `income_payment`
+      // sendiri-sendiri (sourceDocId = id doc payments_income masing-masing,
+      // BUKAN groupTransactionId) — jadi dihapus satu-satu juga.
+      await Promise.all(docs.map(d => deleteJournalEntriesBySource('income_payment', d.id)));
       // Setoran grup yang dicatat lewat "Terima Setoran Jamaah" di modul
       // Keuangan cuma punya SATU baris mutasi buat seluruh transaksi
       // (sourceDocId = groupTransactionId, lihat FinanceModule.jsx) — jadi
