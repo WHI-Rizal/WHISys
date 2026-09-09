@@ -627,16 +627,38 @@ function BalanceSheetTab({ styles, isDark, journalEntries, chartOfAccounts, fina
         }
       });
     });
+  // Label rekening: pakai data financial_accounts yang masih aktif SEKARANG
+  // (nama akun + nama bank + no. rekening) biar jelas bedanya, bukan cuma
+  // "nama akun" hasil snapshot pas jurnal dibuat (yang kadang digenericin
+  // sama user jadi "Kas & Bank" doang buat lebih dari satu rekening).
+  const describeAccount = (fa, fallbackName) => {
+    if (!fa) return fallbackName || 'Rekening Tanpa Nama';
+    if (fa.type === 'Bank' && fa.bankName) {
+      const tail = fa.accountNumber ? ` ${fa.accountNumber}` : '';
+      return `${fa.name} — ${fa.bankName}${tail}`;
+    }
+    return fa.name || fallbackName || 'Rekening Tanpa Nama';
+  };
   // Urutkan ikutin urutan financial_accounts yang masih aktif dulu, baru
   // sisanya (misal rekening yang udah dihapus tapi masih ada histori jurnal).
   const kasBankRows = [
     ...financialAccounts
-      .map(fa => kasBankByAccountId[fa.id])
-      .filter(Boolean),
+      .filter(fa => kasBankByAccountId[fa.id])
+      .map(fa => ({ ...kasBankByAccountId[fa.id], accountName: describeAccount(fa, kasBankByAccountId[fa.id].accountName) })),
     ...Object.entries(kasBankByAccountId)
       .filter(([key]) => !financialAccounts.some(fa => fa.id === key))
       .map(([, v]) => v),
   ].filter(r => Math.abs(r.balance) >= 1 || financialAccounts.some(fa => fa.id === r.accountId));
+  // Kalau masih ada label yang sama persis (misal dua-duanya emang dikasih
+  // nama "Kas & Bank" tanpa bank/no. rekening pembeda), tempelin potongan ID
+  // biar tetap bisa dibedain di layar & PDF.
+  const labelCount = {};
+  kasBankRows.forEach(r => { labelCount[r.accountName] = (labelCount[r.accountName] || 0) + 1; });
+  kasBankRows.forEach(r => {
+    if (labelCount[r.accountName] > 1 && r.accountId) {
+      r.accountName = `${r.accountName} (${r.accountId.slice(-4)})`;
+    }
+  });
 
   const byType = {};
   ACCOUNT_TYPE_ORDER.forEach(t => { byType[t] = []; });
