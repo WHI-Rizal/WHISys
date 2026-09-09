@@ -71,10 +71,16 @@ export const ACC = {
   OPEX: '5201',
 };
 
-// Bikin 1 baris jurnal. `extra` dipakai buat nempelin accountId/accountName
-// (KHUSUS baris yang nyentuh akun 1101 Kas & Bank) biar baris itu bisa
-// dilacak balik ke doc `financial_accounts` mana persisnya — dipakai laporan
-// Arus Kas & rekonsiliasi saldo kas per rekening.
+// Bikin 1 baris jurnal. `extra` dipakai buat nempelin info tambahan yang
+// nggak keliatan dari accountCode doang:
+// - accountId/accountName (KHUSUS baris yang nyentuh akun 1101 Kas & Bank)
+//   biar baris itu bisa dilacak balik ke doc `financial_accounts` mana
+//   persisnya — dipakai laporan Arus Kas & rekonsiliasi saldo kas per rekening.
+// - category (KHUSUS baris yang nyentuh akun 5201 Beban Operasional) biar
+//   baris itu bisa difilter/dipecah per kategori biaya di Buku Besar &
+//   breakdown Laba Rugi, sama kayak Kas & Bank dipecah per rekening — jadi
+//   kategori baru yang ditambah user (lewat "Kelola Kategori") otomatis
+//   ikut kejurnal & muncul di Buku Besar juga, bukan cuma di P&L.
 const glLine = (code, debit = 0, credit = 0, extra = {}) => ({
   accountCode: code,
   accountName: COA_NAME_BY_CODE[code] || code,
@@ -82,6 +88,7 @@ const glLine = (code, debit = 0, credit = 0, extra = {}) => ({
   credit: Math.round(Number(credit) || 0),
   ...(extra.accountId ? { accountId: extra.accountId } : {}),
   ...(extra.accountName ? { financialAccountName: extra.accountName } : {}),
+  ...(extra.category ? { category: extra.category } : {}),
 });
 
 // Seed Chart of Accounts sekali (idempotent — setDoc by code, aman
@@ -241,7 +248,7 @@ export const postOperationalExpense = async ({ expenseId, category, amount, acco
     date, description: `Biaya Operasional - ${category || '-'}`,
     source: 'operational_expense', sourceDocId: expenseId, reference: category || '',
     lines: [
-      glLine(ACC.OPEX, amt, 0),
+      glLine(ACC.OPEX, amt, 0, { category }),
       glLine(ACC.KAS_BANK, 0, amt, { accountId, accountName }),
     ],
     createdByUid, createdByName
@@ -360,6 +367,45 @@ export const fetchChartOfAccounts = async () => {
   const snap = await getDocs(collection(db, 'chart_of_accounts'));
   const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   return list.length > 0 ? list.sort((a, b) => a.code.localeCompare(b.code)) : COA;
+};
+
+// Tempelin field `category` ke baris jurnal 5201 (Beban Operasional) yang
+// dibuat SEBELUM fitur breakdown-per-kategori ini ada (jadi baris lama
+// itu belum punya field category-nya) — dicari balik dari doc
+// expenses_operational asli lewat sourceDocId. Idempotent & aman dipanggil
+// berkali-kali: entry yang udah punya category dilewatin, cuma yang bolong
+// yang ditambal. Dipanggil otomatis tiap kali modul Laporan Keuangan
+// dibuka, jadi kategori baru maupun histori lama sama-sama kefilter di
+// Buku Besar, bukan cuma transaksi yang baru dicatat setelah fitur ini rilis.
+//
+// PENTING: Firestore Rules sengaja nolak `update` di journal_entries (biar
+// jurnal immutable/nggak bisa diotak-atik diam-diam) — jadi nambal di sini
+// dilakuin lewat hapus dokumen lama + bikin baru (create+delete, dua-duanya
+// DIIZINKAN rules), bukan updateDoc. Field lain (tanggal, deskripsi,
+// nominal, createdBy asli, dst) disalin persis apa adanya, cuma baris OPEX
+// yang ditambahin field category.
+export const backfillOpexJournalCategories = async (operationalExpenses) => {
+  const expenseById = {};
+  (operationalExpenses || []).forEach(e => { expenseById[e.id] = e; });
+
+  const snap = await getDocs(query(collection(db, 'journal_entries'), where('source', '==', 'operational_expense')));
+  const patches = [];
+  snap.docs.forEach(d => {
+    const data = d.data();
+    const lines = data.lines || [];
+    const idx = lines.findIndex(l => l.accountCode === ACC.OPEX);
+    if (idx === -1 || lines[idx].category) return;
+    const expense = expenseById[data.sourceDocId];
+    if (!expense || !expense.category) return;
+    const newLines = lines.map((l, i) => (i === idx ? { ...l, category: expense.category } : l));
+    patches.push(
+      addDoc(collection(db, 'journal_entries'), { ...data, lines: newLines })
+        .then(() => deleteDoc(d.ref))
+    );
+  });
+
+  if (patches.length > 0) await Promise.all(patches);
+  return patches.length;
 };
 
 // =====================================================================
