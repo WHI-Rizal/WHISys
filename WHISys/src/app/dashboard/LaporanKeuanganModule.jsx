@@ -1212,6 +1212,8 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
   const [showProfitDetailModal, setShowProfitDetailModal] = useState(false);
   const [selectedPackageForDetail, setSelectedPackageForDetail] = useState(null);
 
+  const [showOpexBreakdown, setShowOpexBreakdown] = useState(false);
+
   useEffect(() => {
     (async () => {
       try {
@@ -1290,6 +1292,19 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
   const plLabaKotor = plOmset - plHpp;
   const plOpex = operationalInPeriod.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const plLabaBersih = plLabaKotor - plOpex;
+
+  // Breakdown Beban Operasional per kategori (Gaji, Sewa, Marketing, dst),
+  // ngikutin periode yang lagi difilter — biar keliatan abis di mana aja,
+  // bukan cuma 1 angka gede doang. Diurutin dari yang paling gede.
+  const plOpexByCategory = Object.values(
+    operationalInPeriod.reduce((acc, curr) => {
+      const key = curr.category || 'Tanpa Kategori';
+      if (!acc[key]) acc[key] = { category: key, total: 0, count: 0 };
+      acc[key].total += Number(curr.amount) || 0;
+      acc[key].count += 1;
+      return acc;
+    }, {})
+  ).sort((a, b) => b.total - a.total);
 
   const selectedPkgIncomes = selectedPackageForDetail
     ? transactions.filter(tx => tx.packageId === selectedPackageForDetail.id || (!tx.packageId && tx.packageName === selectedPackageForDetail.name))
@@ -1453,6 +1468,26 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
 
       cursorY = docPdf.lastAutoTable.finalY + 8;
 
+      if (plOpexByCategory.length > 0) {
+        docPdf.setFont('helvetica', 'bold');
+        docPdf.setFontSize(10);
+        docPdf.text('Rincian Biaya Operasional per Kategori', marginX, cursorY);
+        cursorY += 3;
+        autoTable(docPdf, {
+          startY: cursorY,
+          margin: { left: marginX, right: marginX },
+          head: [['Kategori', 'Jumlah Transaksi', 'Nominal (Rp)', '% dari Total']],
+          body: plOpexByCategory.map(c => [
+            c.category, `${c.count}x`, c.total.toLocaleString('id-ID'),
+            plOpex > 0 ? `${((c.total / plOpex) * 100).toFixed(1)}%` : '-'
+          ]),
+          styles: { fontSize: 8.5, cellPadding: 2 },
+          headStyles: { fillColor: [15, 23, 42] },
+          columnStyles: { 1: { halign: 'center' }, 2: { halign: 'right' }, 3: { halign: 'right' } }
+        });
+        cursorY = docPdf.lastAutoTable.finalY + 8;
+      }
+
       docPdf.setFont('helvetica', 'bold');
       docPdf.setFontSize(10);
       docPdf.text('Rincian Margin per Paket (Pendapatan Sudah Diakui)', marginX, cursorY);
@@ -1556,15 +1591,51 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
             <span className={`text-[10px] ${styles.textSub} uppercase`}>Laba Kotor</span>
             <p className={`text-sm font-bold mt-1 ${plLabaKotor >= 0 ? 'text-blue-500' : 'text-amber-500'}`}>Rp {plLabaKotor.toLocaleString('id-ID')}</p>
           </div>
-          <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
-            <span className={`text-[10px] ${styles.textSub} uppercase`}>Biaya Operasional</span>
+          <button
+            type="button"
+            onClick={() => setShowOpexBreakdown(v => !v)}
+            className={`${styles.innerBg} p-3 rounded-lg border text-center hover:opacity-80 transition-opacity`}
+          >
+            <span className={`text-[10px] ${styles.textSub} uppercase flex items-center justify-center gap-1`}>
+              Biaya Operasional {showOpexBreakdown ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            </span>
             <p className="text-sm font-bold text-amber-500 mt-1">Rp {plOpex.toLocaleString('id-ID')}</p>
-          </div>
+          </button>
           <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
             <span className={`text-[10px] ${styles.textSub} uppercase`}>Laba Bersih</span>
             <p className={`text-sm font-bold mt-1 ${plLabaBersih >= 0 ? 'text-blue-500' : 'text-amber-500'}`}>Rp {plLabaBersih.toLocaleString('id-ID')}</p>
           </div>
         </div>
+
+        {showOpexBreakdown && (
+          <div className={`mb-6 -mt-3 rounded-lg border overflow-hidden ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+            <div className={`px-3 py-2 text-[10.5px] font-semibold ${styles.tableHeaderBg}`}>
+              Rincian Biaya Operasional per Kategori — {formatPeriodLabel(plPeriod)}
+            </div>
+            {plOpexByCategory.length === 0 ? (
+              <p className={`p-3 text-[11px] ${styles.textSub}`}>Nggak ada biaya operasional di periode ini.</p>
+            ) : (
+              <table className="w-full text-xs">
+                <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                  {plOpexByCategory.map(c => (
+                    <tr key={c.category}>
+                      <td className={`p-2.5 ${styles.textSub}`}>{c.category} <span className="text-[10px] opacity-70">({c.count}x)</span></td>
+                      <td className={`p-2.5 text-right ${styles.textTitle}`}>Rp {c.total.toLocaleString('id-ID')}</td>
+                      <td className={`p-2.5 text-right w-16 ${styles.textSub}`}>{plOpex > 0 ? `${((c.total / plOpex) * 100).toFixed(1)}%` : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className={styles.tableHeaderBg}>
+                    <td className="p-2.5 font-bold">Total Biaya Operasional</td>
+                    <td className="p-2.5 text-right font-bold">Rp {plOpex.toLocaleString('id-ID')}</td>
+                    <td className="p-2.5 text-right font-bold">100%</td>
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </div>
+        )}
 
         <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded-lg border ${isDark ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50'}`}>
           <div className="flex items-center gap-2">
