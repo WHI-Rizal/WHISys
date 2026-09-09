@@ -359,6 +359,16 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   const [showVendorModal, setShowVendorModal] = useState(false);
   const [showOperationalModal, setShowOperationalModal] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
+
+  // Guard double-submit (tombol di-disable selagi proses async jalan) buat
+  // form-form Finance — sebelumnya nggak ada, jadi double-klik/koneksi
+  // lambat + klik ulang bisa bikin data (dan saldo, dan jurnal) tercatat
+  // dobel. Lihat juga audit "Kualitas Kode & Bug" §HIGH.
+  const [savingIncome, setSavingIncome] = useState(false);
+  const [savingDeposit, setSavingDeposit] = useState(false);
+  const [savingVendor, setSavingVendor] = useState(false);
+  const [savingVendorBill, setSavingVendorBill] = useState(false);
+  const [savingOperational, setSavingOperational] = useState(false);
   const [activeTab, setActiveTab] = useState('income');
 
   // Tab "Laporan" — HUB laporan-laporan finansial yang bakal terus nambah ke
@@ -986,6 +996,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       alert("Pilih akun Kas/Bank yang nerima transferan ini dulu.");
       return;
     }
+    if (savingDeposit) return; // cegah double-submit (double-klik/koneksi lambat)
+    setSavingDeposit(true);
     try {
       const account = financialAccounts.find(a => a.id === depositForm.accountId);
       await adjustDepositBalance(
@@ -1008,12 +1020,17 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         accountId: depositForm.accountId, accountName: account?.name || '',
         date: resolvePaymentCreatedAt(depositForm.date),
         createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-      }).catch(err => console.error('Gagal posting jurnal titip deposit:', err));
+      }).catch(err => {
+        console.error('Gagal posting jurnal titip deposit:', err);
+        alert(`Deposit tersimpan & saldo Kas/Bank sudah bertambah, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+      });
       setShowDepositModal(false);
       setDepositForm({ customerId: '', amount: '', accountId: '', notes: 'Titip Deposit (belum ada booking)', date: todayISODate() });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat deposit: " + err.message);
+    } finally {
+      setSavingDeposit(false);
     }
   };
 
@@ -1091,6 +1108,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const handleIncomeSubmit = async (e) => {
     e.preventDefault();
+    if (savingIncome) return; // cegah double-submit (double-klik/koneksi lambat)
+    setSavingIncome(true);
     try {
       const groupItems = bookingsList
         .filter(b => (b.groupBookingCode || b.bookingCode) === incomeForm.groupCode)
@@ -1166,7 +1185,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             paymentMethod: incomeForm.paymentMethod, accountId: incomeForm.accountId, accountName: incomeAccount?.name || '',
             date: resolvePaymentCreatedAt(incomeForm.date),
             createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-          }).catch(err => console.error('Gagal posting jurnal setoran:', err));
+          }).catch(err => {
+            console.error('Gagal posting jurnal setoran:', err);
+            alert(`Setoran ${item.bookingCode} tersimpan, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk setoran ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+          });
         }
 
         await syncBookingTotalPaid(item.id);
@@ -1197,6 +1219,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       fetchData();
     } catch (err) {
       alert("Gagal mencatat pembayaran: " + err.message);
+    } finally {
+      setSavingIncome(false);
     }
   };
 
@@ -1270,6 +1294,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // nggak nunggu sampai duitnya keluar.
   const handleVendorBillSubmit = async (e) => {
     e.preventDefault();
+    if (savingVendorBill) return; // cegah double-submit
+    setSavingVendorBill(true);
     try {
       const selectedVendor = vendorsList.find(v => v.id === vendorBillForm.vendorId);
       if (!selectedVendor) {
@@ -1309,6 +1335,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         date: billDateResolved,
         createdByUid: currentUser?.uid,
         createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => {
+        console.error('Gagal posting jurnal tagihan vendor:', err);
+        alert(`Tagihan vendor tersimpan, TAPI jurnalnya GAGAL diposting (${err.message}). Hutang Vendor di Neraca belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
       });
 
       logActivity({
@@ -1325,6 +1354,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       fetchData();
     } catch (err) {
       alert("Gagal mencatat tagihan vendor: " + err.message);
+    } finally {
+      setSavingVendorBill(false);
     }
   };
 
@@ -1359,6 +1390,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const handleVendorSubmit = async (e) => {
     e.preventDefault();
+    if (savingVendor) return; // cegah double-submit
+    setSavingVendor(true);
     try {
       const selectedPkg = packagesList.find(p => p.id === vendorForm.packageId);
       if (!selectedPkg) {
@@ -1451,6 +1484,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         date: paymentDateResolved,
         createdByUid: currentUser?.uid,
         createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => {
+        console.error('Gagal posting jurnal bayar vendor:', err);
+        alert(`Pembayaran vendor tersimpan & saldo Kas/Bank sudah terpotong, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
       });
 
       logActivity({
@@ -1467,6 +1503,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       fetchData();
     } catch (err) {
       alert("Gagal mencatat pembayaran vendor: " + err.message);
+    } finally {
+      setSavingVendor(false);
     }
   };
 
@@ -1487,6 +1525,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const handleOperationalSubmit = async (e) => {
     e.preventDefault();
+    if (savingOperational) return; // cegah double-submit
+    setSavingOperational(true);
     try {
       if (!operationalForm.accountId) {
         alert("Pilih akun Kas/Bank yang dipakai bayar biaya ini dulu.");
@@ -1529,7 +1569,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           accountId: operationalForm.accountId, accountName: opAccount?.name || '',
           date: journalDate,
           createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-        }).catch(err => console.error('Gagal posting jurnal biaya operasional:', err));
+        }).catch(err => {
+          console.error('Gagal posting jurnal biaya operasional:', err);
+          alert(`Biaya operasional tersimpan & saldo Kas/Bank sudah terpotong, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar/Laba Rugi) untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+        });
 
         logActivity({
           userId: currentUser?.uid,
@@ -1562,7 +1605,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           accountId: operationalForm.accountId, accountName: opAccount?.name || '',
           date: journalDate,
           createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-        }).catch(err => console.error('Gagal posting jurnal biaya operasional:', err));
+        }).catch(err => {
+          console.error('Gagal posting jurnal biaya operasional:', err);
+          alert(`Biaya operasional tersimpan & saldo Kas/Bank sudah terpotong, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar/Laba Rugi) untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+        });
 
         logActivity({
           userId: currentUser?.uid,
@@ -1581,6 +1627,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       fetchData();
     } catch (err) {
       alert("Gagal menyimpan biaya operasional: " + err.message);
+    } finally {
+      setSavingOperational(false);
     }
   };
 
@@ -3263,8 +3311,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 <button type="button" onClick={() => setShowIncomeModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
-                <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
-                  Simpan Pembayaran
+                <button type="submit" disabled={savingIncome} className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium disabled:opacity-60">
+                  {savingIncome ? 'Menyimpan...' : 'Simpan Pembayaran'}
                 </button>
               </div>
             </form>
@@ -3353,8 +3401,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 <button type="button" onClick={() => setShowDepositModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
-                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium">
-                  Simpan Deposit
+                <button type="submit" disabled={savingDeposit} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium disabled:opacity-60">
+                  {savingDeposit ? 'Menyimpan...' : 'Simpan Deposit'}
                 </button>
               </div>
             </form>
@@ -3527,8 +3575,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 <button type="button" onClick={() => setShowVendorModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
-                <button type="submit" className="px-4 py-2 bg-rose-600 text-white rounded-lg font-medium">
-                  Simpan Pengeluaran Vendor
+                <button type="submit" disabled={savingVendor} className="px-4 py-2 bg-rose-600 text-white rounded-lg font-medium disabled:opacity-60">
+                  {savingVendor ? 'Menyimpan...' : 'Simpan Pengeluaran Vendor'}
                 </button>
               </div>
             </form>
@@ -3662,8 +3710,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 <button type="button" onClick={() => setShowVendorBillModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
-                <button type="submit" className="px-4 py-2 bg-orange-600 text-white rounded-lg font-medium">
-                  Simpan Tagihan Vendor
+                <button type="submit" disabled={savingVendorBill} className="px-4 py-2 bg-orange-600 text-white rounded-lg font-medium disabled:opacity-60">
+                  {savingVendorBill ? 'Menyimpan...' : 'Simpan Tagihan Vendor'}
                 </button>
               </div>
             </form>
@@ -3758,8 +3806,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 <button type="button" onClick={() => { setShowOperationalModal(false); setEditingOperationalId(null); }} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
-                <button type="submit" className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium">
-                  {editingOperationalId ? 'Simpan Perubahan' : 'Simpan Biaya Operasional'}
+                <button type="submit" disabled={savingOperational} className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium disabled:opacity-60">
+                  {savingOperational ? 'Menyimpan...' : (editingOperationalId ? 'Simpan Perubahan' : 'Simpan Biaya Operasional')}
                 </button>
               </div>
             </form>
