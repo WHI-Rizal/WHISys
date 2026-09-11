@@ -16,7 +16,8 @@ import { calculatePPN } from '../../lib/ppn';
 import {
   COA, ACC, seedChartOfAccounts, fetchAllJournalEntries, fetchChartOfAccounts,
   runInitialJournalMigration, postJournalEntry, postRevenueRecognition, postRevenueUnrecognition,
-  backfillOpexJournalCategories, diagnoseRescheduleMigrationImpact, applyRescheduleMigrationCorrection
+  backfillOpexJournalCategories, diagnoseRescheduleMigrationImpact, applyRescheduleMigrationCorrection,
+  diagnoseMissingBookingJournals, applyMissingBookingJournalsCorrection
 } from '../../lib/journal';
 
 const DEFAULT_COMPANY_PROFILE = {
@@ -218,6 +219,14 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
   const [rescheduleDiagnosis, setRescheduleDiagnosis] = useState(null);
   const [applyingRescheduleFix, setApplyingRescheduleFix] = useState(false);
 
+  // Diagnosa & koreksi booking yang kesimpen tapi jurnal `booking_created`-
+  // nya gagal keposting (misal network/permission error pas nyimpen booking
+  // baru) — lihat diagnoseMissingBookingJournals/applyMissingBookingJournalsCorrection
+  // di lib/journal.js. Pola sama persis kayak Cek Dampak Reschedule di atas.
+  const [showMissingJournalDiagnosis, setShowMissingJournalDiagnosis] = useState(false);
+  const [missingJournalDiagnosis, setMissingJournalDiagnosis] = useState(null);
+  const [applyingMissingJournalFix, setApplyingMissingJournalFix] = useState(false);
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -321,6 +330,31 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
     setApplyingRescheduleFix(false);
   };
 
+  const handleOpenMissingJournalDiagnosis = () => {
+    const result = diagnoseMissingBookingJournals({ bookings: bookingsList, journalEntries });
+    setMissingJournalDiagnosis(result);
+    setShowMissingJournalDiagnosis(true);
+  };
+
+  const handleApplyMissingJournalFix = async () => {
+    if (!missingJournalDiagnosis || missingJournalDiagnosis.affected.length === 0) return;
+    if (!confirm(`Posting jurnal buat ${missingJournalDiagnosis.affected.length} booking yang kelewat ini? Ini bakal jalanin "Booking baru" (Dr Piutang Jamaah, Cr Pendapatan Diterima Dimuka) per booking, pakai tanggal & nominal asli booking-nya (bukan tanggal hari ini) — aman diulang, booking yang udah kejurnal otomatis dilewati.`)) return;
+    setApplyingMissingJournalFix(true);
+    try {
+      const summary = await applyMissingBookingJournalsCorrection({
+        affected: missingJournalDiagnosis.affected,
+        createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      });
+      alert(`Koreksi selesai!\n\nBooking dikoreksi: ${summary.corrected}\nDilewati (udah kejurnal duluan): ${summary.skipped}\nError: ${summary.errors.length}${summary.errors.length > 0 ? `\n\nDetail error:\n${summary.errors.slice(0, 10).join('\n')}` : ''}`);
+      await fetchData();
+      setShowMissingJournalDiagnosis(false);
+      setMissingJournalDiagnosis(null);
+    } catch (err) {
+      alert('Gagal menerapkan koreksi: ' + err.message);
+    }
+    setApplyingMissingJournalFix(false);
+  };
+
   if (loading) {
     return (
       <div className={`${styles.cardBg} border rounded-xl p-12 text-center`}>
@@ -359,6 +393,15 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
               title="Cek apakah ada booking hasil reschedule (sebelum migrasi jalan) yang kena dobel-catat di Neraca"
             >
               <RotateCcw className="w-3.5 h-3.5" /> Cek Dampak Reschedule
+            </button>
+          )}
+          {isSuperAdmin && (
+            <button
+              onClick={handleOpenMissingJournalDiagnosis}
+              className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium rounded-lg flex items-center gap-1.5"
+              title="Cek apakah ada booking yang kesimpen tapi jurnalnya gagal keposting (misal gara-gara error koneksi)"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Cek Booking Belum Terjurnal
             </button>
           )}
         </div>
@@ -418,6 +461,67 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
                   className="w-full px-3 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg disabled:opacity-60"
                 >
                   {applyingRescheduleFix ? 'Memproses...' : `Terapkan Koreksi buat ${rescheduleDiagnosis.count} Booking Ini`}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showMissingJournalDiagnosis && missingJournalDiagnosis && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className={`${styles.cardBg} border rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-5`}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className={`text-sm font-bold ${styles.textTitle}`}>Booking Belum Terjurnal</h3>
+              <button onClick={() => { setShowMissingJournalDiagnosis(false); setMissingJournalDiagnosis(null); }} className={styles.textSub}><X className="w-4 h-4" /></button>
+            </div>
+            <p className={`text-xs ${styles.textSub} mb-3`}>
+              Booking baru di sistem otomatis nge-jurnal Piutang Jamaah begitu disimpan. Kadang jurnalnya bisa gagal keposting (misal koneksi putus pas nyimpen) walau booking-nya sendiri tetap tersimpan — daftar di bawah ini booking status aktif yang KESIMPEN tapi belum ada jurnal "Booking baru"-nya sama sekali. Ini diagnosa read-only dulu, belum ada jurnal apapun yang diposting.
+            </p>
+            {missingJournalDiagnosis.count === 0 ? (
+              <div className={`p-4 rounded-lg ${styles.innerBg} border text-xs ${styles.textSub} flex items-center gap-2`}>
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Nggak ada booking yang kelewat. Semua booking aktif udah kejurnal.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+                    <p className={`text-[10.5px] ${styles.textSub}`}>Booking kena dampak</p>
+                    <p className={`text-lg font-bold ${styles.textTitle}`}>{missingJournalDiagnosis.count}</p>
+                  </div>
+                  <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+                    <p className={`text-[10.5px] ${styles.textSub}`}>Total Piutang yang belum kejurnal</p>
+                    <p className="text-lg font-bold text-amber-500">{formatRp(missingJournalDiagnosis.totalAmount)}</p>
+                  </div>
+                </div>
+                <div className="overflow-x-auto mb-3">
+                  <table className="w-full text-[11px]">
+                    <thead className={styles.tableHeaderBg}>
+                      <tr>
+                        <th className="text-left p-2 font-medium">Booking</th>
+                        <th className="text-left p-2 font-medium">Jamaah</th>
+                        <th className="text-left p-2 font-medium">Tanggal Booking</th>
+                        <th className="text-right p-2 font-medium">Total Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                      {missingJournalDiagnosis.affected.map(item => (
+                        <tr key={item.bookingId}>
+                          <td className="p-2">{item.bookingCode || item.bookingId}</td>
+                          <td className="p-2">{item.jamaahName || '-'}</td>
+                          <td className="p-2">{formatDateDDMMYYYY((item.createdAt || '').slice(0, 10))}</td>
+                          <td className="p-2 text-right">{formatRp(item.totalAmount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  onClick={handleApplyMissingJournalFix}
+                  disabled={applyingMissingJournalFix}
+                  className="w-full px-3 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg disabled:opacity-60"
+                >
+                  {applyingMissingJournalFix ? 'Memproses...' : `Posting Jurnal buat ${missingJournalDiagnosis.count} Booking Ini`}
                 </button>
               </>
             )}
