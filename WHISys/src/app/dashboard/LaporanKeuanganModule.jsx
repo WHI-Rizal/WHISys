@@ -17,7 +17,8 @@ import {
   COA, ACC, seedChartOfAccounts, fetchAllJournalEntries, fetchChartOfAccounts,
   runInitialJournalMigration, postJournalEntry, postRevenueRecognition, postRevenueUnrecognition,
   backfillOpexJournalCategories, diagnoseRescheduleMigrationImpact, applyRescheduleMigrationCorrection,
-  diagnoseMissingBookingJournals, applyMissingBookingJournalsCorrection
+  diagnoseMissingBookingJournals, applyMissingBookingJournalsCorrection,
+  diagnoseArReconciliation, removeDuplicateBookingCreatedEntries
 } from '../../lib/journal';
 
 const DEFAULT_COMPANY_PROFILE = {
@@ -227,6 +228,17 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
   const [missingJournalDiagnosis, setMissingJournalDiagnosis] = useState(null);
   const [applyingMissingJournalFix, setApplyingMissingJournalFix] = useState(false);
 
+  // Rekonsiliasi Piutang Jamaah PER BOOKING — buat nyari tau persis booking
+  // mana yang bikin Neraca beda sama Total Piutang Jamaah di tab Piutang &
+  // Hutang (lihat diagnoseArReconciliation/removeDuplicateBookingCreatedEntries
+  // di lib/journal.js). Read-only diagnosa, cuma aksi koreksi yang disediakan
+  // di sini yang well-defined & aman (hapus jurnal booking_created yang
+  // eksplisit dobel-posting) — mismatch lain ditampilin apa adanya biar staf/
+  // finance yang putuskan koreksinya, bukan di-auto-apply.
+  const [showArReconciliation, setShowArReconciliation] = useState(false);
+  const [arReconciliation, setArReconciliation] = useState(null);
+  const [removingDuplicates, setRemovingDuplicates] = useState(false);
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -355,6 +367,28 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
     setApplyingMissingJournalFix(false);
   };
 
+  const handleOpenArReconciliation = () => {
+    const result = diagnoseArReconciliation({ bookings: bookingsList, journalEntries });
+    setArReconciliation(result);
+    setShowArReconciliation(true);
+  };
+
+  const handleRemoveDuplicates = async () => {
+    if (!arReconciliation || arReconciliation.duplicateBookingCreated.length === 0) return;
+    if (!confirm(`Hapus jurnal "Booking baru" yang dobel-posting buat ${arReconciliation.duplicateBookingCreated.length} booking ini? Yang dipertahankan cuma jurnal yang PALING DULU dibuat per booking (yang asli), sisanya (hasil dobel) dihapus. Aman diulang.`)) return;
+    setRemovingDuplicates(true);
+    try {
+      const summary = await removeDuplicateBookingCreatedEntries({ duplicateBookingCreated: arReconciliation.duplicateBookingCreated });
+      alert(`Selesai!\n\nJurnal dobel yang dihapus: ${summary.deleted}\nBooking yang dibereskan: ${summary.keptBookings}\nError: ${summary.errors.length}${summary.errors.length > 0 ? `\n\nDetail error:\n${summary.errors.slice(0, 10).join('\n')}` : ''}`);
+      await fetchData();
+      setShowArReconciliation(false);
+      setArReconciliation(null);
+    } catch (err) {
+      alert('Gagal menghapus jurnal dobel: ' + err.message);
+    }
+    setRemovingDuplicates(false);
+  };
+
   if (loading) {
     return (
       <div className={`${styles.cardBg} border rounded-xl p-12 text-center`}>
@@ -402,6 +436,15 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
               title="Cek apakah ada booking yang kesimpen tapi jurnalnya gagal keposting (misal gara-gara error koneksi)"
             >
               <RefreshCw className="w-3.5 h-3.5" /> Cek Booking Belum Terjurnal
+            </button>
+          )}
+          {isSuperAdmin && (
+            <button
+              onClick={handleOpenArReconciliation}
+              className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium rounded-lg flex items-center gap-1.5"
+              title="Cari tau persis booking mana yang bikin Piutang Jamaah di Neraca beda sama Total Piutang Jamaah di tab Piutang & Hutang"
+            >
+              <Scale className="w-3.5 h-3.5" /> Rekonsiliasi Piutang per Booking
             </button>
           )}
         </div>
@@ -523,6 +566,79 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
                 >
                   {applyingMissingJournalFix ? 'Memproses...' : `Posting Jurnal buat ${missingJournalDiagnosis.count} Booking Ini`}
                 </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showArReconciliation && arReconciliation && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className={`${styles.cardBg} border rounded-xl max-w-4xl w-full max-h-[85vh] overflow-y-auto p-5`}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className={`text-sm font-bold ${styles.textTitle}`}>Rekonsiliasi Piutang Jamaah per Booking</h3>
+              <button onClick={() => { setShowArReconciliation(false); setArReconciliation(null); }} className={styles.textSub}><X className="w-4 h-4" /></button>
+            </div>
+            <p className={`text-xs ${styles.textSub} mb-3`}>
+              Bandingin per booking aktif: nilai "Piutang Jamaah" hasil jurnal (yang kepakai di Neraca) vs sisa tagihan live (totalAmount - totalPaid, yang kepakai di tab Piutang & Hutang). Cuma booking yang BEDA yang ditampilin. Diff positif = jurnal kelebihan catat (kemungkinan dobel-posting); diff negatif = jurnal kurang catat (ada yang belum kejurnal). Read-only, belum ada apapun yang diubah.
+            </p>
+            {arReconciliation.count === 0 ? (
+              <div className={`p-4 rounded-lg ${styles.innerBg} border text-xs ${styles.textSub} flex items-center gap-2`}>
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Nggak ada booking yang beda. Jurnal Piutang Jamaah sudah cocok 1:1 sama live-sum-nya.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+                    <p className={`text-[10.5px] ${styles.textSub}`}>Booking yang beda</p>
+                    <p className={`text-lg font-bold ${styles.textTitle}`}>{arReconciliation.count}</p>
+                  </div>
+                  <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+                    <p className={`text-[10.5px] ${styles.textSub}`}>Total selisih bersih</p>
+                    <p className={`text-lg font-bold ${arReconciliation.totalDiff >= 0 ? 'text-rose-500' : 'text-amber-500'}`}>{formatRp(arReconciliation.totalDiff)}</p>
+                  </div>
+                </div>
+                {arReconciliation.duplicateBookingCreated.length > 0 && (
+                  <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 mb-3">
+                    <p className="text-xs font-bold text-rose-500 mb-1">Ketemu {arReconciliation.duplicateBookingCreated.length} booking dengan jurnal "Booking baru" DOBEL-posting:</p>
+                    <ul className="text-[11px] text-rose-400 list-disc list-inside mb-2">
+                      {arReconciliation.duplicateBookingCreated.map(d => (
+                        <li key={d.bookingId}>{d.bookingCode || d.bookingId} ({d.jamaahName || '-'}) — {d.count}x jurnal</li>
+                      ))}
+                    </ul>
+                    <button
+                      onClick={handleRemoveDuplicates}
+                      disabled={removingDuplicates}
+                      className="w-full px-3 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg disabled:opacity-60"
+                    >
+                      {removingDuplicates ? 'Memproses...' : `Hapus Jurnal Dobel buat ${arReconciliation.duplicateBookingCreated.length} Booking Ini (pertahankan yang paling awal)`}
+                    </button>
+                  </div>
+                )}
+                <div className="overflow-x-auto mb-3">
+                  <table className="w-full text-[11px]">
+                    <thead className={styles.tableHeaderBg}>
+                      <tr>
+                        <th className="text-left p-2 font-medium">Booking</th>
+                        <th className="text-left p-2 font-medium">Jamaah</th>
+                        <th className="text-right p-2 font-medium">Sisa Tagihan (Live)</th>
+                        <th className="text-right p-2 font-medium">Piutang (Jurnal)</th>
+                        <th className="text-right p-2 font-medium">Diff</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                      {arReconciliation.mismatches.map(item => (
+                        <tr key={item.bookingId}>
+                          <td className="p-2">{item.bookingCode || item.bookingId}{item.isDuplicate && <span className="ml-1 text-[9.5px] text-rose-500 font-bold">DOBEL</span>}</td>
+                          <td className="p-2">{item.jamaahName || '-'}</td>
+                          <td className="p-2 text-right">{formatRp(item.liveOutstanding)}</td>
+                          <td className="p-2 text-right">{formatRp(item.journalNet)}</td>
+                          <td className={`p-2 text-right font-bold ${item.diff >= 0 ? 'text-rose-500' : 'text-amber-500'}`}>{item.diff >= 0 ? '+' : ''}{formatRp(item.diff)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </>
             )}
           </div>
