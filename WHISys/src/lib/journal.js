@@ -808,3 +808,100 @@ export const applyMissingBookingJournalsCorrection = async ({ affected, createdB
   }
   return summary;
 };
+
+// ---------------------------------------------------------------------
+// Rekonsiliasi Piutang Jamaah PER BOOKING — dipakai buat nyari tau
+// PERSIS booking mana yang bikin "1201 - Piutang Jamaah" di Neraca beda
+// sama "Total Piutang Jamaah" di tab Piutang & Hutang (yang itu live-sum
+// dari bookingsList, independen dari jurnal). Dibikin nyusul laporan user
+// kalau selisihnya malah MELEBAR & KEBALIK arah setelah nge-klik "Cek
+// Booking Belum Terjurnal" — indikasi kuat ada jurnal `booking_created`
+// yang keposting DOBEL, bukan genuinely ada yang belum kejurnal.
+//
+// Caranya: kelompokkan SEMUA baris jurnal yang nyentuh akun 1201 by
+// `reference`-nya — SELALU bookingCode di setiap fungsi yang nyentuh akun
+// ini (postBookingCreated, postIncomePayment, postBookingCancelRefund,
+// reklas carry-over reschedule — cek semua di atas), jadi ini valid buat
+// SEMUA jenis transaksi yang pernah gerakin Piutang Jamaah booking itu,
+// bukan cuma booking_created doang. Bandingin net-nya (Debit - Kredit)
+// sama liveOutstanding (totalAmount - totalPaid, PERSIS rumus ArApTab) —
+// yang beda berarti ada bolong (diff negatif) atau dobel-catat (diff
+// positif) buat booking itu spesifik.
+export const diagnoseArReconciliation = ({ bookings, journalEntries }) => {
+  const journalNetByRef = {};
+  (journalEntries || []).forEach(e => {
+    const ref = e.reference || '';
+    if (!ref) return;
+    (e.lines || []).forEach(l => {
+      if (l.accountCode !== ACC.PIUTANG_JAMAAH) return;
+      journalNetByRef[ref] = (journalNetByRef[ref] || 0) + (Number(l.debit) || 0) - (Number(l.credit) || 0);
+    });
+  });
+
+  // Deteksi eksplisit dobel-posting `booking_created` (2+ entry dengan
+  // source+sourceDocId PERSIS sama) — ini indikator paling gamblang ada
+  // jurnal yang keposting berkali-kali buat booking yang sama (misal gara-
+  // gara "Cek Booking Belum Terjurnal" salah nandain booking yang
+  // sebenarnya udah kejurnal duluan sebagai "belum").
+  const bookingCreatedCountBySourceDocId = {};
+  (journalEntries || []).forEach(e => {
+    if (e.source !== 'booking_created') return;
+    bookingCreatedCountBySourceDocId[e.sourceDocId] = (bookingCreatedCountBySourceDocId[e.sourceDocId] || 0) + 1;
+  });
+  const duplicateBookingCreated = Object.entries(bookingCreatedCountBySourceDocId)
+    .filter(([, count]) => count > 1)
+    .map(([bookingId, count]) => {
+      const b = (bookings || []).find(bk => bk.id === bookingId);
+      return { bookingId, bookingCode: b?.bookingCode || bookingId, jamaahName: b?.jamaahName || '-', count };
+    });
+
+  const mismatches = (bookings || [])
+    .filter(b => (b.status || 'active') === 'active')
+    .map(b => {
+      const liveOutstanding = Math.max(0, Number(b.totalAmount || 0) - Number(b.totalPaid || 0));
+      const journalNet = journalNetByRef[b.bookingCode] || 0;
+      const diff = Math.round(journalNet - liveOutstanding);
+      const isDuplicate = (bookingCreatedCountBySourceDocId[b.id] || 0) > 1;
+      return {
+        bookingId: b.id, bookingCode: b.bookingCode, jamaahName: b.jamaahName,
+        totalAmount: Number(b.totalAmount || 0), totalPaid: Number(b.totalPaid || 0),
+        liveOutstanding, journalNet, diff, isDuplicate,
+      };
+    })
+    .filter(item => Math.abs(item.diff) > 1)
+    .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+
+  const totalDiff = mismatches.reduce((acc, m) => acc + m.diff, 0);
+
+  return { mismatches, totalDiff, duplicateBookingCreated, count: mismatches.length };
+};
+
+// Koreksi KHUSUS buat kasus dobel-posting `booking_created` yang kedetek
+// di atas — per booking yang kena, pertahankan entry yang PALING DULU
+// dibuat (`createdAt` jurnal paling kecil = yang asli), hapus sisanya
+// (yang keposting belakangan = hasil dobel/salah diagnosa). Query ulang
+// LANGSUNG ke Firestore (bukan dari snapshot diagnosa) biar dapet urutan
+// createdAt yang akurat & aman diulang (kalau udah cuma tersisa 1, di-skip).
+export const removeDuplicateBookingCreatedEntries = async ({ duplicateBookingCreated }) => {
+  const summary = { deleted: 0, keptBookings: 0, errors: [] };
+  for (const item of (duplicateBookingCreated || [])) {
+    try {
+      const snap = await getDocs(query(
+        collection(db, 'journal_entries'),
+        where('source', '==', 'booking_created'),
+        where('sourceDocId', '==', item.bookingId)
+      ));
+      if (snap.docs.length <= 1) continue; // udah kekoreksi duluan / nggak jadi dobel
+      const sorted = snap.docs.slice().sort((a, b) => (a.data().createdAt || '').localeCompare(b.data().createdAt || ''));
+      const [, ...extras] = sorted; // buang yang pertama (dipertahankan), sisanya dihapus
+      for (const d of extras) {
+        await deleteDoc(d.ref);
+        summary.deleted += 1;
+      }
+      summary.keptBookings += 1;
+    } catch (err) {
+      summary.errors.push(`${item.bookingCode || item.bookingId}: ${err.message}`);
+    }
+  }
+  return summary;
+};
