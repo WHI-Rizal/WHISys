@@ -428,13 +428,13 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
       <div className={`${styles.cardBg} border rounded-xl p-1.5 flex flex-wrap gap-1`}>
         {[
           { key: 'journal', label: 'Jurnal Umum', icon: BookOpen },
+          { key: 'cash_bank', label: 'Kas & Bank', icon: Wallet },
           { key: 'ledger', label: 'Buku Besar', icon: Wallet },
           { key: 'balance_sheet', label: 'Neraca', icon: Scale },
+          { key: 'profit_loss', label: 'Laba Rugi (P&L)', icon: BarChart3 },
           { key: 'cash_flow', label: 'Arus Kas', icon: TrendingUp },
           { key: 'ar_ap', label: 'Piutang & Hutang', icon: Users },
-          { key: 'profit_loss', label: 'Laba Rugi (P&L)', icon: BarChart3 },
           { key: 'margin_analysis', label: 'Analisa Margin', icon: ArrowUpRight },
-          { key: 'cash_bank', label: 'Kas & Bank', icon: Wallet },
         ].map(t => (
           <button
             key={t.key}
