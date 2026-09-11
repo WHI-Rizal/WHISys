@@ -10,6 +10,7 @@ import {
   UserCheck, Plus, Edit, Trash2, X, Link2, Wallet, History,
   AlertCircle, Building2
 } from 'lucide-react';
+import { postOperationalExpense, deleteJournalEntriesBySource } from '../../lib/journal';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -42,7 +43,7 @@ const resolvePaymentCreatedAt = (dateStr) => {
 // 3. Pembayaran Komisi ke Mitra (partner_commission_payments) — mirip
 //    Riwayat Bayar Vendor, ngurangin saldo Kas/Bank & nyatet ke
 //    account_mutations biar tetap konsisten sama rekap mutasi bank.
-export default function AgentsModule({ theme = 'dark', userRole = '' }) {
+export default function AgentsModule({ theme = 'dark', userRole = '', currentUser = null }) {
   const isDark = theme === 'dark';
 
   // Menu Mitra & Agen sengaja tetap bisa DIBUKA & DILIHAT sama semua role
@@ -478,6 +479,23 @@ export default function AgentsModule({ theme = 'dark', userRole = '' }) {
         date: resolvePaymentCreatedAt(payForm.paymentDate),
         sourceDocId: payRef.id
       });
+      // Jurnal ganda-nya sempat KELEWAT nggak keposting sama sekali (cuma
+      // nulis expenses_operational + mutasi akun langsung, nggak pernah
+      // manggil postOperationalExpense) — akibatnya Jurnal Umum/Buku
+      // Besar/Neraca/Arus Kas nggak pernah "liat" pengeluaran komisi Mitra
+      // sama sekali walau saldo Kas/Bank-nya udah kepotong beneran, bikin
+      // Neraca kelebihan catat Kas & Bank + Ekuitas (Laba Berjalan) sebesar
+      // akumulasi komisi yang udah dibayar. Ditambal di sini, pola sama
+      // persis kayak Biaya Operasional biasa di FinanceModule.jsx.
+      await postOperationalExpense({
+        expenseId: expenseRef.id, category: 'Komisi Mitra/Agen', amount,
+        accountId: payForm.accountId, accountName: account?.name || '',
+        date: resolvePaymentCreatedAt(payForm.paymentDate),
+        createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => {
+        console.error('Gagal posting jurnal komisi mitra:', err);
+        alert(`Pembayaran komisi tersimpan, TAPI jurnalnya GAGAL diposting (${err.message}). Neraca/Buku Besar untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+      });
       setShowPayModal(false);
       fetchData();
     } catch (err) {
@@ -507,6 +525,7 @@ export default function AgentsModule({ theme = 'dark', userRole = '' }) {
       // pas pembayaran ini dicatat, biar nggak ada jejak biaya yang ketinggalan.
       if (pay.operationalExpenseId) {
         await deleteDoc(doc(db, 'expenses_operational', pay.operationalExpenseId));
+        await deleteJournalEntriesBySource('operational_expense', pay.operationalExpenseId);
       }
       await deleteDoc(doc(db, 'partner_commission_payments', pay.id));
       fetchData();
