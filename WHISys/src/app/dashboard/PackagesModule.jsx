@@ -67,6 +67,24 @@ const AIRLINE_CATEGORIES = [
 // DESTINATION_CATEGORY_CONFIG_ID di atas.
 const AIRLINE_CATEGORY_CONFIG_ID = '_airline_categories_config';
 
+// Item default Rencana Anggaran (Planning Cost) — label cuma starting point,
+// staf bebas tambah/edit/hapus baris per paket. Dipisah 2 kelompok niru
+// struktur costing manual yang dulu dipakai tim (Fixed Cost = biaya pokok
+// per paket, Variable Cost TL = biaya yang nempel ke Tour Leader/rombongan).
+const DEFAULT_BUDGET_FIXED_COST_ITEMS = [
+  { label: 'Tiket Pesawat', amount: '' },
+  { label: 'Land Tour', amount: '' },
+  { label: 'City Tour', amount: '' },
+  { label: 'Hotel Transit', amount: '' }
+];
+const DEFAULT_BUDGET_VARIABLE_COST_ITEMS = [
+  { label: 'Tiket TL', amount: '' },
+  { label: 'Fee TL', amount: '' },
+  { label: 'Banner', amount: '' },
+  { label: 'Insurance', amount: '' },
+  { label: 'Lain-lain', amount: '' }
+];
+
 export default function PackagesModule({ theme = 'dark', userRole = '', currentUser = null }) {
   const isDark = theme === 'dark';
 
@@ -147,7 +165,16 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     priceMain: '',
     priceTriple: '',
     priceDouble: '',
-    priceChild: ''
+    priceChild: '',
+    // Rencana Anggaran (Planning Cost) — dipisah Fixed Cost & Variable Cost
+    // TL, niru struktur costing manual yang dulu dipakai tim di Google
+    // Sheet, tapi disimpen lump sum per paket (bukan per-pax) biar apple-to-
+    // apple sama cara payments_vendor/vendor_bills disimpen sekarang. Dipakai
+    // buat itung "Margin Planning" (target margin di awal, sebelum paket
+    // dijual) vs "Margin Realisasi" (angka riil pas Akui Pendapatan) di tab
+    // Analisa Margin — lihat LaporanKeuanganModule.jsx.
+    budgetFixedCostItems: DEFAULT_BUDGET_FIXED_COST_ITEMS,
+    budgetVariableCostItems: DEFAULT_BUDGET_VARIABLE_COST_ITEMS
   });
 
   const fetchData = async () => {
@@ -222,7 +249,9 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       priceMain: '',
       priceTriple: '',
       priceDouble: '',
-      priceChild: ''
+      priceChild: '',
+      budgetFixedCostItems: DEFAULT_BUDGET_FIXED_COST_ITEMS,
+      budgetVariableCostItems: DEFAULT_BUDGET_VARIABLE_COST_ITEMS
     });
     setShowModal(true);
   };
@@ -249,7 +278,14 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       priceMain: pkg.priceMain || pkg.priceQuad || '',
       priceTriple: pkg.priceTriple || '',
       priceDouble: pkg.priceDouble || '',
-      priceChild: pkg.priceChild || ''
+      priceChild: pkg.priceChild || '',
+      // Paket lama (dibuat sebelum fitur Rencana Anggaran ada) belum punya
+      // field ini sama sekali — fallback ke daftar default biar formnya
+      // tetap kepakai wajar (bukan array kosong tanpa baris apa-apa).
+      budgetFixedCostItems: (Array.isArray(pkg.budgetFixedCostItems) && pkg.budgetFixedCostItems.length > 0)
+        ? pkg.budgetFixedCostItems : DEFAULT_BUDGET_FIXED_COST_ITEMS,
+      budgetVariableCostItems: (Array.isArray(pkg.budgetVariableCostItems) && pkg.budgetVariableCostItems.length > 0)
+        ? pkg.budgetVariableCostItems : DEFAULT_BUDGET_VARIABLE_COST_ITEMS
     });
     setShowModal(true);
   };
@@ -599,6 +635,36 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     }, 500);
   };
 
+  // ============ Rencana Anggaran (Planning Cost) — tambah/edit/hapus baris ============
+  // Pola array-of-rows yang sama kayak editor Itinerary — bedanya ini nggak
+  // lewat updateDoc terpisah, cuma state form biasa yang ikut ke-submit
+  // bareng field lain pas Simpan.
+
+  const handleBudgetItemChange = (kind, idx, field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      [kind]: prev[kind].map((item, i) => i === idx ? { ...item, [field]: value } : item)
+    }));
+  };
+
+  const handleAddBudgetItem = (kind) => {
+    setFormData(prev => ({ ...prev, [kind]: [...prev[kind], { label: '', amount: '' }] }));
+  };
+
+  const handleRemoveBudgetItem = (kind, idx) => {
+    setFormData(prev => ({ ...prev, [kind]: prev[kind].filter((_, i) => i !== idx) }));
+  };
+
+  // Dipakai buat preview live di modal DAN buat hitung budgetCostTotal yang
+  // disimpen ke Firestore pas Simpan.
+  const sumBudgetItems = (items) => (items || []).reduce((acc, it) => acc + (Number(it.amount) || 0), 0);
+  const budgetFixedCostTotal = sumBudgetItems(formData.budgetFixedCostItems);
+  const budgetVariableCostTotal = sumBudgetItems(formData.budgetVariableCostItems);
+  const budgetCostTotalPreview = budgetFixedCostTotal + budgetVariableCostTotal;
+  const budgetPlanningSellingTotal = Number(formData.priceMain || 0) * Number(formData.quotaTotal || 0);
+  const budgetPlanningMarginTotal = budgetPlanningSellingTotal - budgetCostTotalPreview;
+  const budgetPlanningMarginPerPax = Number(formData.priceMain || 0) - (Number(formData.quotaTotal) > 0 ? budgetCostTotalPreview / Number(formData.quotaTotal) : 0);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!canManagePackages) {
@@ -606,6 +672,12 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       return;
     }
     try {
+      const cleanedFixedCostItems = (formData.budgetFixedCostItems || [])
+        .filter(it => (it.label && it.label.trim()) || Number(it.amount) > 0)
+        .map(it => ({ label: it.label || '', amount: Number(it.amount) || 0 }));
+      const cleanedVariableCostItems = (formData.budgetVariableCostItems || [])
+        .filter(it => (it.label && it.label.trim()) || Number(it.amount) > 0)
+        .map(it => ({ label: it.label || '', amount: Number(it.amount) || 0 }));
       const payload = {
         code: formData.code,
         name: formData.name,
@@ -624,6 +696,9 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         priceTriple: Number(formData.priceTriple || 0),
         priceDouble: Number(formData.priceDouble || 0),
         priceChild: Number(formData.priceChild || 0),
+        budgetFixedCostItems: cleanedFixedCostItems,
+        budgetVariableCostItems: cleanedVariableCostItems,
+        budgetCostTotal: sumBudgetItems(cleanedFixedCostItems) + sumBudgetItems(cleanedVariableCostItems),
         updatedAt: new Date().toISOString()
       };
 
@@ -1519,6 +1594,85 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* RENCANA ANGGARAN (PLANNING COST) — buat itung Margin Planning
+                  di awal, sebelum paket dijual. Lihat tab "Analisa Margin"
+                  di Laporan Keuangan buat perbandingan sama Margin Realisasi. */}
+              <div className={`${styles.innerBg} p-4 rounded-xl border space-y-3`}>
+                <p className="text-[11px] font-bold text-amber-500 uppercase tracking-wider">
+                  Rencana Anggaran (Planning Cost) — Total per Paket
+                </p>
+
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold opacity-70">Fixed Cost</p>
+                  {formData.budgetFixedCostItems.map((item, idx) => (
+                    <div key={`fixed-${idx}`} className="flex gap-2 items-center">
+                      <input
+                        type="text" placeholder="Nama item biaya"
+                        className={`flex-1 ${styles.inputBg} rounded-lg p-2 text-xs`}
+                        value={item.label}
+                        onChange={e => handleBudgetItemChange('budgetFixedCostItems', idx, 'label', e.target.value)}
+                      />
+                      <input
+                        type="number" placeholder="0"
+                        className={`w-36 ${styles.inputBg} rounded-lg p-2 text-xs`}
+                        value={item.amount}
+                        onChange={e => handleBudgetItemChange('budgetFixedCostItems', idx, 'amount', e.target.value)}
+                      />
+                      <button type="button" onClick={() => handleRemoveBudgetItem('budgetFixedCostItems', idx)} className="text-rose-500 hover:text-rose-400 p-1">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => handleAddBudgetItem('budgetFixedCostItems')} className="text-[11px] text-emerald-500 hover:underline flex items-center gap-1">
+                    <Plus className="w-3 h-3" /> Tambah Item Fixed Cost
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold opacity-70">Variable Cost (TL/Rombongan)</p>
+                  {formData.budgetVariableCostItems.map((item, idx) => (
+                    <div key={`var-${idx}`} className="flex gap-2 items-center">
+                      <input
+                        type="text" placeholder="Nama item biaya"
+                        className={`flex-1 ${styles.inputBg} rounded-lg p-2 text-xs`}
+                        value={item.label}
+                        onChange={e => handleBudgetItemChange('budgetVariableCostItems', idx, 'label', e.target.value)}
+                      />
+                      <input
+                        type="number" placeholder="0"
+                        className={`w-36 ${styles.inputBg} rounded-lg p-2 text-xs`}
+                        value={item.amount}
+                        onChange={e => handleBudgetItemChange('budgetVariableCostItems', idx, 'amount', e.target.value)}
+                      />
+                      <button type="button" onClick={() => handleRemoveBudgetItem('budgetVariableCostItems', idx)} className="text-rose-500 hover:text-rose-400 p-1">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => handleAddBudgetItem('budgetVariableCostItems')} className="text-[11px] text-emerald-500 hover:underline flex items-center gap-1">
+                    <Plus className="w-3 h-3" /> Tambah Item Variable Cost
+                  </button>
+                </div>
+
+                <div className={`pt-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'} grid grid-cols-2 gap-2 text-xs`}>
+                  <div>Total Planning Cost</div>
+                  <div className="text-right font-bold">Rp {budgetCostTotalPreview.toLocaleString('id-ID')}</div>
+                  <div>Estimasi Total Jual (Harga Utama × Kuota)</div>
+                  <div className="text-right font-bold">Rp {budgetPlanningSellingTotal.toLocaleString('id-ID')}</div>
+                  <div className="font-bold">Estimasi Margin Planning</div>
+                  <div className={`text-right font-bold ${budgetPlanningMarginTotal >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                    Rp {budgetPlanningMarginTotal.toLocaleString('id-ID')}
+                  </div>
+                  <div className="opacity-70">Margin per Pax (estimasi)</div>
+                  <div className={`text-right ${budgetPlanningMarginPerPax >= 0 ? 'text-emerald-500' : 'text-rose-500'} opacity-90`}>
+                    Rp {Math.round(budgetPlanningMarginPerPax).toLocaleString('id-ID')}
+                  </div>
+                </div>
+                <p className="text-[10px] opacity-60 italic">
+                  * Estimasi ini asumsi semua pax ambil Harga Utama — angka riil belakangan bisa beda tergantung campuran tipe kamar (Quad/Triple/Double) yang beneran dibooking. Bandingkan sama Margin Realisasi di menu Laporan Keuangan → Analisa Margin setelah paket ini "Akui Pendapatan".
+                </p>
               </div>
 
               <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
