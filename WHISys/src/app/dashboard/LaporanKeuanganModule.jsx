@@ -1462,7 +1462,16 @@ function ArApTab({ styles, isDark, bookingsList, vendorBills, vendorsList }) {
 // =====================================================================
 // TAB 6: LABA RUGI (P&L) — dipindah dari FinanceModule.jsx tab "Laporan"
 // =====================================================================
-function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPayments, operationalExpenses, packagesList, onRefresh }) {
+function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPayments: allVendorPayments, operationalExpenses, packagesList, onRefresh }) {
+  // Pembayaran vendor yang udah dikonversi ke Saldo Deposit Vendor (DP batal
+  // tapi nggak hangus, kayak tiket block-seat yang di-roll-over ke
+  // keberangkatan berikutnya) SUDAH diakui HPP/selisihnya sendiri secara
+  // LANGSUNG pas konversi terjadi (lihat postVendorDepositConversion di
+  // journal.js, dipanggil dari handleConvertSubmit FinanceModule.jsx) —
+  // makanya dikeluarkan dari SEMUA perhitungan HPP/Biaya Dibayar Dimuka
+  // "live" di tab ini (Akui Pendapatan, tabel Margin per Paket, dst), biar
+  // nggak kehitung dobel pas paketnya diklik Akui Pendapatan.
+  const vendorPayments = allVendorPayments.filter(vp => !vp.convertedToDeposit);
   const [plPeriod, setPlPeriod] = useState('all');
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [companyProfile, setCompanyProfile] = useState(DEFAULT_COMPANY_PROFILE);
