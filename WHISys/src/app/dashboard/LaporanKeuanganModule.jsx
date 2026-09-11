@@ -1592,6 +1592,17 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
     return { pkg, pkgIncome, pkgVendorCost, profit: pkgIncome - pkgVendorCost };
   });
 
+  // Tabel "Analisis Margin per Program Paket" ikut kefilter plPeriod yang sama kayak
+  // ringkasan Laba Rugi di atasnya, biar nggak numpuk semua paket dari awal berdiri.
+  // Paket yang BELUM diakui pendapatannya tetap selalu keliatan di semua periode —
+  // itu masih jadi action item ("Akui Pendapatan") yang belum kelar, jadi jangan
+  // sampai ke-hide cuma gara-gara beda periode.
+  const marginTablePackages = packagesList.filter(pkg => {
+    if (!pkg.revenueRecognized) return true;
+    if (plPeriod === 'all') return true;
+    return getPeriodKey(pkg.recognizedAt) === plPeriod;
+  });
+
   const openRecognizeModal = (pkg) => {
     const parsedDeparture = pkg.departureDate ? new Date(pkg.departureDate) : null;
     const defaultDate = parsedDeparture && !isNaN(parsedDeparture.getTime())
@@ -1941,6 +1952,7 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
         </h4>
         <p className={`text-xs ${styles.textSub} mb-4`}>
           Membandingkan total setoran jamaah yang masuk (Omset Real) terhadap realisasi pembayaran biaya vendor (HPP). Klik <strong>Akui Pendapatan</strong> pada paket yang jasanya sudah terealisasi (mis. jamaah sudah berangkat) biar omset & HPP-nya masuk ke Laporan P&L. Sebelum diklik, nilainya tercatat sebagai Pendapatan/Biaya Dibayar Dimuka.
+          Mengikuti filter periode <strong>{formatPeriodLabel(plPeriod)}</strong> di atas (paket yang belum diakui pendapatannya tetap ditampilkan di semua periode selama masih jadi action item).
         </p>
 
         <div className="hidden md:block overflow-x-auto">
@@ -1957,12 +1969,12 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
               </tr>
             </thead>
             <tbody className={`divide-y ${styles.tableRowBorder}`}>
-              {packagesList.length === 0 ? (
+              {marginTablePackages.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada paket perjalanan terdaftar.</td>
+                  <td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada paket perjalanan pada periode ini.</td>
                 </tr>
               ) : (
-                packagesList.map((pkg) => {
+                marginTablePackages.map((pkg) => {
                   const pkgIncome = transactions
                     .filter(tx => tx.packageId === pkg.id || (!tx.packageId && tx.packageName === pkg.name))
                     .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
@@ -2048,10 +2060,10 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
           </table>
         </div>
         <div className="md:hidden space-y-3">
-          {packagesList.length === 0 ? (
-            <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada paket perjalanan terdaftar.</p>
+          {marginTablePackages.length === 0 ? (
+            <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada paket perjalanan pada periode ini.</p>
           ) : (
-            packagesList.map((pkg) => {
+            marginTablePackages.map((pkg) => {
               const pkgIncome = transactions
                 .filter(tx => tx.packageId === pkg.id || (!tx.packageId && tx.packageName === pkg.name))
                 .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
