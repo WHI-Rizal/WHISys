@@ -699,3 +699,68 @@ export const applyRescheduleMigrationCorrection = async ({ affected, bookings, p
 
   return summary;
 };
+
+// ---------------------------------------------------------------------
+// Diagnosa & koreksi booking yang KESIMPEN tapi jurnalnya GAGAL keposting
+// (postBookingCreated dipanggil pakai `.catch(console.error)` di
+// BookingsModule.jsx — booking-nya sendiri tetap sukses tersimpan walau
+// jurnalnya gagal, misal network/permission error pas prosesnya). Pola
+// diagnose-dulu-baru-apply ini SAMA PERSIS kayak
+// diagnoseRescheduleMigrationImpact/applyRescheduleMigrationCorrection di
+// atas — read-only dulu, biar staf bisa liat daftarnya sebelum ada jurnal
+// baru yang diposting.
+// ---------------------------------------------------------------------
+export const diagnoseMissingBookingJournals = ({ bookings, journalEntries }) => {
+  // Booking dianggap "udah kejurnal" kalau ada journal_entries dengan
+  // source 'booking_created' & sourceDocId = id booking itu — persis
+  // pola postBookingCreated di atas.
+  const journaledBookingIds = new Set(
+    (journalEntries || []).filter(e => e.source === 'booking_created').map(e => e.sourceDocId)
+  );
+
+  // Cuma booking status 'active' yang di-cek (booking yang udah
+  // dibatalkan/di-reschedule dilewatin dulu — akuntansinya lebih rumit
+  // karena ada 2 kemungkinan bolong sekaligus (booking_created DAN
+  // booking_cancel_refund/booking_reschedule_carryover-nya), jadi lebih
+  // aman dicek manual daripada di-auto-koreksi di sini).
+  const affected = (bookings || [])
+    .filter(b => (b.status || 'active') === 'active')
+    .filter(b => Number(b.totalAmount || 0) > 0)
+    .filter(b => !journaledBookingIds.has(b.id))
+    .map(b => ({
+      bookingId: b.id,
+      bookingCode: b.bookingCode,
+      jamaahName: b.jamaahName,
+      totalAmount: Number(b.totalAmount || 0),
+      createdAt: b.createdAt,
+    }));
+
+  const totalAmount = affected.reduce((acc, b) => acc + b.totalAmount, 0);
+  return { affected, totalAmount, count: affected.length };
+};
+
+export const applyMissingBookingJournalsCorrection = async ({ affected, createdByUid, createdByName }) => {
+  const summary = { corrected: 0, skipped: 0, errors: [] };
+  for (const item of (affected || [])) {
+    try {
+      // Cek ulang tepat sebelum posting (bukan cuma pas diagnosa) — jaga-
+      // jaga kalau ada 2 orang buka modal ini bersamaan, atau ada jurnal
+      // yang masuk di antara diagnosa & klik Terapkan Koreksi.
+      const existing = await getDocs(query(
+        collection(db, 'journal_entries'),
+        where('source', '==', 'booking_created'),
+        where('sourceDocId', '==', item.bookingId)
+      ));
+      if (existing.docs.length > 0) { summary.skipped += 1; continue; }
+
+      const posted = await postBookingCreated({
+        bookingId: item.bookingId, bookingCode: item.bookingCode, totalAmount: item.totalAmount,
+        date: item.createdAt || new Date().toISOString(), createdByUid, createdByName
+      });
+      if (posted) summary.corrected += 1; else summary.skipped += 1;
+    } catch (err) {
+      summary.errors.push(`${item.bookingCode || item.bookingId}: ${err.message}`);
+    }
+  }
+  return summary;
+};
