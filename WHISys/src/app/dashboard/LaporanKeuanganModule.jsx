@@ -19,7 +19,7 @@ import {
   backfillOpexJournalCategories, diagnoseRescheduleMigrationImpact, applyRescheduleMigrationCorrection,
   diagnoseMissingBookingJournals, applyMissingBookingJournalsCorrection,
   diagnoseArReconciliation, removeDuplicateBookingCreatedEntries, removeOrphanBookingJournalEntries,
-  diagnoseMissingCommissionJournals, applyMissingCommissionJournalsCorrection
+  diagnoseMissingCommissionJournals, applyMissingCommissionJournalsCorrection, deleteJournalEntryById
 } from '../../lib/journal';
 
 const DEFAULT_COMPANY_PROFILE = {
@@ -240,6 +240,8 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
   const [arReconciliation, setArReconciliation] = useState(null);
   const [removingDuplicates, setRemovingDuplicates] = useState(false);
   const [removingOrphans, setRemovingOrphans] = useState(false);
+  const [expandedArBookingIds, setExpandedArBookingIds] = useState([]);
+  const [deletingEntryId, setDeletingEntryId] = useState(null);
 
   // Diagnosa & koreksi jurnal Komisi Mitra/Agen yang belum pernah keposting
   // (lihat catatan lengkap di diagnoseMissingCommissionJournals, lib/journal.js
@@ -415,6 +417,28 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
       alert('Gagal menghapus jurnal yatim piatu: ' + err.message);
     }
     setRemovingOrphans(false);
+  };
+
+  const toggleArBookingExpand = (bookingId) => {
+    setExpandedArBookingIds(prev => prev.includes(bookingId) ? prev.filter(x => x !== bookingId) : [...prev, bookingId]);
+  };
+
+  const handleDeleteArEntry = async (entryId, label) => {
+    if (!confirm(`Hapus jurnal ini (${label})? Cuma hapus entry ini doang, bukan seluruh booking-nya. Pastikan udah yakin ini beneran dobel/salah sebelum hapus.`)) return;
+    setDeletingEntryId(entryId);
+    try {
+      await deleteJournalEntryById(entryId);
+      await fetchData();
+      // Re-diagnosa pakai data yang baru di-fetch (fetchData nge-update
+      // journalEntries/bookingsList state, tapi butuh nunggu 1 tick biar
+      // state-nya kepake) — paling aman minta user buka ulang modalnya.
+      setShowArReconciliation(false);
+      setArReconciliation(null);
+      alert('Jurnal berhasil dihapus. Buka lagi "Rekonsiliasi Piutang per Booking" buat lihat hasil terbarunya.');
+    } catch (err) {
+      alert('Gagal menghapus jurnal: ' + err.message);
+    }
+    setDeletingEntryId(null);
   };
 
   const handleOpenMissingCommissionDiagnosis = () => {
@@ -753,6 +777,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
                     </button>
                   </div>
                 )}
+                <p className={`text-[10.5px] ${styles.textSub} mb-1.5`}>Klik baris buat lihat rincian jurnal per booking (biar ketauan persis entry mana yang dobel/salah, sebelum dihapus satu-satu).</p>
                 <div className="overflow-x-auto mb-3">
                   <table className="w-full text-[11px]">
                     <thead className={styles.tableHeaderBg}>
@@ -762,17 +787,64 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
                         <th className="text-right p-2 font-medium">Sisa Tagihan (Live)</th>
                         <th className="text-right p-2 font-medium">Piutang (Jurnal)</th>
                         <th className="text-right p-2 font-medium">Diff</th>
+                        <th className="p-2"></th>
                       </tr>
                     </thead>
                     <tbody className={`divide-y ${styles.tableRowBorder}`}>
                       {arReconciliation.mismatches.map(item => (
-                        <tr key={item.bookingId}>
-                          <td className="p-2">{item.bookingCode || item.bookingId}{item.isDuplicate && <span className="ml-1 text-[9.5px] text-rose-500 font-bold">DOBEL</span>}</td>
-                          <td className="p-2">{item.jamaahName || '-'}</td>
-                          <td className="p-2 text-right">{formatRp(item.liveOutstanding)}</td>
-                          <td className="p-2 text-right">{formatRp(item.journalNet)}</td>
-                          <td className={`p-2 text-right font-bold ${item.diff >= 0 ? 'text-rose-500' : 'text-amber-500'}`}>{item.diff >= 0 ? '+' : ''}{formatRp(item.diff)}</td>
-                        </tr>
+                        <React.Fragment key={item.bookingId}>
+                          <tr className={`cursor-pointer ${isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}`} onClick={() => toggleArBookingExpand(item.bookingId)}>
+                            <td className="p-2">{item.bookingCode || item.bookingId}{item.isDuplicate && <span className="ml-1 text-[9.5px] text-rose-500 font-bold">DOBEL</span>}</td>
+                            <td className="p-2">{item.jamaahName || '-'}</td>
+                            <td className="p-2 text-right">{formatRp(item.liveOutstanding)}</td>
+                            <td className="p-2 text-right">{formatRp(item.journalNet)}</td>
+                            <td className={`p-2 text-right font-bold ${item.diff >= 0 ? 'text-rose-500' : 'text-amber-500'}`}>{item.diff >= 0 ? '+' : ''}{formatRp(item.diff)}</td>
+                            <td className="p-2 text-right">{expandedArBookingIds.includes(item.bookingId) ? <ChevronDown className="w-3.5 h-3.5 inline" /> : <ChevronRight className="w-3.5 h-3.5 inline" />}</td>
+                          </tr>
+                          {expandedArBookingIds.includes(item.bookingId) && (
+                            <tr>
+                              <td colSpan={6} className={`p-0 ${styles.innerBg}`}>
+                                {item.entries.length === 0 ? (
+                                  <p className={`p-3 text-[10.5px] ${styles.textSub}`}>Nggak ada jurnal yang nyentuh 1201 buat booking ini (aneh — cek manual di Jurnal Umum pakai kode booking ini).</p>
+                                ) : (
+                                  <table className="w-full text-[10.5px]">
+                                    <thead>
+                                      <tr className={styles.textSub}>
+                                        <th className="text-left px-3 py-1.5 font-medium">Tanggal</th>
+                                        <th className="text-left px-3 py-1.5 font-medium">Source</th>
+                                        <th className="text-left px-3 py-1.5 font-medium">Deskripsi</th>
+                                        <th className="text-right px-3 py-1.5 font-medium">Debit</th>
+                                        <th className="text-right px-3 py-1.5 font-medium">Kredit</th>
+                                        <th className="px-3 py-1.5"></th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {item.entries.map(en => (
+                                        <tr key={en.id} className="border-t border-dashed border-slate-700/30">
+                                          <td className="px-3 py-1.5">{formatDateDDMMYYYY((en.date || '').slice(0, 10))}</td>
+                                          <td className="px-3 py-1.5">{en.source}{en.isManual && ' (manual)'}</td>
+                                          <td className="px-3 py-1.5">{en.description}</td>
+                                          <td className="px-3 py-1.5 text-right">{en.debit > 0 ? formatRp(en.debit) : '-'}</td>
+                                          <td className="px-3 py-1.5 text-right">{en.credit > 0 ? formatRp(en.credit) : '-'}</td>
+                                          <td className="px-3 py-1.5 text-right">
+                                            <button
+                                              onClick={(e) => { e.stopPropagation(); handleDeleteArEntry(en.id, `${en.source} - ${en.description}`); }}
+                                              disabled={deletingEntryId === en.id}
+                                              className="text-rose-500 hover:text-rose-400 disabled:opacity-50"
+                                              title="Hapus entry jurnal ini"
+                                            >
+                                              <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       ))}
                     </tbody>
                   </table>
