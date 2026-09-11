@@ -7,7 +7,7 @@ import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, Hi
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN, addPPN } from '../../lib/ppn';
 import { getNextCustomerCode } from '../../lib/customerCode';
-import { postBookingCreated, postIncomePayment, postBookingCancelRefund, postJournalEntry, deleteJournalEntriesBySource, ACC } from '../../lib/journal';
+import { postBookingCreated, postIncomePayment, postBookingCancelRefund, postJournalEntry, deleteJournalEntriesBySource, deleteAllJournalEntriesForBooking, ACC } from '../../lib/journal';
 
 // Firestore where(..., 'in', [...]) cuma dukung maks 30 nilai sekaligus —
 // buat query yang array-nya bisa aja lebih dari itu (grup rombongan gede),
@@ -1427,6 +1427,12 @@ Terimakasih🙏`;
       if (!confirm(`Apakah Anda yakin ingin menghapus booking ${item.bookingCode}?${partnerWarning}`)) return;
 
       await deleteDoc(doc(db, 'bookings', item.id));
+      // Booking-nya beneran hilang dari sistem — jurnal apapun yang nempel
+      // ke booking ini (piutang awal, koreksi edit, dst) WAJIB ikut dihapus,
+      // kalau nggak Piutang Jamaah di Neraca bakal kelebihan catat selamanya
+      // buat booking yang udah nggak ada ini (lihat catatan lengkap di
+      // deleteAllJournalEntriesForBooking, lib/journal.js).
+      await deleteAllJournalEntriesForBooking(item.id).catch(err => console.error('Gagal menghapus jurnal booking yang dihapus:', err));
 
       if (!partnerLinkSnap.empty && !siblingStillExists) {
         await Promise.all(partnerLinkSnap.docs.map(d => deleteDoc(d.ref)));
@@ -3181,6 +3187,11 @@ Terimakasih🙏`;
       if (!confirm(`Apakah Anda yakin ingin menghapus SELURUH ${allItems.length} booking dalam grup ${group.code}?${partnerWarning}`)) return;
 
       await Promise.all(allItems.map(item => deleteDoc(doc(db, 'bookings', item.id))));
+      // Sama kayak hapus booking satuan — semua jurnal yang nempel ke
+      // TIAP booking di grup ini WAJIB ikut dihapus, kalau nggak Piutang
+      // Jamaah di Neraca kelebihan catat selamanya buat grup yang udah
+      // nggak ada ini.
+      await Promise.all(allItems.map(item => deleteAllJournalEntriesForBooking(item.id).catch(err => console.error('Gagal menghapus jurnal booking grup yang dihapus:', err))));
 
       if (!partnerLinkSnap.empty) {
         await Promise.all(partnerLinkSnap.docs.map(d => deleteDoc(d.ref)));
