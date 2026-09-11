@@ -243,7 +243,11 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
 
       setChartOfAccounts(coaList);
       setBookingsList(bookSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setPackagesList(pkgSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      // Filter dokumen config kategori destinasi ('_destination_categories_config')
+      // yang disamarkan sebagai doc di collection 'packages' sendiri (lihat
+      // PackagesModule.jsx) — kalau nggak difilter, dia ikut ke-anggep "paket"
+      // di semua tab yang pakai packagesList di sini (termasuk Analisa Margin).
+      setPackagesList(pkgSnap.docs.filter(d => d.id !== '_destination_categories_config').map(d => ({ id: d.id, ...d.data() })));
       setVendorBills(billSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setVendorsList(vendorSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(v => !v.isCategoryConfig));
       setFinancialAccounts(accSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -429,6 +433,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
           { key: 'cash_flow', label: 'Arus Kas', icon: TrendingUp },
           { key: 'ar_ap', label: 'Piutang & Hutang', icon: Users },
           { key: 'profit_loss', label: 'Laba Rugi (P&L)', icon: BarChart3 },
+          { key: 'margin_analysis', label: 'Analisa Margin', icon: ArrowUpRight },
           { key: 'cash_bank', label: 'Kas & Bank', icon: Wallet },
         ].map(t => (
           <button
@@ -462,6 +467,12 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
           transactions={paymentsIncome} vendorPayments={paymentsVendor}
           operationalExpenses={operationalExpenses} packagesList={packagesList}
           onRefresh={fetchData}
+        />
+      )}
+      {activeTab === 'margin_analysis' && (
+        <MarginAnalysisTab
+          styles={styles} isDark={isDark}
+          packagesList={packagesList} journalEntries={journalEntries} companyProfile={companyProfile}
         />
       )}
       {activeTab === 'cash_bank' && (
@@ -2276,6 +2287,357 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// TAB: ANALISA MARGIN — Margin Planning (Rencana Anggaran yang diisi di
+// Paket Perjalanan) vs Margin Realisasi (angka riil yang udah dibekukan
+// di jurnal `revenue_recognition`/`revenue_unrecognition` pas staf klik
+// "Akui Pendapatan" di tab Laba Rugi). Tab ini murni agregasi client-side
+// dari packagesList & journalEntries yang udah di-fetch parent — nggak ada
+// query Firestore baru sama sekali di sini.
+// =====================================================================
+function MarginAnalysisTab({ styles, isDark, packagesList, journalEntries, companyProfile }) {
+  const [subView, setSubView] = useState('per_paket'); // 'per_paket' | 'per_destinasi'
+  const [filterDestinasi, setFilterDestinasi] = useState('all');
+  const [filterTahun, setFilterTahun] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all'); // all | recognized | not_recognized
+  const [selectedPkgDetail, setSelectedPkgDetail] = useState(null);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+
+  // Realisasi Income/HPP dihitung dari NET baris jurnal source
+  // 'revenue_recognition' + 'revenue_unrecognition' yang sourceDocId-nya =
+  // id paket ini. Sengaja pakai jurnal (bukan re-sum payments_income/
+  // payments_vendor live) karena angkanya udah dibekukan pas momen Akui
+  // Pendapatan — nggak kegeser kalau ada transaksi baru masuk belakangan,
+  // dan otomatis netto balik ke 0 kalau paketnya di-"Batalkan Pengakuan".
+  const marginRows = packagesList.map(pkg => {
+    const relatedEntries = journalEntries.filter(je =>
+      je.sourceDocId === pkg.id && (je.source === 'revenue_recognition' || je.source === 'revenue_unrecognition')
+    );
+    let realisasiIncome = 0;
+    let realisasiHpp = 0;
+    relatedEntries.forEach(je => {
+      (je.lines || []).forEach(line => {
+        if (line.accountCode === ACC.PENDAPATAN) {
+          realisasiIncome += (Number(line.credit) || 0) - (Number(line.debit) || 0);
+        }
+        if (line.accountCode === ACC.HPP) {
+          realisasiHpp += (Number(line.debit) || 0) - (Number(line.credit) || 0);
+        }
+      });
+    });
+    const realisasiMargin = realisasiIncome - realisasiHpp;
+
+    const budgetCostTotal = Number(pkg.budgetCostTotal || 0);
+    const quotaTotal = Number(pkg.quotaTotal || 0);
+    const quotaTerjual = Math.max(0, quotaTotal - Number(pkg.quotaRemaining ?? quotaTotal));
+    const hargaJualUtama = Number(pkg.priceMain || pkg.priceQuad || 0);
+    const planningSelling = hargaJualUtama * quotaTotal;
+    const planningMargin = planningSelling - budgetCostTotal;
+
+    const hasRealisasiActivity = relatedEntries.length > 0;
+    const recognizedYear = pkg.recognizedAt ? new Date(pkg.recognizedAt).getFullYear() : null;
+
+    return {
+      pkg, quotaTotal, quotaTerjual, hargaJualUtama,
+      planningSelling, budgetCostTotal, planningMargin,
+      realisasiIncome, realisasiHpp, realisasiMargin,
+      selisih: realisasiMargin - planningMargin,
+      hasRealisasiActivity, recognizedYear,
+    };
+  });
+
+  const yearsAvailable = Array.from(new Set(marginRows.filter(r => r.recognizedYear).map(r => r.recognizedYear))).sort((a, b) => b - a);
+  const destinasiAvailable = Array.from(new Set(packagesList.map(p => p.destinationCity).filter(Boolean))).sort();
+
+  const filteredRows = marginRows.filter(r => {
+    if (filterDestinasi !== 'all' && r.pkg.destinationCity !== filterDestinasi) return false;
+    if (filterTahun !== 'all' && String(r.recognizedYear) !== filterTahun) return false;
+    if (filterStatus === 'recognized' && !r.pkg.revenueRecognized) return false;
+    if (filterStatus === 'not_recognized' && r.pkg.revenueRecognized) return false;
+    return true;
+  });
+
+  // Per Destinasi (Tahunan/Multi-Tahun) — cuma paket yang udah ada
+  // aktivitas Realisasi (diakui pendapatannya) yang diagregasi, biar angka
+  // Margin Realisasi-nya bukan 0 semua gara-gara belum pernah Akui
+  // Pendapatan.
+  const perDestinasiMap = {};
+  filteredRows.filter(r => r.pkg.revenueRecognized || r.hasRealisasiActivity).forEach(r => {
+    const key = r.pkg.destinationCity || 'Tanpa Destinasi';
+    if (!perDestinasiMap[key]) {
+      perDestinasiMap[key] = { destinasi: key, jumlahPaket: 0, totalPax: 0, totalPlanning: 0, totalRealisasi: 0, totalRealisasiIncome: 0 };
+    }
+    perDestinasiMap[key].jumlahPaket += 1;
+    perDestinasiMap[key].totalPax += r.quotaTerjual;
+    perDestinasiMap[key].totalPlanning += r.planningMargin;
+    perDestinasiMap[key].totalRealisasi += r.realisasiMargin;
+    perDestinasiMap[key].totalRealisasiIncome += r.realisasiIncome;
+  });
+  const perDestinasiRows = Object.values(perDestinasiMap)
+    .map(d => ({
+      ...d,
+      marginPct: d.totalRealisasiIncome > 0 ? (d.totalRealisasi / d.totalRealisasiIncome) * 100 : 0,
+      selisih: d.totalRealisasi - d.totalPlanning
+    }))
+    .sort((a, b) => b.totalRealisasi - a.totalRealisasi);
+
+  const maxAbsMargin = Math.max(1, ...perDestinasiRows.map(d => Math.max(Math.abs(d.totalPlanning), Math.abs(d.totalRealisasi))));
+
+  const handleExportPdfPerPaket = async () => {
+    setGeneratingPdf(true);
+    try {
+      const docPdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+      const { cursorY, marginX } = await addPdfLetterhead(docPdf, companyProfile, 'ANALISA MARGIN PER PAKET', 'Planning vs Realisasi');
+      autoTable(docPdf, {
+        startY: cursorY + 2,
+        margin: { left: marginX, right: marginX },
+        head: [['Paket', 'Destinasi', 'Kuota (Terjual/Total)', 'Planning Cost', 'Margin Planning', 'Status', 'Margin Realisasi', 'Selisih']],
+        body: filteredRows.map(r => [
+          `${r.pkg.name}${r.pkg.code ? ` (${r.pkg.code})` : ''}`,
+          r.pkg.destinationCity || '-',
+          `${r.quotaTerjual}/${r.quotaTotal}`,
+          r.budgetCostTotal.toLocaleString('id-ID'),
+          r.planningMargin.toLocaleString('id-ID'),
+          r.pkg.revenueRecognized ? 'Sudah Diakui' : 'Belum Diakui',
+          r.realisasiMargin.toLocaleString('id-ID'),
+          r.selisih.toLocaleString('id-ID')
+        ]),
+        styles: { fontSize: 7.5, cellPadding: 2 },
+        headStyles: { fillColor: [15, 23, 42] },
+        columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right' } }
+      });
+      docPdf.save(`Analisa-Margin-Per-Paket-${todayISODate()}.pdf`);
+    } catch (err) {
+      alert('Gagal membuat PDF Analisa Margin Per Paket: ' + err.message);
+    }
+    setGeneratingPdf(false);
+  };
+
+  const handleExportPdfPerDestinasi = async () => {
+    setGeneratingPdf(true);
+    try {
+      const docPdf = new jsPDF({ unit: 'mm', format: 'a4' });
+      const subtitle = filterTahun === 'all' ? 'Semua Tahun' : `Tahun ${filterTahun}`;
+      const { cursorY, marginX } = await addPdfLetterhead(docPdf, companyProfile, 'ANALISA MARGIN PER DESTINASI', subtitle);
+      autoTable(docPdf, {
+        startY: cursorY + 2,
+        margin: { left: marginX, right: marginX },
+        head: [['Destinasi', 'Jumlah Paket', 'Total Pax', 'Margin Planning', 'Margin Realisasi', 'Margin %', 'Selisih']],
+        body: perDestinasiRows.map(d => [
+          d.destinasi, String(d.jumlahPaket), String(d.totalPax),
+          d.totalPlanning.toLocaleString('id-ID'), d.totalRealisasi.toLocaleString('id-ID'),
+          `${d.marginPct.toFixed(1)}%`, d.selisih.toLocaleString('id-ID')
+        ]),
+        styles: { fontSize: 8.5, cellPadding: 2.5 },
+        headStyles: { fillColor: [15, 23, 42] },
+        columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } }
+      });
+      docPdf.save(`Analisa-Margin-Per-Destinasi-${todayISODate()}.pdf`);
+    } catch (err) {
+      alert('Gagal membuat PDF Analisa Margin Per Destinasi: ' + err.message);
+    }
+    setGeneratingPdf(false);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className={`${styles.cardBg} border rounded-xl p-4 flex flex-wrap items-end gap-3`}>
+        <div className={`${styles.innerBg} border rounded-lg p-1 flex gap-1`}>
+          <button onClick={() => setSubView('per_paket')} className={`px-3 py-1.5 rounded-md text-xs font-medium ${subView === 'per_paket' ? styles.tabActive : styles.textSub}`}>Per Paket</button>
+          <button onClick={() => setSubView('per_destinasi')} className={`px-3 py-1.5 rounded-md text-xs font-medium ${subView === 'per_destinasi' ? styles.tabActive : styles.textSub}`}>Per Destinasi (Tahunan)</button>
+        </div>
+
+        {subView === 'per_paket' && (
+          <div>
+            <label className={`block mb-1 text-[10.5px] font-medium ${styles.textSub}`}>Destinasi</label>
+            <select className={`${styles.inputBg} rounded-lg p-2 text-xs border`} value={filterDestinasi} onChange={e => setFilterDestinasi(e.target.value)}>
+              <option value="all">Semua Destinasi</option>
+              {destinasiAvailable.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+        )}
+        <div>
+          <label className={`block mb-1 text-[10.5px] font-medium ${styles.textSub}`}>Tahun (Akui Pendapatan)</label>
+          <select className={`${styles.inputBg} rounded-lg p-2 text-xs border`} value={filterTahun} onChange={e => setFilterTahun(e.target.value)}>
+            <option value="all">Semua Tahun</option>
+            {yearsAvailable.map(y => <option key={y} value={String(y)}>{y}</option>)}
+          </select>
+        </div>
+        {subView === 'per_paket' && (
+          <div>
+            <label className={`block mb-1 text-[10.5px] font-medium ${styles.textSub}`}>Status</label>
+            <select className={`${styles.inputBg} rounded-lg p-2 text-xs border`} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+              <option value="all">Semua Status</option>
+              <option value="recognized">Sudah Diakui</option>
+              <option value="not_recognized">Belum Diakui</option>
+            </select>
+          </div>
+        )}
+        <div className="flex-1" />
+        <button
+          onClick={subView === 'per_paket' ? handleExportPdfPerPaket : handleExportPdfPerDestinasi}
+          disabled={generatingPdf}
+          className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 disabled:opacity-60"
+        >
+          <Download className="w-3.5 h-3.5" /> {generatingPdf ? 'Membuat...' : 'Export PDF'}
+        </button>
+      </div>
+
+      <p className={`text-[11px] ${styles.textSub} px-1`}>
+        Margin Planning = estimasi target margin dari harga jual & Rencana Anggaran yang diisi pas bikin paket (menu Paket Perjalanan). Margin Realisasi = angka riil dari jurnal pas paket di-"Akui Pendapatan". Selisih = Realisasi − Planning.
+      </p>
+
+      {subView === 'per_paket' ? (
+        <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className={styles.tableHeaderBg}>
+                <tr>
+                  <th className="text-left p-2.5 font-medium">Paket</th>
+                  <th className="text-left p-2.5 font-medium">Destinasi</th>
+                  <th className="text-right p-2.5 font-medium">Kuota</th>
+                  <th className="text-right p-2.5 font-medium">Planning Cost</th>
+                  <th className="text-right p-2.5 font-medium">Margin Planning</th>
+                  <th className="text-center p-2.5 font-medium">Status</th>
+                  <th className="text-right p-2.5 font-medium">Margin Realisasi</th>
+                  <th className="text-right p-2.5 font-medium">Selisih</th>
+                </tr>
+              </thead>
+              <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                {filteredRows.length === 0 && (
+                  <tr><td colSpan={8} className={`p-4 text-center ${styles.textSub}`}>Tidak ada paket yang cocok dengan filter ini.</td></tr>
+                )}
+                {filteredRows.map(r => (
+                  <tr key={r.pkg.id} className="cursor-pointer hover:bg-slate-500/5" onClick={() => setSelectedPkgDetail(r)}>
+                    <td className={`p-2.5 ${styles.textTitle} font-medium`}>{r.pkg.name} {r.pkg.code ? <span className={styles.textSub}>({r.pkg.code})</span> : null}</td>
+                    <td className={`p-2.5 ${styles.textSub}`}>{r.pkg.destinationCity || '-'}</td>
+                    <td className={`p-2.5 text-right ${styles.textSub}`}>{r.quotaTerjual}/{r.quotaTotal}</td>
+                    <td className="p-2.5 text-right">{formatRp(r.budgetCostTotal)}</td>
+                    <td className={`p-2.5 text-right font-medium ${r.planningMargin >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{formatRp(r.planningMargin)}</td>
+                    <td className="p-2.5 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${r.pkg.revenueRecognized ? 'bg-emerald-500/15 text-emerald-500' : 'bg-slate-500/15 text-slate-400'}`}>
+                        {r.pkg.revenueRecognized ? 'Sudah Diakui' : 'Belum Diakui'}
+                      </span>
+                    </td>
+                    <td className={`p-2.5 text-right font-medium ${r.realisasiMargin >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{formatRp(r.realisasiMargin)}</td>
+                    <td className={`p-2.5 text-right font-medium ${r.selisih >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{formatRp(r.selisih)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className={styles.tableHeaderBg}>
+                <tr>
+                  <th className="text-left p-2.5 font-medium">Destinasi</th>
+                  <th className="text-right p-2.5 font-medium">Jumlah Paket</th>
+                  <th className="text-right p-2.5 font-medium">Total Pax</th>
+                  <th className="text-left p-2.5 font-medium w-56">Planning vs Realisasi</th>
+                  <th className="text-right p-2.5 font-medium">Margin Planning</th>
+                  <th className="text-right p-2.5 font-medium">Margin Realisasi</th>
+                  <th className="text-right p-2.5 font-medium">Margin %</th>
+                  <th className="text-right p-2.5 font-medium">Selisih</th>
+                </tr>
+              </thead>
+              <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                {perDestinasiRows.length === 0 && (
+                  <tr><td colSpan={8} className={`p-4 text-center ${styles.textSub}`}>Belum ada paket yang diakui pendapatannya untuk periode/filter ini.</td></tr>
+                )}
+                {perDestinasiRows.map(d => (
+                  <tr key={d.destinasi}>
+                    <td className={`p-2.5 ${styles.textTitle} font-medium`}>{d.destinasi}</td>
+                    <td className={`p-2.5 text-right ${styles.textSub}`}>{d.jumlahPaket}</td>
+                    <td className={`p-2.5 text-right ${styles.textSub}`}>{d.totalPax}</td>
+                    <td className="p-2.5">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[9.5px] w-14 opacity-60">Planning</span>
+                          <div className="flex-1 h-2 rounded bg-slate-500/15 overflow-hidden">
+                            <div className="h-full bg-slate-400" style={{ width: `${(Math.abs(d.totalPlanning) / maxAbsMargin) * 100}%` }} />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[9.5px] w-14 opacity-60">Realisasi</span>
+                          <div className="flex-1 h-2 rounded bg-slate-500/15 overflow-hidden">
+                            <div className={`h-full ${d.totalRealisasi >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`} style={{ width: `${(Math.abs(d.totalRealisasi) / maxAbsMargin) * 100}%` }} />
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="p-2.5 text-right">{formatRp(d.totalPlanning)}</td>
+                    <td className={`p-2.5 text-right font-medium ${d.totalRealisasi >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{formatRp(d.totalRealisasi)}</td>
+                    <td className={`p-2.5 text-right ${styles.textSub}`}>{d.marginPct.toFixed(1)}%</td>
+                    <td className={`p-2.5 text-right font-medium ${d.selisih >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{formatRp(d.selisih)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {selectedPkgDetail && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setSelectedPkgDetail(null)}>
+          <div className={`${styles.cardBg} border rounded-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto p-5`} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className={`text-sm font-bold ${styles.textTitle}`}>{selectedPkgDetail.pkg.name} {selectedPkgDetail.pkg.code ? `(${selectedPkgDetail.pkg.code})` : ''}</h3>
+              <button onClick={() => setSelectedPkgDetail(null)} className={styles.textSub}><X className="w-4 h-4" /></button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mb-4 text-xs">
+              <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+                <p className={`${styles.textSub} mb-1`}>Margin Planning</p>
+                <p className={`text-base font-bold ${selectedPkgDetail.planningMargin >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{formatRp(selectedPkgDetail.planningMargin)}</p>
+              </div>
+              <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+                <p className={`${styles.textSub} mb-1`}>Margin Realisasi</p>
+                <p className={`text-base font-bold ${selectedPkgDetail.realisasiMargin >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{formatRp(selectedPkgDetail.realisasiMargin)}</p>
+              </div>
+            </div>
+
+            {!selectedPkgDetail.pkg.revenueRecognized && (
+              <p className={`text-[11px] ${styles.textSub} mb-3 italic`}>Paket ini belum "Akui Pendapatan" — Margin Realisasi masih 0 sampai diakui lewat tab Laba Rugi (P&L).</p>
+            )}
+
+            <p className={`text-[11px] font-semibold mb-1.5 ${styles.textTitle}`}>Rincian Rencana Anggaran (Fixed Cost)</p>
+            <table className="w-full text-xs mb-3">
+              <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                {(selectedPkgDetail.pkg.budgetFixedCostItems || []).length === 0 && (
+                  <tr><td className={`p-1.5 ${styles.textSub}`}>Belum diisi.</td></tr>
+                )}
+                {(selectedPkgDetail.pkg.budgetFixedCostItems || []).map((it, i) => (
+                  <tr key={`fx-${i}`}><td className="p-1.5">{it.label || '-'}</td><td className="p-1.5 text-right">{formatRp(it.amount)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+
+            <p className={`text-[11px] font-semibold mb-1.5 ${styles.textTitle}`}>Rincian Rencana Anggaran (Variable Cost TL)</p>
+            <table className="w-full text-xs mb-3">
+              <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                {(selectedPkgDetail.pkg.budgetVariableCostItems || []).length === 0 && (
+                  <tr><td className={`p-1.5 ${styles.textSub}`}>Belum diisi.</td></tr>
+                )}
+                {(selectedPkgDetail.pkg.budgetVariableCostItems || []).map((it, i) => (
+                  <tr key={`vr-${i}`}><td className="p-1.5">{it.label || '-'}</td><td className="p-1.5 text-right">{formatRp(it.amount)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className={`pt-2 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'} text-xs space-y-1`}>
+              <div className="flex justify-between"><span className={styles.textSub}>Realisasi Income (DPP)</span><span className="font-medium">{formatRp(selectedPkgDetail.realisasiIncome)}</span></div>
+              <div className="flex justify-between"><span className={styles.textSub}>Realisasi HPP Vendor</span><span className="font-medium">{formatRp(selectedPkgDetail.realisasiHpp)}</span></div>
+            </div>
           </div>
         </div>
       )}
