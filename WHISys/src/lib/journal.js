@@ -50,6 +50,7 @@ export const COA = [
   { code: '4101', name: 'Pendapatan Jasa Perjalanan', type: 'Pendapatan', normalBalance: 'credit' },
   { code: '5101', name: 'Beban Pokok Penjualan (HPP)', type: 'Beban', normalBalance: 'debit' },
   { code: '5201', name: 'Beban Operasional', type: 'Beban', normalBalance: 'debit' },
+  { code: '5301', name: 'Biaya Penalty/Materialized', type: 'Beban', normalBalance: 'debit' },
 ];
 
 const COA_NAME_BY_CODE = COA.reduce((acc, a) => { acc[a.code] = a.name; return acc; }, {});
@@ -69,6 +70,7 @@ export const ACC = {
   PENDAPATAN: '4101',
   HPP: '5101',
   OPEX: '5201',
+  BIAYA_PENALTY: '5301',
 };
 
 // Bikin 1 baris jurnal. `extra` dipakai buat nempelin info tambahan yang
@@ -237,6 +239,48 @@ export const postVendorPayment = async ({ paymentId, vendorName, amount, payMeth
     source: 'vendor_payment', sourceDocId: paymentId, reference: vendorName || '',
     lines: [debitLine, creditLine],
     createdByUid, createdByName
+  });
+};
+
+// 5b. Konversi DP Vendor yang batal (trip cancel, tapi nggak hangus) jadi
+//     Saldo Deposit Vendor — misal tiket block seat yang udah dibayar penuh
+//     tapi keberangkatannya batal, sebagian nilainya di-roll-over jadi kredit
+//     buat booking vendor berikutnya (bukan uang cash yang keluar/masuk lagi,
+//     Kas & Bank SENGAJA nggak disentuh — uangnya emang udah beneran keluar
+//     pas dibayar dulu, dicatat lewat postVendorPayment di atas).
+//
+//     `originalAmount` = nominal pembayaran vendor ASLI yang lagi dikonversi
+//     (masih nangkring di 1401 Biaya Dibayar Dimuka sejak dibayar dulu).
+//     `rolloverAmount` = porsi yang beneran bisa dipakai lagi (jadi Piutang
+//     Deposit Vendor, akun 1301). Selisihnya (originalAmount - rolloverAmount)
+//     = bagian yang hangus/kena penalty pembatalan-reschedule — LANGSUNG
+//     diakui sebagai beban SEKARANG (nggak nunggu paketnya "Akui
+//     Pendapatan", soalnya duit/kreditnya emang udah nggak balik lagi ke
+//     paket yang batal itu). Staf pilih mau selisih ini masuk HPP paket yang
+//     batal (`selisihAccount: 'hpp'`) atau ke akun terpisah "Biaya
+//     Penalty/Materialized" (`selisihAccount: 'penalty'`) biar nggak
+//     nyampur sama HPP operasional biasa.
+//
+//     Setelah dikonversi, `originalAmount` ini DIKELUARKAN dari perhitungan
+//     HPP live per-paket (lihat filter `convertedToDeposit` di
+//     LaporanKeuanganModule.jsx ProfitLossTab) — biar nggak kehitung dobel
+//     pas paket itu nanti/udah diklik Akui Pendapatan.
+export const postVendorDepositConversion = async ({ paymentId, vendorName, packageName, originalAmount, rolloverAmount, selisihAccount, date, createdByUid, createdByName }) => {
+  const original = Math.max(0, Number(originalAmount) || 0);
+  const rollover = Math.min(original, Math.max(0, Number(rolloverAmount) || 0));
+  const selisih = original - rollover;
+  if (original <= 0) return null;
+  const lines = [];
+  if (rollover > 0) lines.push(glLine(ACC.PIUTANG_DEPOSIT_VENDOR, rollover, 0));
+  if (selisih > 0) {
+    const acc = selisihAccount === 'penalty' ? ACC.BIAYA_PENALTY : ACC.HPP;
+    lines.push(glLine(acc, selisih, 0));
+  }
+  lines.push(glLine(ACC.BIAYA_DIBAYAR_DIMUKA, 0, original));
+  return postJournalEntry({
+    date, description: `Konversi DP Vendor Batal ke Saldo Deposit - ${vendorName || '-'}${packageName ? ` (${packageName})` : ''}`,
+    source: 'vendor_deposit_conversion', sourceDocId: paymentId, reference: vendorName || '',
+    lines, createdByUid, createdByName
   });
 };
 
