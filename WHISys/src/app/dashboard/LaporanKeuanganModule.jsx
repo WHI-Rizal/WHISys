@@ -18,7 +18,8 @@ import {
   runInitialJournalMigration, postJournalEntry, postRevenueRecognition, postRevenueUnrecognition,
   backfillOpexJournalCategories, diagnoseRescheduleMigrationImpact, applyRescheduleMigrationCorrection,
   diagnoseMissingBookingJournals, applyMissingBookingJournalsCorrection,
-  diagnoseArReconciliation, removeDuplicateBookingCreatedEntries
+  diagnoseArReconciliation, removeDuplicateBookingCreatedEntries, removeOrphanBookingJournalEntries,
+  diagnoseMissingCommissionJournals, applyMissingCommissionJournalsCorrection
 } from '../../lib/journal';
 
 const DEFAULT_COMPANY_PROFILE = {
@@ -238,6 +239,15 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
   const [showArReconciliation, setShowArReconciliation] = useState(false);
   const [arReconciliation, setArReconciliation] = useState(null);
   const [removingDuplicates, setRemovingDuplicates] = useState(false);
+  const [removingOrphans, setRemovingOrphans] = useState(false);
+
+  // Diagnosa & koreksi jurnal Komisi Mitra/Agen yang belum pernah keposting
+  // (lihat catatan lengkap di diagnoseMissingCommissionJournals, lib/journal.js
+  // — gap-nya baru ditambal 11 Sep 2026, histori lama perlu dibackfill manual).
+  const [commissionPayments, setCommissionPayments] = useState([]);
+  const [showMissingCommissionDiagnosis, setShowMissingCommissionDiagnosis] = useState(false);
+  const [missingCommissionDiagnosis, setMissingCommissionDiagnosis] = useState(null);
+  const [applyingMissingCommissionFix, setApplyingMissingCommissionFix] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -245,7 +255,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
       await seedChartOfAccounts();
       const [
         jeList, coaList, bookSnap, pkgSnap, billSnap, vendorSnap, accSnap,
-        incomeSnap, vendorPaySnap, opexSnap, migFlagSnap, profileSnap
+        incomeSnap, vendorPaySnap, opexSnap, migFlagSnap, profileSnap, commissionSnap
       ] = await Promise.all([
         fetchAllJournalEntries(),
         fetchChartOfAccounts(),
@@ -259,6 +269,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
         getDocs(collection(db, 'expenses_operational')),
         getDoc(doc(db, 'settings', 'journal_migration')),
         getDoc(doc(db, 'settings', 'company_profile')),
+        getDocs(collection(db, 'partner_commission_payments')),
       ]);
       const opexList = opexSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(o => !o.isCategoryConfig);
 
@@ -275,6 +286,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
       setPaymentsIncome(incomeSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setPaymentsVendor(vendorPaySnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setOperationalExpenses(opexList);
+      setCommissionPayments(commissionSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setMigrationDone(!!(migFlagSnap.exists() && migFlagSnap.data().done));
       if (profileSnap.exists() && profileSnap.data().company) {
         setCompanyProfile({ ...DEFAULT_COMPANY_PROFILE, ...profileSnap.data().company });
@@ -389,6 +401,47 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
     setRemovingDuplicates(false);
   };
 
+  const handleRemoveOrphans = async () => {
+    if (!arReconciliation || arReconciliation.orphanEntries.length === 0) return;
+    if (!confirm(`Hapus ${arReconciliation.orphanEntries.length} jurnal yatim piatu (nempel ke booking yang udah dihapus permanen dari sistem)? Ini nggak bisa dibatalkan (tapi transaksi aslinya emang udah nggak ada juga).`)) return;
+    setRemovingOrphans(true);
+    try {
+      const summary = await removeOrphanBookingJournalEntries({ orphanEntries: arReconciliation.orphanEntries });
+      alert(`Selesai!\n\nJurnal yatim piatu yang dihapus: ${summary.deleted}\nError: ${summary.errors.length}${summary.errors.length > 0 ? `\n\nDetail error:\n${summary.errors.slice(0, 10).join('\n')}` : ''}`);
+      await fetchData();
+      setShowArReconciliation(false);
+      setArReconciliation(null);
+    } catch (err) {
+      alert('Gagal menghapus jurnal yatim piatu: ' + err.message);
+    }
+    setRemovingOrphans(false);
+  };
+
+  const handleOpenMissingCommissionDiagnosis = () => {
+    const result = diagnoseMissingCommissionJournals({ commissionPayments, journalEntries });
+    setMissingCommissionDiagnosis(result);
+    setShowMissingCommissionDiagnosis(true);
+  };
+
+  const handleApplyMissingCommissionFix = async () => {
+    if (!missingCommissionDiagnosis || missingCommissionDiagnosis.affected.length === 0) return;
+    if (!confirm(`Posting jurnal buat ${missingCommissionDiagnosis.affected.length} pembayaran komisi Mitra/Agen lama yang belum pernah kejurnal? Aman diulang, yang udah kejurnal otomatis dilewati.`)) return;
+    setApplyingMissingCommissionFix(true);
+    try {
+      const summary = await applyMissingCommissionJournalsCorrection({
+        affected: missingCommissionDiagnosis.affected,
+        createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      });
+      alert(`Koreksi selesai!\n\nKomisi dikoreksi: ${summary.corrected}\nDilewati (udah kejurnal duluan): ${summary.skipped}\nError: ${summary.errors.length}${summary.errors.length > 0 ? `\n\nDetail error:\n${summary.errors.slice(0, 10).join('\n')}` : ''}`);
+      await fetchData();
+      setShowMissingCommissionDiagnosis(false);
+      setMissingCommissionDiagnosis(null);
+    } catch (err) {
+      alert('Gagal menerapkan koreksi: ' + err.message);
+    }
+    setApplyingMissingCommissionFix(false);
+  };
+
   if (loading) {
     return (
       <div className={`${styles.cardBg} border rounded-xl p-12 text-center`}>
@@ -445,6 +498,15 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
               title="Cari tau persis booking mana yang bikin Piutang Jamaah di Neraca beda sama Total Piutang Jamaah di tab Piutang & Hutang"
             >
               <Scale className="w-3.5 h-3.5" /> Rekonsiliasi Piutang per Booking
+            </button>
+          )}
+          {isSuperAdmin && (
+            <button
+              onClick={handleOpenMissingCommissionDiagnosis}
+              className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium rounded-lg flex items-center gap-1.5"
+              title="Cek pembayaran komisi Mitra/Agen lama yang belum pernah kejurnal (gap ditambal 11 Sep 2026)"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Cek Komisi Mitra Belum Terjurnal
             </button>
           )}
         </div>
@@ -572,6 +634,65 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
         </div>
       )}
 
+      {showMissingCommissionDiagnosis && missingCommissionDiagnosis && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className={`${styles.cardBg} border rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-5`}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className={`text-sm font-bold ${styles.textTitle}`}>Komisi Mitra/Agen Belum Terjurnal</h3>
+              <button onClick={() => { setShowMissingCommissionDiagnosis(false); setMissingCommissionDiagnosis(null); }} className={styles.textSub}><X className="w-4 h-4" /></button>
+            </div>
+            <p className={`text-xs ${styles.textSub} mb-3`}>
+              Pembayaran Komisi Mitra/Agen (modul Mitra & Agen) sempat nggak pernah dijurnal sama sekali sejak fitur ini dibikin — cuma nulis Biaya Operasional + mutasi akun langsung, nggak pernah lewat jurnal ganda. Ditambal 11 September 2026 (transaksi baru otomatis kejurnal), tapi histori LAMA di bawah ini perlu di-backfill manual biar Neraca/Buku Besar/Arus Kas akurat. Read-only dulu, belum ada jurnal apapun yang diposting.
+            </p>
+            {missingCommissionDiagnosis.count === 0 ? (
+              <div className={`p-4 rounded-lg ${styles.innerBg} border text-xs ${styles.textSub} flex items-center gap-2`}>
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Nggak ada yang kelewat. Semua pembayaran komisi udah kejurnal.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+                    <p className={`text-[10.5px] ${styles.textSub}`}>Pembayaran kena dampak</p>
+                    <p className={`text-lg font-bold ${styles.textTitle}`}>{missingCommissionDiagnosis.count}</p>
+                  </div>
+                  <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+                    <p className={`text-[10.5px] ${styles.textSub}`}>Total belum kejurnal</p>
+                    <p className="text-lg font-bold text-amber-500">{formatRp(missingCommissionDiagnosis.totalAmount)}</p>
+                  </div>
+                </div>
+                <div className="overflow-x-auto mb-3">
+                  <table className="w-full text-[11px]">
+                    <thead className={styles.tableHeaderBg}>
+                      <tr>
+                        <th className="text-left p-2 font-medium">Mitra/Agen</th>
+                        <th className="text-left p-2 font-medium">Tanggal</th>
+                        <th className="text-right p-2 font-medium">Nominal</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                      {missingCommissionDiagnosis.affected.map(item => (
+                        <tr key={item.paymentId}>
+                          <td className="p-2">{item.partnerName || '-'}</td>
+                          <td className="p-2">{formatDateDDMMYYYY((item.createdAt || '').slice(0, 10))}</td>
+                          <td className="p-2 text-right">{formatRp(item.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  onClick={handleApplyMissingCommissionFix}
+                  disabled={applyingMissingCommissionFix}
+                  className="w-full px-3 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg disabled:opacity-60"
+                >
+                  {applyingMissingCommissionFix ? 'Memproses...' : `Posting Jurnal buat ${missingCommissionDiagnosis.count} Pembayaran Ini`}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {showArReconciliation && arReconciliation && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className={`${styles.cardBg} border rounded-xl max-w-4xl w-full max-h-[85vh] overflow-y-auto p-5`}>
@@ -582,6 +703,23 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
             <p className={`text-xs ${styles.textSub} mb-3`}>
               Bandingin per booking aktif: nilai "Piutang Jamaah" hasil jurnal (yang kepakai di Neraca) vs sisa tagihan live (totalAmount - totalPaid, yang kepakai di tab Piutang & Hutang). Cuma booking yang BEDA yang ditampilin. Diff positif = jurnal kelebihan catat (kemungkinan dobel-posting); diff negatif = jurnal kurang catat (ada yang belum kejurnal). Read-only, belum ada apapun yang diubah.
             </p>
+            {arReconciliation.orphanEntries.length > 0 && (
+              <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 mb-3">
+                <p className="text-xs font-bold text-rose-500 mb-1">Ketemu {arReconciliation.orphanEntries.length} jurnal YATIM PIATU (nempel ke booking yang udah dihapus permanen dari sistem) — total Rp {formatRp(arReconciliation.orphanTotal1201)} nempel di Neraca selamanya kalau nggak dibersihin:</p>
+                <ul className="text-[11px] text-rose-400 list-disc list-inside mb-2 max-h-32 overflow-y-auto">
+                  {arReconciliation.orphanEntries.map(o => (
+                    <li key={o.id}>{o.reference || o.sourceDocId} — {o.description} ({formatRp(o.net1201)})</li>
+                  ))}
+                </ul>
+                <button
+                  onClick={handleRemoveOrphans}
+                  disabled={removingOrphans}
+                  className="w-full px-3 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg disabled:opacity-60"
+                >
+                  {removingOrphans ? 'Memproses...' : `Hapus ${arReconciliation.orphanEntries.length} Jurnal Yatim Piatu Ini`}
+                </button>
+              </div>
+            )}
             {arReconciliation.count === 0 ? (
               <div className={`p-4 rounded-lg ${styles.innerBg} border text-xs ${styles.textSub} flex items-center gap-2`}>
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Nggak ada booking yang beda. Jurnal Piutang Jamaah sudah cocok 1:1 sama live-sum-nya.
@@ -1676,7 +1814,16 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
   const plTotalDpp = plPpnBreakdown.dpp;
   const plTotalPpn = plPpnBreakdown.ppn;
   const plHpp = vendorInPeriod.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-  const plLabaKotor = plOmset - plHpp;
+  // Laba Kotor/Bersih WAJIB dihitung dari plTotalDpp (Omset BERSIH tanpa
+  // PPN), BUKAN plOmset (yang masih termasuk PPN 1,1% titipan negara) —
+  // PPN itu utang ke kantor pajak, bukan pendapatan perusahaan. Pola ini
+  // NYAMBUNG sama jurnal ganda (postRevenueRecognition di journal.js
+  // misahin DPP ke akun 4101 Pendapatan, PPN-nya ke 2401 PPN Keluaran
+  // yang liabilitas) — kalau Laba Kotor/Bersih di sini masih pakai
+  // Omset ber-PPN, angkanya bakal SELALU lebih besar drpd Laba Berjalan
+  // di Neraca (beda sebesar total PPN periode itu), bikin 2 laporan yang
+  // harusnya nyambung malah beda sendiri-sendiri.
+  const plLabaKotor = plTotalDpp - plHpp;
   const plOpex = operationalInPeriod.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const plLabaBersih = plLabaKotor - plOpex;
 
@@ -1847,18 +1994,19 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
         margin: { left: marginX, right: marginX },
         head: [['Komponen', 'Nominal (Rp)']],
         body: [
-          ['Omset (Pendapatan Diakui)', plOmset.toLocaleString('id-ID')],
+          ['Omset Kotor (Pendapatan Diakui, termasuk PPN)', plOmset.toLocaleString('id-ID')],
+          ['PPN Keluaran (titipan negara, BUKAN pendapatan)', `(${plTotalPpn.toLocaleString('id-ID')})`],
+          ['Omset Bersih (DPP)', plTotalDpp.toLocaleString('id-ID')],
           ['HPP / Biaya Vendor', `(${plHpp.toLocaleString('id-ID')})`],
           ['Laba Kotor', plLabaKotor.toLocaleString('id-ID')],
           ['Biaya Operasional Kantor', `(${plOpex.toLocaleString('id-ID')})`],
           ['Laba Bersih', plLabaBersih.toLocaleString('id-ID')],
-          ['Total PPN Terutang (1,1%, sudah termasuk di harga jual)', plTotalPpn.toLocaleString('id-ID')]
         ],
         styles: { fontSize: 9, cellPadding: 2.5 },
         headStyles: { fillColor: [15, 23, 42] },
         columnStyles: { 1: { halign: 'right' } },
         didParseCell: (data) => {
-          if (data.row.index === 4 && data.section === 'body') {
+          if (data.row.index === 6 && data.section === 'body') {
             data.cell.styles.fontStyle = 'bold';
           }
         }
@@ -1978,7 +2126,7 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
           <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
-            <span className={`text-[10px] ${styles.textSub} uppercase`}>Omset (Pemasukan)</span>
+            <span className={`text-[10px] ${styles.textSub} uppercase`}>Omset Kotor (termasuk PPN)</span>
             <p className="text-sm font-bold text-emerald-500 mt-1">Rp {plOmset.toLocaleString('id-ID')}</p>
           </div>
           <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
