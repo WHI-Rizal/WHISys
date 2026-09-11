@@ -396,6 +396,29 @@ export const deleteJournalEntriesBySource = async (source, sourceDocId) => {
   }
 };
 
+// Hapus SEMUA jurnal yang nempel ke 1 booking spesifik yang mau
+// dihapus/DIHAPUS PERMANEN (bukan cuma dibatalkan) — WAJIB dipanggil di
+// SETIAP titik `deleteDoc(doc(db, 'bookings', id))` di BookingsModule.jsx
+// (hapus booking satuan MAUPUN hapus grup), soalnya kalau booking-nya
+// hilang tapi jurnalnya nggak ikut kehapus, Piutang Jamaah di Neraca akan
+// SELAMANYA lebih besar dari total live booking yang ada (nggak ada cara
+// nutupnya lagi dari UI manapun karena booking-nya udah nggak ada buat
+// dijadiin acuan). Nyakup SEMUA source yang pernah nyentuh booking ini
+// sepanjang hidupnya: `booking_created` (piutang awal), `booking_edit_adjustment`
+// (koreksi selisih pas diedit), `booking_reschedule_carryover` (reklas
+// carry-over kalau booking ini adalah booking BARU hasil reschedule), dan
+// `booking_cancel_refund` (kalau sempat dibatalkan sebelum dihapus permanen
+// — sourceDocId-nya `refund_<id>`, BUKAN id booking langsung).
+export const deleteAllJournalEntriesForBooking = async (bookingId) => {
+  if (!bookingId) return;
+  await Promise.all([
+    deleteJournalEntriesBySource('booking_created', bookingId),
+    deleteJournalEntriesBySource('booking_edit_adjustment', bookingId),
+    deleteJournalEntriesBySource('booking_reschedule_carryover', bookingId),
+    deleteJournalEntriesBySource('booking_cancel_refund', `refund_${bookingId}`),
+  ]);
+};
+
 // ---------------------------------------------------------------------
 // Query helper buat modul Laporan Keuangan — baca SEMUA journal_entries,
 // dipakai bareng oleh Jurnal Umum, Buku Besar, Neraca, Arus Kas.
@@ -810,6 +833,56 @@ export const applyMissingBookingJournalsCorrection = async ({ affected, createdB
 };
 
 // ---------------------------------------------------------------------
+// Diagnosa & koreksi Pembayaran Komisi Mitra/Agen (AgentsModule.jsx) yang
+// KESIMPEN tapi jurnalnya BELUM PERNAH keposting sama sekali — beda kasus
+// sama yang di atas (yang itu jurnalnya SEMPAT gagal karena error), ini
+// jurnalnya emang belum pernah dikirim ke journal.js sejak fitur Mitra &
+// Agen ini dibikin (cuma nulis expenses_operational + mutasi akun langsung),
+// sampai ditambal 11 Sep 2026 — lihat catatan lengkap di handlePaySubmit.
+// Nyakup SEMUA histori pembayaran komisi lama yang punya `operationalExpenseId`
+// (berarti emang udah lolos proses simpan, bukan yang gagal duluan).
+// ---------------------------------------------------------------------
+export const diagnoseMissingCommissionJournals = ({ commissionPayments, journalEntries }) => {
+  const journaledExpenseIds = new Set(
+    (journalEntries || []).filter(e => e.source === 'operational_expense').map(e => e.sourceDocId)
+  );
+  const affected = (commissionPayments || [])
+    .filter(p => p.operationalExpenseId && Number(p.amount || 0) > 0)
+    .filter(p => !journaledExpenseIds.has(p.operationalExpenseId))
+    .map(p => ({
+      paymentId: p.id, expenseId: p.operationalExpenseId, partnerName: p.partnerName,
+      amount: Number(p.amount || 0), accountId: p.accountId, accountName: p.accountName,
+      createdAt: p.createdAt,
+    }));
+  const totalAmount = affected.reduce((acc, p) => acc + p.amount, 0);
+  return { affected, totalAmount, count: affected.length };
+};
+
+export const applyMissingCommissionJournalsCorrection = async ({ affected, createdByUid, createdByName }) => {
+  const summary = { corrected: 0, skipped: 0, errors: [] };
+  for (const item of (affected || [])) {
+    try {
+      const existing = await getDocs(query(
+        collection(db, 'journal_entries'),
+        where('source', '==', 'operational_expense'),
+        where('sourceDocId', '==', item.expenseId)
+      ));
+      if (existing.docs.length > 0) { summary.skipped += 1; continue; }
+
+      const posted = await postOperationalExpense({
+        expenseId: item.expenseId, category: 'Komisi Mitra/Agen', amount: item.amount,
+        accountId: item.accountId, accountName: item.accountName,
+        date: item.createdAt || new Date().toISOString(), createdByUid, createdByName
+      });
+      if (posted) summary.corrected += 1; else summary.skipped += 1;
+    } catch (err) {
+      summary.errors.push(`${item.partnerName || item.paymentId}: ${err.message}`);
+    }
+  }
+  return summary;
+};
+
+// ---------------------------------------------------------------------
 // Rekonsiliasi Piutang Jamaah PER BOOKING — dipakai buat nyari tau
 // PERSIS booking mana yang bikin "1201 - Piutang Jamaah" di Neraca beda
 // sama "Total Piutang Jamaah" di tab Piutang & Hutang (yang itu live-sum
@@ -873,7 +946,49 @@ export const diagnoseArReconciliation = ({ bookings, journalEntries }) => {
 
   const totalDiff = mismatches.reduce((acc, m) => acc + m.diff, 0);
 
-  return { mismatches, totalDiff, duplicateBookingCreated, count: mismatches.length };
+  // Deteksi jurnal YATIM PIATU — entry dari source yang nempel ke suatu
+  // booking (`booking_created`, `booking_edit_adjustment`,
+  // `booking_reschedule_carryover`, `booking_cancel_refund`) tapi
+  // booking-nya sendiri udah NGGAK ADA lagi di collection `bookings` (kena
+  // hapus permanen lewat "Hapus Booking"/"Hapus Grup", SEBELUM
+  // deleteAllJournalEntriesForBooking ada — lihat catatan di fungsi itu).
+  // Ini nggak akan pernah kedeteksi sebagai "mismatch" di atas (loop-nya
+  // dari `bookings`, jadi booking yang udah nggak ada otomatis nggak
+  // pernah dicek) — makanya nempel di Neraca SELAMANYA, nggak pernah
+  // nutup sendiri, walau live-sum (ArApTab) udah bener dari awal karena
+  // dia emang cuma liat `bookings` yang MASIH ADA.
+  const BOOKING_LINKED_SOURCES = ['booking_created', 'booking_edit_adjustment', 'booking_reschedule_carryover', 'booking_cancel_refund'];
+  const existingBookingCodes = new Set((bookings || []).map(b => b.bookingCode).filter(Boolean));
+  const orphanEntries = (journalEntries || [])
+    .filter(e => BOOKING_LINKED_SOURCES.includes(e.source))
+    .filter(e => e.reference && !existingBookingCodes.has(e.reference))
+    .map(e => {
+      const net1201 = (e.lines || [])
+        .filter(l => l.accountCode === ACC.PIUTANG_JAMAAH)
+        .reduce((acc, l) => acc + (Number(l.debit) || 0) - (Number(l.credit) || 0), 0);
+      return { id: e.id, source: e.source, sourceDocId: e.sourceDocId, reference: e.reference, date: e.date, description: e.description, net1201 };
+    })
+    .sort((a, b) => Math.abs(b.net1201) - Math.abs(a.net1201));
+  const orphanTotal1201 = orphanEntries.reduce((acc, o) => acc + o.net1201, 0);
+
+  return { mismatches, totalDiff, duplicateBookingCreated, orphanEntries, orphanTotal1201, count: mismatches.length };
+};
+
+// Koreksi KHUSUS buat jurnal yatim piatu yang kedetek di atas (booking
+// sumbernya udah dihapus permanen) — hapus entry-entry itu langsung by id.
+// Aman diulang (kalau id-nya udah nggak ada, getDoc-nya bakal gagal-diam
+// lewat try/catch per item, nggak nge-gagalin yang lain).
+export const removeOrphanBookingJournalEntries = async ({ orphanEntries }) => {
+  const summary = { deleted: 0, errors: [] };
+  for (const item of (orphanEntries || [])) {
+    try {
+      await deleteDoc(doc(db, 'journal_entries', item.id));
+      summary.deleted += 1;
+    } catch (err) {
+      summary.errors.push(`${item.reference || item.sourceDocId}: ${err.message}`);
+    }
+  }
+  return summary;
 };
 
 // Koreksi KHUSUS buat kasus dobel-posting `booking_created` yang kedetek
