@@ -284,11 +284,16 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   // Finance & Super Admin doang di atas).
   const canRecordPayment = true;
 
-  // TC/Sales sekarang dibolehkan EDIT booking yang MEREKA SENDIRI yang buat
-  // dulunya — bukan bebas edit punya siapa aja (itu tetap eksklusif Finance
-  // & Super Admin, lihat canManageBookings di atas). Kepemilikan dicek dari
-  // field createdByUid yang dicatat otomatis pas booking dibuat. Buat data
-  // LAMA yang belum punya field itu (dibuat sebelum fitur ini ada),
+  // TC/Sales BUKAN "edit bebas" — Edit Booking penuh (ganti data jamaah,
+  // room/bus, biaya tambahan/diskon, closing source, dst) tetap eksklusif
+  // Finance & Super Admin (canManageBookings di atas), itu yang megang
+  // keputusan soal uang & data customer. canEditOwnBooking/canEditOwnGroup di
+  // bawah ini SEKARANG cuma dipakai buat 1 hal doang: nentuin siapa yang
+  // boleh nambah PESERTA BARU (nyusul) ke booking/grup itu — lihat tombol
+  // "Tambah Peserta" & handleAddPaxToGroup. TC/Sales boleh nambah peserta ke
+  // booking yang MEREKA SENDIRI yang bikin dulunya, nggak bisa ke booking
+  // orang lain. Kepemilikan dicek dari field createdByUid yang dicatat
+  // otomatis pas booking dibuat. Buat data LAMA yang belum punya field itu,
   // fallback-nya cocokkan closingSourceName booking itu sama nama staff yang
   // lagi login — asumsinya TC/Sales nyatet closingan atas nama dirinya sendiri.
   const canEditOwnBooking = (item) => {
@@ -305,7 +310,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
 
   // Versi buat GRUP (rombongan) — semua pax dalam grup itu harus lolos cek
   // kepemilikan di atas, biar nggak ada 1-2 pax "nyempil" punya orang lain
-  // ikut keedit bareng pas TC/Sales edit grupnya.
+  // ikut kena akses pas TC/Sales mau nambah peserta ke grupnya.
   const canEditOwnGroup = (group) => {
     if (canManageBookings) return true;
     if (!group || !Array.isArray(group.items) || group.items.length === 0) return false;
@@ -1091,8 +1096,13 @@ Terimakasih🙏`;
   };
 
   const handleOpenEditModal = async (item) => {
-    if (!canEditOwnBooking(item)) {
-      alert("Cuma Finance & Super Admin, atau TC/Sales yang bikin booking ini sendiri, yang boleh mengedit booking.");
+    // Edit Booking (form penuh: identitas jamaah, room/bus, biaya
+    // tambahan/diskon, closing source, dst) tetap eksklusif Finance & Super
+    // Admin. TC/Sales yang mau nambah peserta ke booking/grup miliknya
+    // sendiri pakai tombol "Tambah Peserta" (handleOpenGroupEditModal), bukan
+    // form ini.
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh mengedit booking. TC/Sales cuma bisa menambah peserta baru lewat tombol \"Tambah Peserta\".");
       return;
     }
     setEditingBookingId(item.id);
@@ -2390,12 +2400,15 @@ Terimakasih🙏`;
   };
 
   // ---- 2b. Tambah Peserta Baru ke grup yang sudah ada (nyusul belakangan) ----
+  // Finance/Super Admin bebas ke grup manapun; TC/Sales cuma boleh ke grup
+  // yang mereka sendiri yang bikin (canEditOwnGroup) — beda sama edit data
+  // grup (harga/paket/biaya tambahan) yang tetap eksklusif Finance/Super
+  // Admin lewat handleGroupEditSubmit di bawah.
   const handleAddPaxToGroup = async () => {
-    if (!canManageBookings) {
-      alert("Cuma Finance & Super Admin yang boleh mengedit booking.");
+    if (!groupEditTarget || !canEditOwnGroup(groupEditTarget)) {
+      alert("Cuma Finance & Super Admin, atau TC/Sales yang bikin booking ini sendiri, yang boleh menambah peserta.");
       return;
     }
-    if (!groupEditTarget) return;
     if (!addPaxForm.jamaahId) {
       alert("Pilih Data Master Jamaah untuk peserta baru ini, atau tambah jamaah baru.");
       return;
@@ -2526,8 +2539,13 @@ Terimakasih🙏`;
   const handleGroupEditSubmit = async (e) => {
     e.preventDefault();
     if (!groupEditTarget) return;
-    if (!canEditOwnGroup(groupEditTarget)) {
-      alert("Cuma Finance & Super Admin, atau TC/Sales yang bikin booking ini sendiri, yang boleh mengedit booking.");
+    // Edit data grup (paket/harga/biaya tambahan/diskon/setoran) tetap
+    // eksklusif Finance & Super Admin — TC/Sales cuma dikasih akses "Tambah
+    // Peserta" (handleAddPaxToGroup di atas), bukan form ini. Form ini
+    // sendiri disembunyikan dari TC/Sales di JSX, jadi cek ini jaga-jaga
+    // (defense in depth) kalau entah gimana caranya handler ini kepanggil.
+    if (!canManageBookings) {
+      alert("Cuma Finance & Super Admin yang boleh mengedit data booking (paket/harga/biaya tambahan). TC/Sales cuma bisa menambah peserta baru lewat form di atasnya.");
       return;
     }
     if (!groupEditForm.packageId) {
@@ -4098,8 +4116,10 @@ Terimakasih🙏`;
           alert('Paket nggak bisa diganti lewat Edit Booking. Pakai tombol "Reschedule" (Finance/Super Admin) buat pindah paket.');
           return;
         }
-        if (!canEditOwnBooking(currentBooking)) {
-          alert("Cuma Finance & Super Admin, atau TC/Sales yang bikin booking ini sendiri, yang boleh mengedit booking.");
+        // Defense in depth — sinkron sama gate di handleOpenEditModal: form
+        // Edit Booking penuh ini eksklusif Finance & Super Admin.
+        if (!canManageBookings) {
+          alert("Cuma Finance & Super Admin yang boleh mengedit booking.");
           return;
         }
         if (paymentVal > 0 && isPaymentDateBeforeBooking(formData.paymentDate, currentBooking?.createdAt)) {
@@ -4727,16 +4747,19 @@ Terimakasih🙏`;
               <History className="w-3.5 h-3.5" /> Riwayat Pembayaran
             </button>
 
-            {/* 2. EDIT BOOKING (GRUP) — Finance/Super Admin bebas, TC/Sales
-                cuma buat grup yang mereka sendiri yang bikin (semua pax di
-                grup ini kudu lolos cek kepemilikan). */}
+            {/* 2. EDIT BOOKING (GRUP) — buka modal yang sama buat Finance/Super
+                Admin maupun TC/Sales, tapi isinya beda: Finance/Super Admin
+                bebas edit data bersama grup (paket/harga/biaya tambahan) DAN
+                nambah peserta baru; TC/Sales yang buka grup miliknya sendiri
+                cuma dikasih bagian "Tambah Peserta" doang (form data grup di
+                bawahnya disembunyikan buat mereka, lihat modal-nya). */}
             {canEditOwnGroup(activeGroupSummary) && (
               <button
                 onClick={() => handleOpenGroupEditModal(activeGroupSummary)}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium transition-colors"
-                title="Edit Data Bersama Seluruh Peserta di Grup Ini"
+                title={canManageBookings ? "Edit Data Bersama Seluruh Peserta di Grup Ini" : "Tambah Peserta Baru ke Grup Ini"}
               >
-                <Edit className="w-3.5 h-3.5" /> Edit
+                {canManageBookings ? (<><Edit className="w-3.5 h-3.5" /> Edit</>) : (<><UserPlus className="w-3.5 h-3.5" /> Tambah Peserta</>)}
               </button>
             )}
 
@@ -4923,11 +4946,12 @@ Terimakasih🙏`;
                                 </button>
                               )}
 
-                              {canEditOwnBooking(item) && (
+                              {canManageBookings && (
                                 <>
-                                  {/* TOMBOL EDIT BOOKING — Finance/Super Admin bebas,
-                                      TC/Sales cuma buat booking yang mereka sendiri
-                                      yang bikin. */}
+                                  {/* TOMBOL EDIT BOOKING (data penuh: identitas,
+                                      room/bus, biaya tambahan/diskon, dst) — eksklusif
+                                      Finance/Super Admin. TC/Sales pakai tombol "Tambah
+                                      Peserta" di header grup buat nambah peserta baru. */}
                                   <button
                                     onClick={() => handleOpenEditModal(item)}
                                     className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
@@ -5078,7 +5102,7 @@ Terimakasih🙏`;
                       </button>
                     )}
 
-                    {canEditOwnBooking(item) && (
+                    {canManageBookings && (
                       <button
                         onClick={() => handleOpenEditModal(item)}
                         className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
@@ -6849,14 +6873,20 @@ Terimakasih🙏`;
             </button>
 
             <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
-              <Edit className="w-5 h-5 text-emerald-500" /> Edit Booking Grup
+              {canManageBookings ? (<><Edit className="w-5 h-5 text-emerald-500" /> Edit Booking Grup</>) : (<><UserPlus className="w-5 h-5 text-emerald-500" /> Tambah Peserta ke Grup</>)}
             </h3>
             <p className={`text-xs ${styles.textSub} mb-4`}>
               Kode: <span className="font-mono text-emerald-500">{groupEditTarget.code}</span> • {groupEditTarget.paxCount} Pax
             </p>
-            <div className={`${styles.innerBg} p-3 rounded-lg border text-[11px] mb-4`}>
-              Perubahan di sini berlaku ke SEMUA peserta yang statusnya masih aktif di grup ini. Identitas peserta (nama/jamaah) nggak diubah dari sini — pakai Edit Booking per-peserta kalau cuma 1 orang yang perlu diganti datanya.
-            </div>
+            {canManageBookings ? (
+              <div className={`${styles.innerBg} p-3 rounded-lg border text-[11px] mb-4`}>
+                Perubahan di sini berlaku ke SEMUA peserta yang statusnya masih aktif di grup ini. Identitas peserta (nama/jamaah) nggak diubah dari sini — pakai Edit Booking per-peserta kalau cuma 1 orang yang perlu diganti datanya.
+              </div>
+            ) : (
+              <div className={`${styles.innerBg} p-3 rounded-lg border text-[11px] mb-4`}>
+                Sebagai TC/Sales, dari sini kamu cuma bisa <strong>menambah peserta baru</strong> ke grup ini. Ganti paket, harga, biaya tambahan/diskon, atau data setoran tetap harus lewat Finance/Super Admin.
+              </div>
+            )}
 
             {/* TAMBAH PESERTA BARU — buat peserta yang nyusul belakangan, biar
                 nggak perlu bikin kode booking baru terpisah. Tetap bisa dipakai
@@ -6961,6 +6991,12 @@ Terimakasih🙏`;
               </button>
             </div>
 
+            {/* Form data bersama grup (paket/pemesan/kamar/bus/biaya tambahan/
+                setoran) — eksklusif Finance & Super Admin. TC/Sales cuma
+                lihat bagian "Tambah Peserta" di atas, form ini disembunyikan
+                buat mereka sepenuhnya (bukan cuma disabled), biar nggak
+                menyesatkan seolah-olah bisa mereka isi. */}
+            {canManageBookings && (
             <form onSubmit={handleGroupEditSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
                 <label className="block mb-1 font-medium">Pilih Paket Travel</label>
@@ -7346,6 +7382,15 @@ Terimakasih🙏`;
                 </button>
               </div>
             </form>
+            )}
+
+            {!canManageBookings && (
+              <div className={`pt-3 flex justify-end border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowGroupEditModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg text-xs`}>
+                  Tutup
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
