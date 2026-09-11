@@ -287,34 +287,30 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   // TC/Sales BUKAN "edit bebas" — Edit Booking penuh (ganti data jamaah,
   // room/bus, biaya tambahan/diskon, closing source, dst) tetap eksklusif
   // Finance & Super Admin (canManageBookings di atas), itu yang megang
-  // keputusan soal uang & data customer. canEditOwnBooking/canEditOwnGroup di
-  // bawah ini SEKARANG cuma dipakai buat 1 hal doang: nentuin siapa yang
-  // boleh nambah PESERTA BARU (nyusul) ke booking/grup itu — lihat tombol
-  // "Tambah Peserta" & handleAddPaxToGroup. TC/Sales boleh nambah peserta ke
-  // booking yang MEREKA SENDIRI yang bikin dulunya, nggak bisa ke booking
-  // orang lain. Kepemilikan dicek dari field createdByUid yang dicatat
-  // otomatis pas booking dibuat. Buat data LAMA yang belum punya field itu,
-  // fallback-nya cocokkan closingSourceName booking itu sama nama staff yang
-  // lagi login — asumsinya TC/Sales nyatet closingan atas nama dirinya sendiri.
-  const canEditOwnBooking = (item) => {
-    if (canManageBookings) return true;
-    if (!isSales && !isOperational) return false;
-    if (!item) return false;
-    const myUid = currentUser?.uid || '';
-    if (myUid && item.createdByUid && item.createdByUid === myUid) return true;
-    const myName = (currentUser?.fullName || '').trim().toLowerCase();
-    const closingName = (item.closingSourceName || '').trim().toLowerCase();
-    if (myName && closingName && myName === closingName) return true;
-    return false;
-  };
-
-  // Versi buat GRUP (rombongan) — semua pax dalam grup itu harus lolos cek
-  // kepemilikan di atas, biar nggak ada 1-2 pax "nyempil" punya orang lain
-  // ikut kena akses pas TC/Sales mau nambah peserta ke grupnya.
+  // keputusan soal uang & data customer. `canAddParticipant` di bawah ini
+  // SEKARANG cuma dipakai buat 1 hal doang: nentuin siapa yang boleh nambah
+  // PESERTA BARU (nyusul) ke booking/grup — lihat tombol "Tambah Peserta" &
+  // handleAddPaxToGroup.
+  //
+  // CATATAN: sebelumnya ini dibatasin cuma ke grup yang staff itu SENDIRI
+  // yang bikin (dicek dari createdByUid, fallback cocokkan nama closingSourceName).
+  // Itu keliatan bagus di atas kertas, tapi di lapangan rawan false-negative:
+  // dokumen akun staf lama kadang nggak punya field `uid` lengkap, dan nama
+  // "Sumber Closing" hasil pilihan dropdown Data Master TC/Sales sering beda
+  // ejaan dikit sama nama akun login mereka sendiri — akibatnya tombolnya
+  // nggak muncul sama sekali walau itu booking mereka sendiri (dilaporin
+  // user 11 Sep 2026). Karena bikin booking BARU & registrasi grup baru
+  // emang udah kebuka bebas buat semua staf login dari awal (lihat
+  // Firestore Rules `bookings`: create dibuka ke isLoggedIn()), nambah 1
+  // peserta ke grup yang UDAH ada itu resikonya sepadan — jadi dibuka ke
+  // SEMUA Sales/Operational buat grup MANAPUN, nggak lagi digembok
+  // kepemilikan. Yang tetap digembok ketat cuma Edit Booking PENUH
+  // (harga/paket/biaya tambahan) — itu tetap Finance/Super Admin doang.
+  const canAddParticipant = canManageBookings || isSales || isOperational;
   const canEditOwnGroup = (group) => {
-    if (canManageBookings) return true;
+    if (!canAddParticipant) return false;
     if (!group || !Array.isArray(group.items) || group.items.length === 0) return false;
-    return group.items.every(item => canEditOwnBooking(item));
+    return true;
   };
 
   const isDark = theme === 'dark';
@@ -1098,9 +1094,8 @@ Terimakasih🙏`;
   const handleOpenEditModal = async (item) => {
     // Edit Booking (form penuh: identitas jamaah, room/bus, biaya
     // tambahan/diskon, closing source, dst) tetap eksklusif Finance & Super
-    // Admin. TC/Sales yang mau nambah peserta ke booking/grup miliknya
-    // sendiri pakai tombol "Tambah Peserta" (handleOpenGroupEditModal), bukan
-    // form ini.
+    // Admin. TC/Sales yang mau nambah peserta ke booking/grup manapun pakai
+    // tombol "Tambah Peserta" (handleOpenGroupEditModal), bukan form ini.
     if (!canManageBookings) {
       alert("Cuma Finance & Super Admin yang boleh mengedit booking. TC/Sales cuma bisa menambah peserta baru lewat tombol \"Tambah Peserta\".");
       return;
@@ -2366,7 +2361,7 @@ Terimakasih🙏`;
   // Tipe Kamar, Alokasi Bus. Identitas peserta TETAP di Edit per-peserta.
   const handleOpenGroupEditModal = (group) => {
     if (!canEditOwnGroup(group)) {
-      alert("Cuma Finance & Super Admin, atau TC/Sales yang bikin booking ini sendiri, yang boleh mengedit booking.");
+      alert("Cuma Finance, Super Admin, TC, atau Sales yang boleh mengakses ini.");
       return;
     }
     setGroupEditTarget(group);
@@ -2400,13 +2395,13 @@ Terimakasih🙏`;
   };
 
   // ---- 2b. Tambah Peserta Baru ke grup yang sudah ada (nyusul belakangan) ----
-  // Finance/Super Admin bebas ke grup manapun; TC/Sales cuma boleh ke grup
-  // yang mereka sendiri yang bikin (canEditOwnGroup) — beda sama edit data
-  // grup (harga/paket/biaya tambahan) yang tetap eksklusif Finance/Super
-  // Admin lewat handleGroupEditSubmit di bawah.
+  // Finance/Super Admin/TC/Sales semua boleh, ke grup MANAPUN (nggak digembok
+  // kepemilikan lagi, lihat canAddParticipant) — beda sama edit data grup
+  // (harga/paket/biaya tambahan) yang tetap eksklusif Finance/Super Admin
+  // lewat handleGroupEditSubmit di bawah.
   const handleAddPaxToGroup = async () => {
     if (!groupEditTarget || !canEditOwnGroup(groupEditTarget)) {
-      alert("Cuma Finance & Super Admin, atau TC/Sales yang bikin booking ini sendiri, yang boleh menambah peserta.");
+      alert("Cuma Finance, Super Admin, TC, atau Sales yang boleh menambah peserta.");
       return;
     }
     if (!addPaxForm.jamaahId) {
@@ -2500,9 +2495,9 @@ Terimakasih🙏`;
         totalPaid: 0,
         paymentStatus: 'Belum Bayar',
         documents: emptyDocChecklist,
-        // Ikutin kepemilikan pax pertama di grup ini (kalau ada) — biar grup
-        // ini tetap konsisten kepemilikannya buat cek canEditOwnGroup (semua
-        // pax dalam 1 grup kudu "milik" orang yang sama).
+        // Ikutin jejak audit "dibuat oleh" pax pertama di grup ini (kalau
+        // ada) — murni buat konsistensi log aktivitas, BUKAN buat cek akses
+        // lagi (canEditOwnGroup sekarang nggak gembok kepemilikan).
         createdByUid: groupEditTarget.primary?.createdByUid || '',
         createdByName: groupEditTarget.primary?.createdByName || '',
         // Sumber Lead ikutin punya grupnya (pax pertama) — 1 closing = 1 sumber lead yang sama.
@@ -4282,10 +4277,10 @@ Terimakasih🙏`;
             closingSourceId: formData.closingSourceId || '',
             closingSourceName: formData.closingSourceName || '',
             leadSource: resolveLeadSource(formData),
-            // Dicatat otomatis pas booking dibuat — dipakai buat nentuin siapa
-            // yang boleh Edit booking ini belakangan kalau yang bikin TC/Sales
-            // (lihat canEditOwnBooking di atas: Finance/Super Admin tetap bebas
-            // edit siapa aja, TC/Sales cuma booking bikinan sendiri).
+            // Dicatat otomatis pas booking dibuat — dipakai buat log aktivitas &
+            // jejak audit siapa yang bikin booking ini (BUKAN lagi buat gembok
+            // akses "Tambah Peserta", itu sekarang dibuka ke semua Sales/
+            // Operational, lihat canAddParticipant di atas).
             createdByUid: currentUser?.uid || '',
             createdByName: currentUser?.fullName || currentUser?.email || '',
               // Waktu Transaksi booking ikut field tanggal yang diisi staff pas
@@ -4410,8 +4405,7 @@ Terimakasih🙏`;
               closingSourceId: formData.closingSourceId || '',
               closingSourceName: formData.closingSourceName || '',
               leadSource: resolveLeadSource(formData),
-              // Sama kayak alur 1 pax — dipakai buat cek kepemilikan pas
-              // TC/Sales mau Edit booking ini belakangan (canEditOwnBooking).
+              // Sama kayak alur 1 pax — jejak audit siapa yang bikin booking ini.
               createdByUid: currentUser?.uid || '',
               createdByName: currentUser?.fullName || currentUser?.email || '',
                   // Sama kayak alur 1 pax — Waktu Transaksi ikut field tanggal
@@ -4750,9 +4744,11 @@ Terimakasih🙏`;
             {/* 2. EDIT BOOKING (GRUP) — buka modal yang sama buat Finance/Super
                 Admin maupun TC/Sales, tapi isinya beda: Finance/Super Admin
                 bebas edit data bersama grup (paket/harga/biaya tambahan) DAN
-                nambah peserta baru; TC/Sales yang buka grup miliknya sendiri
-                cuma dikasih bagian "Tambah Peserta" doang (form data grup di
-                bawahnya disembunyikan buat mereka, lihat modal-nya). */}
+                nambah peserta baru ke grup manapun; TC/Sales boleh buka grup
+                MANAPUN juga (nggak digembok kepemilikan lagi, lihat
+                canAddParticipant) tapi cuma dikasih bagian "Tambah Peserta"
+                doang (form data grup di bawahnya disembunyikan buat mereka,
+                lihat modal-nya). */}
             {canEditOwnGroup(activeGroupSummary) && (
               <button
                 onClick={() => handleOpenGroupEditModal(activeGroupSummary)}
