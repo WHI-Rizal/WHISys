@@ -11,7 +11,7 @@ import { logActivity } from '../../lib/activityLog';
 import { calculatePPN } from '../../lib/ppn';
 import {
   postIncomePayment, postDepositTopup, postVendorBillCreated, postVendorPayment,
-  postOperationalExpense,
+  postOperationalExpense, postVendorDepositConversion,
   deleteJournalEntriesBySource
 } from '../../lib/journal';
 
@@ -346,7 +346,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // Vendor yang DP-nya batal dipakai (trip cancel) tapi nggak hangus.
   const [showConvertDepositModal, setShowConvertDepositModal] = useState(false);
   const [convertingPayment, setConvertingPayment] = useState(null);
-  const [convertForm, setConvertForm] = useState({ vendorId: '', amount: '', notes: '' });
+  const [convertForm, setConvertForm] = useState({ vendorId: '', amount: '', notes: '', selisihAccount: 'hpp' });
 
   // Modal "Tambah/Koreksi Saldo Deposit Vendor" manual — dipakai buat input
   // saldo yang udah ada dari sebelumnya (migrasi data lama), atau koreksi
@@ -885,7 +885,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     setConvertForm({
       vendorId: matchedVendor?.id || '',
       amount: vp.amount,
-      notes: `Konversi DP batal - ${vp.category} (${vp.packageName || '-'})`
+      notes: `Konversi DP batal - ${vp.category} (${vp.packageName || '-'})`,
+      selisihAccount: 'hpp'
     });
     setShowConvertDepositModal(true);
   };
@@ -896,13 +897,20 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       alert("Pilih vendor tujuan saldo depositnya dulu.");
       return;
     }
+    const originalAmount = Number(convertingPayment?.amount || 0);
     const amountVal = Number(convertForm.amount || 0);
     if (amountVal <= 0) {
       alert("Isi nominal yang valid (lebih dari 0).");
       return;
     }
+    if (amountVal > originalAmount) {
+      alert(`Nominal yang di-roll-over (Rp ${amountVal.toLocaleString('id-ID')}) nggak boleh lebih besar dari pembayaran aslinya (Rp ${originalAmount.toLocaleString('id-ID')}).`);
+      return;
+    }
+    const selisihVal = originalAmount - amountVal;
     try {
       const vendor = vendorsList.find(v => v.id === convertForm.vendorId);
+      const nowIso = new Date().toISOString();
       // CATATAN: konversi ini SENGAJA nggak nyentuh saldo akun Kas/Bank —
       // uang DP-nya emang udah beneran keluar dari kas pas dibayar dulu.
       // Konversi cuma nyatet bahwa vendor sekarang "berutang" jasa senilai
@@ -914,17 +922,34 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         'refund_conversion',
         convertForm.notes,
         convertingPayment?.packageName || convertingPayment?.category || '',
-        new Date().toISOString()
+        nowIso
       );
+      // Jurnal: keluarkan nominal ASLI dari Biaya Dibayar Dimuka (paket yang
+      // batal ini nggak lagi "berhutang" biaya itu) — porsi yang di-roll-over
+      // pindah jadi aset Piutang Deposit Vendor (bisa dipakai lagi), sisanya
+      // (selisih, kalau ada) LANGSUNG diakui sebagai beban sekarang, bukan
+      // nunggu paketnya "Akui Pendapatan" (soalnya kreditnya emang udah
+      // nggak balik lagi ke paket yang batal itu).
+      await postVendorDepositConversion({
+        paymentId: convertingPayment.id, vendorName: convertingPayment?.vendorName,
+        packageName: convertingPayment?.packageName, originalAmount, rolloverAmount: amountVal,
+        selisihAccount: convertForm.selisihAccount, date: nowIso,
+        createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => {
+        console.error('Gagal posting jurnal konversi DP vendor:', err);
+        alert(`Konversi ke Saldo Deposit Vendor berhasil, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar/Laba Rugi) untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance, atau tambahkan Jurnal Manual di Laporan Keuangan → Jurnal Umum.`);
+      });
       await updateDoc(doc(db, 'payments_vendor', convertingPayment.id), {
         convertedToDeposit: true,
         convertedAmount: amountVal,
+        convertedSelisihAmount: selisihVal,
+        convertedSelisihAccount: convertForm.selisihAccount,
         convertedToVendorId: convertForm.vendorId,
-        convertedAt: new Date().toISOString()
+        convertedAt: nowIso
       });
       setShowConvertDepositModal(false);
       setConvertingPayment(null);
-      setConvertForm({ vendorId: '', amount: '', notes: '' });
+      setConvertForm({ vendorId: '', amount: '', notes: '', selisihAccount: 'hpp' });
       fetchData();
     } catch (err) {
       alert("Gagal mengonversi ke Saldo Deposit: " + err.message);
@@ -1044,7 +1069,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       return;
     }
     if (vp.convertedToDeposit) {
-      if (!confirm(`PERHATIAN: transaksi ini udah pernah dikonversi jadi Saldo Deposit Vendor (Rp ${Number(vp.convertedAmount || 0).toLocaleString('id-ID')}). Menghapus catatan aslinya TIDAK otomatis narik balik saldo deposit yang udah kebentuk itu. Kalau emang mau dikoreksi, sesuaikan juga saldo deposit vendornya secara manual. Tetap lanjut hapus?`)) return;
+      if (!confirm(`PERHATIAN: transaksi ini udah pernah dikonversi jadi Saldo Deposit Vendor (Rp ${Number(vp.convertedAmount || 0).toLocaleString('id-ID')}${vp.convertedSelisihAmount > 0 ? `, selisih Rp ${Number(vp.convertedSelisihAmount).toLocaleString('id-ID')} udah keakui sebagai beban` : ''}). Jurnal konversinya bakal ikut dihapus otomatis, TAPI saldo deposit vendor yang udah kebentuk (Rp ${Number(vp.convertedAmount || 0).toLocaleString('id-ID')}) TIDAK otomatis ditarik balik. Kalau emang mau dikoreksi, sesuaikan juga saldo deposit vendornya secara manual. Tetap lanjut hapus?`)) return;
     } else {
       if (!confirm("Apakah Anda yakin ingin menghapus catatan pengeluaran vendor ini?")) return;
     }
@@ -1070,6 +1095,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         }
       }
       await deleteJournalEntriesBySource('vendor_payment', vp.id);
+      if (vp.convertedToDeposit) {
+        // Ikut hapus jurnal konversi DP-batal-ke-deposit-nya juga (kalau
+        // ada) — lihat postVendorDepositConversion di journal.js. Saldo
+        // deposit vendor yang udah kebentuk TETAP nggak otomatis ditarik
+        // balik (sama kayak sebelumnya), staf perlu koreksi manual sendiri.
+        await deleteJournalEntriesBySource('vendor_deposit_conversion', vp.id);
+      }
       logActivity({
         userId: currentUser?.uid,
         userName: currentUser?.fullName || currentUser?.email,
@@ -3143,7 +3175,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
               <RotateCcw className="w-5 h-5 text-emerald-500" /> Konversi ke Saldo Deposit Vendor
             </h3>
             <p className={`text-[10.5px] ${styles.textSub} mb-4`}>
-              Transaksi asli (Rp {Number(convertingPayment.amount || 0).toLocaleString('id-ID')} ke {convertingPayment.vendorName}) TETAP tercatat apa adanya — konversi ini cuma nambahin kredit ke vendor terkait, nggak menyentuh saldo Kas/Bank (uangnya emang udah keluar duluan).
+              Transaksi asli (Rp {Number(convertingPayment.amount || 0).toLocaleString('id-ID')} ke {convertingPayment.vendorName}) tetap tercatat apa adanya — konversi ini nggak menyentuh saldo Kas/Bank (uangnya emang udah keluar duluan). Yang berubah cuma statusnya di Laporan Keuangan: nominal yang di-roll-over pindah dari HPP/Biaya Dibayar Dimuka paket ini jadi Piutang Deposit Vendor (aset, bisa dipakai lagi), dan langsung dicatat ke Jurnal Umum saat ini juga.
             </p>
             <form onSubmit={handleConvertSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
@@ -3164,15 +3196,38 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 )}
               </div>
               <div>
-                <label className="block mb-1 font-medium">Nominal yang Dikonversi (Rp)</label>
+                <label className="block mb-1 font-medium">Nominal yang Bisa Di-roll-over jadi Saldo Deposit (Rp)</label>
                 <input
                   type="number" required
+                  max={Number(convertingPayment.amount || 0)}
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                   value={convertForm.amount}
                   onChange={e => setConvertForm({ ...convertForm, amount: e.target.value })}
                 />
-                <p className="text-[10px] mt-1 opacity-70">Default-nya sama kayak nominal DP aslinya, tapi bisa disesuaikan kalau cuma sebagian yang nggak hangus.</p>
+                <p className="text-[10px] mt-1 opacity-70">Default-nya sama kayak nominal DP aslinya, tapi bisa disesuaikan kalau cuma sebagian yang nggak hangus (nggak boleh lebih besar dari Rp {Number(convertingPayment.amount || 0).toLocaleString('id-ID')}).</p>
               </div>
+              {(() => {
+                const selisihPreview = Math.max(0, Number(convertingPayment.amount || 0) - Number(convertForm.amount || 0));
+                if (selisihPreview <= 0) return null;
+                return (
+                  <div className={`${styles.innerBg} p-3 rounded-lg border space-y-2.5`}>
+                    <p className="text-[11px] font-semibold text-amber-500">
+                      Selisih Rp {selisihPreview.toLocaleString('id-ID')} nggak ikut di-roll-over (hangus/kena biaya pembatalan-reschedule) — langsung diakui sebagai beban sekarang.
+                    </p>
+                    <div>
+                      <label className="block mb-1 font-medium">Selisih Ini Dicatat Sebagai</label>
+                      <select
+                        className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                        value={convertForm.selisihAccount}
+                        onChange={e => setConvertForm({ ...convertForm, selisihAccount: e.target.value })}
+                      >
+                        <option value="hpp">HPP Paket yang Batal ({convertingPayment.packageName || convertingPayment.category || '-'})</option>
+                        <option value="penalty">Akun Terpisah: Biaya Penalty/Materialized</option>
+                      </select>
+                    </div>
+                  </div>
+                );
+              })()}
               <div>
                 <label className="block mb-1 font-medium">Catatan</label>
                 <input
