@@ -902,14 +902,22 @@ export const applyMissingCommissionJournalsCorrection = async ({ affected, creat
 // positif) buat booking itu spesifik.
 export const diagnoseArReconciliation = ({ bookings, journalEntries }) => {
   const journalNetByRef = {};
+  const journalEntriesByRef = {};
   (journalEntries || []).forEach(e => {
     const ref = e.reference || '';
     if (!ref) return;
     (e.lines || []).forEach(l => {
       if (l.accountCode !== ACC.PIUTANG_JAMAAH) return;
       journalNetByRef[ref] = (journalNetByRef[ref] || 0) + (Number(l.debit) || 0) - (Number(l.credit) || 0);
+      if (!journalEntriesByRef[ref]) journalEntriesByRef[ref] = [];
+      journalEntriesByRef[ref].push({
+        id: e.id, source: e.source, sourceDocId: e.sourceDocId, date: e.date,
+        description: e.description, debit: Number(l.debit) || 0, credit: Number(l.credit) || 0,
+        isManual: !!e.isManual, isReversal: !!e.isReversal,
+      });
     });
   });
+  Object.values(journalEntriesByRef).forEach(list => list.sort((a, b) => (a.date || '').localeCompare(b.date || '')));
 
   // Deteksi eksplisit dobel-posting `booking_created` (2+ entry dengan
   // source+sourceDocId PERSIS sama) — ini indikator paling gamblang ada
@@ -939,6 +947,7 @@ export const diagnoseArReconciliation = ({ bookings, journalEntries }) => {
         bookingId: b.id, bookingCode: b.bookingCode, jamaahName: b.jamaahName,
         totalAmount: Number(b.totalAmount || 0), totalPaid: Number(b.totalPaid || 0),
         liveOutstanding, journalNet, diff, isDuplicate,
+        entries: journalEntriesByRef[b.bookingCode] || [],
       };
     })
     .filter(item => Math.abs(item.diff) > 1)
@@ -989,6 +998,22 @@ export const removeOrphanBookingJournalEntries = async ({ orphanEntries }) => {
     }
   }
   return summary;
+};
+
+// Hapus 1 entry jurnal SPESIFIK by id — dipakai dari modal Rekonsiliasi
+// Piutang per Booking, buat kasus dobel-posting yang bukan `booking_created`
+// (misal `booking_edit_adjustment` keposting dua kali gara-gara staf
+// nge-submit ulang form Edit Grup sebelum data ke-refresh). BEDA sama
+// `removeDuplicateBookingCreatedEntries` yang otomatis nentuin mana yang
+// dihapus (karena `booking_created` SELALU cuma boleh ada 1 per booking) —
+// `booking_edit_adjustment` sebaliknya SAH kalau ada lebih dari 1 (tiap
+// booking diedit ulang bikin entry baru), jadi mana yang "dobel" vs
+// "legitimate edit ke-2/3" itu harus dicek manual satu-satu dulu (lihat
+// rincian jurnal per booking di modal), makanya hapusnya per-id, bukan
+// otomatis kayak booking_created.
+export const deleteJournalEntryById = async (entryId) => {
+  if (!entryId) return;
+  await deleteDoc(doc(db, 'journal_entries', entryId));
 };
 
 // Koreksi KHUSUS buat kasus dobel-posting `booking_created` yang kedetek
