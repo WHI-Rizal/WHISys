@@ -1912,7 +1912,10 @@ Terimakasih🙏`;
       await postBookingCreated({
         bookingId: newBookingRef.id, bookingCode: newBookingCode, totalAmount: newPrice,
         date: new Date().toISOString(), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-      }).catch(err => console.error('Gagal posting jurnal booking reschedule:', err));
+      }).catch(err => {
+        console.error('Gagal posting jurnal booking reschedule:', err);
+        alert(`Booking hasil reschedule (${newBookingCode}) berhasil dibuat, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Piutang Jamaah) untuk booking ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance, atau tambahkan Jurnal Manual di Laporan Keuangan → Jurnal Umum.`);
+      });
 
       // 2. Pindahkan setoran yang sudah dibayar sebagai carry-over ke booking baru
       if (carryOverAmount > 0) {
@@ -2497,7 +2500,10 @@ Terimakasih🙏`;
       await postBookingCreated({
         bookingId: addPaxBookingRef.id, bookingCode, totalAmount: price,
         date: new Date().toISOString(), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-      }).catch(err => console.error('Gagal posting jurnal tambah pax grup:', err));
+      }).catch(err => {
+        console.error('Gagal posting jurnal tambah pax grup:', err);
+        alert(`Pax baru (${bookingCode}) berhasil ditambahkan ke grup, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Piutang Jamaah) untuk booking ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance, atau tambahkan Jurnal Manual di Laporan Keuangan → Jurnal Umum.`);
+      });
 
       // Sinkronkan groupTotalPax ke semua booking lain di grup ini juga,
       // biar badge "Grup X/Y" di tiap baris peserta tetap akurat.
@@ -2875,7 +2881,10 @@ Terimakasih🙏`;
         await postBookingCreated({
           bookingId: newBookingRef.id, bookingCode: newBookingCode, totalAmount: newPrice,
           date: nowIso, createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-        }).catch(err => console.error('Gagal posting jurnal booking reschedule grup:', err));
+        }).catch(err => {
+          console.error('Gagal posting jurnal booking reschedule grup:', err);
+          alert(`Booking hasil reschedule grup (${newBookingCode}) berhasil dibuat, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Piutang Jamaah) untuk booking ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance, atau tambahkan Jurnal Manual di Laporan Keuangan → Jurnal Umum.`);
+        });
 
         if (carryOverAmount > 0) {
           await addDoc(collection(db, 'payments_income'), {
@@ -4269,7 +4278,10 @@ Terimakasih🙏`;
           await postBookingCreated({
             bookingId: newBookingRef.id, bookingCode, totalAmount: singleTotalAmount,
             date: resolvePaymentCreatedAt(formData.paymentDate), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-          }).catch(err => console.error('Gagal posting jurnal booking baru:', err));
+          }).catch(err => {
+            console.error('Gagal posting jurnal booking baru:', err);
+            alert(`Booking baru (${bookingCode}) berhasil dibuat, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Piutang Jamaah) untuk booking ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance, atau tambahkan Jurnal Manual di Laporan Keuangan → Jurnal Umum.`);
+          });
 
           if (paymentVal > 0) {
             const payRef = await addDoc(collection(db, 'payments_income'), {
@@ -4390,7 +4402,10 @@ Terimakasih🙏`;
             await postBookingCreated({
               bookingId: newBookingRef.id, bookingCode, totalAmount: paxTotalAmount,
               date: resolvePaymentCreatedAt(formData.paymentDate), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-            }).catch(err => console.error('Gagal posting jurnal booking grup baru:', err));
+            }).catch(err => {
+              console.error('Gagal posting jurnal booking grup baru:', err);
+              alert(`Booking grup baru (${bookingCode}) berhasil dibuat, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Piutang Jamaah) untuk booking ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance, atau tambahkan Jurnal Manual di Laporan Keuangan → Jurnal Umum.`);
+            });
 
             if (paxShare > 0) {
               const groupNewPayRef = await addDoc(collection(db, 'payments_income'), {
