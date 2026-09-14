@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, getDoc, setDoc, deleteDoc, doc, updateDoc, query, where, increment } from 'firebase/firestore';
+import { collection, addDoc, getDocs, getDoc, setDoc, deleteDoc, doc, updateDoc, query, where, increment, writeBatch } from 'firebase/firestore';
 import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock, Download, Pencil, Plus, Settings, FileBarChart, ChevronDown, ChevronRight } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -1193,36 +1193,58 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       // 1 pax (bukan grup), biar konsisten sama pola hapus yang sudah ada.
       let firstPayRefId = null;
 
+      // Setoran (payments_income) + jurnal income_payment-nya sekarang
+      // dibundel jadi SATU writeBatch atomik per pax — biar nggak ada lagi
+      // skenario "setoran kesimpen tapi jurnalnya diam-diam gagal" (itu yang
+      // bikin Piutang Jamaah di Neraca kegulung/selisih dari data live).
+      // Kalau jurnal gagal dibuat (misal nggak balance), SELURUH setoran pax
+      // itu (dan cuma pax itu) ikut batal, langsung ketahuan lewat alert —
+      // bukan tersimpan diam-diam kayak pola `.catch(console.error)` lama.
+      const incomeBatch = writeBatch(db);
+      const paxWrites = []; // { item, paxShare, payRef }
+
       for (let i = 0; i < groupItems.length; i++) {
         const item = groupItems[i];
         const paxShare = baseShare + (i === 0 ? remainder : 0);
+        if (paxShare <= 0) continue;
 
-        if (paxShare > 0) {
-          const payRef = await addDoc(collection(db, 'payments_income'), {
-            bookingId: item.id,
-            bookingCode: item.bookingCode,
-            jamaahName: item.jamaahName,
-            packageId: item.packageId,
-            packageName: item.packageName,
-            amount: paxShare,
-            paymentMethod: incomeForm.paymentMethod,
-            ...(incomeForm.paymentMethod !== 'Saldo Deposit' ? { accountId: incomeForm.accountId, accountName: incomeAccount?.name || '' } : {}),
-            notes: isGroup ? `${incomeForm.notes} (Grup ${incomeForm.groupCode})` : incomeForm.notes,
-            createdAt: resolvePaymentCreatedAt(incomeForm.date),
-            ...(isGroup ? { groupTransactionId } : {})
-          });
-          if (!firstPayRefId) firstPayRefId = payRef.id;
-          await postIncomePayment({
-            paymentId: payRef.id, bookingCode: item.bookingCode, amount: paxShare,
-            paymentMethod: incomeForm.paymentMethod, accountId: incomeForm.accountId, accountName: incomeAccount?.name || '',
-            date: resolvePaymentCreatedAt(incomeForm.date),
-            createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-          }).catch(err => {
-            console.error('Gagal posting jurnal setoran:', err);
-            alert(`Setoran ${item.bookingCode} tersimpan, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk setoran ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
-          });
+        const payRef = doc(collection(db, 'payments_income'));
+        incomeBatch.set(payRef, {
+          bookingId: item.id,
+          bookingCode: item.bookingCode,
+          jamaahName: item.jamaahName,
+          packageId: item.packageId,
+          packageName: item.packageName,
+          amount: paxShare,
+          paymentMethod: incomeForm.paymentMethod,
+          ...(incomeForm.paymentMethod !== 'Saldo Deposit' ? { accountId: incomeForm.accountId, accountName: incomeAccount?.name || '' } : {}),
+          notes: isGroup ? `${incomeForm.notes} (Grup ${incomeForm.groupCode})` : incomeForm.notes,
+          createdAt: resolvePaymentCreatedAt(incomeForm.date),
+          ...(isGroup ? { groupTransactionId } : {})
+        });
+        if (!firstPayRefId) firstPayRefId = payRef.id;
+
+        await postIncomePayment({
+          paymentId: payRef.id, bookingCode: item.bookingCode, amount: paxShare,
+          paymentMethod: incomeForm.paymentMethod, accountId: incomeForm.accountId, accountName: incomeAccount?.name || '',
+          date: resolvePaymentCreatedAt(incomeForm.date),
+          createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email,
+          batch: incomeBatch
+        });
+
+        paxWrites.push({ item, paxShare, payRef });
+      }
+
+      if (paxWrites.length > 0) {
+        try {
+          await incomeBatch.commit();
+        } catch (err) {
+          alert(`Gagal mencatat setoran kode ${incomeForm.groupCode}: ${err.message}. Tidak ada data yang tersimpan (setoran & jurnal dibatalkan bersamaan) — silakan coba lagi.`);
+          return;
         }
+      }
 
+      for (const { item } of paxWrites) {
         await syncBookingTotalPaid(item.id);
       }
 
