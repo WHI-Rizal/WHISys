@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where, increment, runTransaction } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where, increment, runTransaction, writeBatch } from 'firebase/firestore';
 import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus, Eye, Link2 } from 'lucide-react';
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN, addPPN } from '../../lib/ppn';
@@ -1432,7 +1432,10 @@ Terimakasih🙏`;
       // kalau nggak Piutang Jamaah di Neraca bakal kelebihan catat selamanya
       // buat booking yang udah nggak ada ini (lihat catatan lengkap di
       // deleteAllJournalEntriesForBooking, lib/journal.js).
-      await deleteAllJournalEntriesForBooking(item.id).catch(err => console.error('Gagal menghapus jurnal booking yang dihapus:', err));
+      await deleteAllJournalEntriesForBooking(item.id).catch(err => {
+        console.error('Gagal menghapus jurnal booking yang dihapus:', err);
+        alert(`Booking berhasil dihapus, TAPI jurnal yang nempel ke booking ini GAGAL ikut dihapus (${err.message}). Piutang Jamaah di Neraca bisa kelebihan catat sampai dikoreksi manual — segera lapor ke tim IT/Finance.`);
+      });
 
       if (!partnerLinkSnap.empty && !siblingStillExists) {
         await Promise.all(partnerLinkSnap.docs.map(d => deleteDoc(d.ref)));
@@ -1813,7 +1816,10 @@ Terimakasih🙏`;
           accountId: cancelForm.refundAccountId,
           accountName: financialAccounts.find(a => a.id === cancelForm.refundAccountId)?.name || '',
           date: new Date().toISOString(), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-        }).catch(err => console.error('Gagal posting jurnal batal/refund booking:', err));
+        }).catch(err => {
+          console.error('Gagal posting jurnal batal/refund booking:', err);
+          alert(`Pembatalan booking tersimpan, TAPI jurnal batal/refund-nya GAGAL diposting (${err.message}). Laporan Keuangan untuk pembatalan ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+        });
       }
 
       // Kuota seat yang dibatalkan dikembalikan ke paket
@@ -1957,7 +1963,10 @@ Terimakasih🙏`;
             { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: 0, credit: carryOverAmount },
           ],
           createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-        }).catch(err => console.error('Gagal posting jurnal carry-over reschedule:', err));
+        }).catch(err => {
+          console.error('Gagal posting jurnal carry-over reschedule:', err);
+          alert(`Reschedule tersimpan, TAPI jurnal carry-over-nya GAGAL diposting (${err.message}). Laporan Keuangan untuk reschedule ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+        });
       }
 
       // Tutup buku booking lama — sisa piutang yang belum dibayar (nggak
@@ -1975,7 +1984,10 @@ Terimakasih🙏`;
             writeOffAmount: oldWriteOff, refundAmount: 0,
             isRecognized: !!(oldPkg && oldPkg.revenueRecognized),
             date: new Date().toISOString(), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-          }).catch(err => console.error('Gagal posting jurnal tutup buku booking lama (reschedule):', err));
+          }).catch(err => {
+            console.error('Gagal posting jurnal tutup buku booking lama (reschedule):', err);
+            alert(`Reschedule tersimpan, TAPI jurnal tutup buku booking lamanya GAGAL diposting (${err.message}). Laporan Keuangan untuk reschedule ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+          });
         }
       }
 
@@ -2107,7 +2119,10 @@ Terimakasih🙏`;
             accountId: groupPaymentForm.accountId, accountName: groupPaymentAccount?.name || '',
             date: resolvePaymentCreatedAt(groupPaymentForm.date),
             createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-          }).catch(err => console.error('Gagal posting jurnal setoran grup:', err));
+          }).catch(err => {
+            console.error('Gagal posting jurnal setoran grup:', err);
+            alert(`Setoran ${item.bookingCode} tersimpan, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk setoran ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+          });
         }
 
         // Sinkronkan totalPaid/paymentStatus tiap pax dari data payments_income
@@ -2479,7 +2494,12 @@ Terimakasih🙏`;
         bank_statement: false, vaccine_cert: false, visa: false, ticket: false
       };
 
-      const addPaxBookingRef = await addDoc(collection(db, 'bookings'), {
+      // Booking pax baru + jurnal `booking_created`-nya diposting ATOMIK
+      // lewat writeBatch — sama kayak alur registrasi booking baru (lihat
+      // catatan panjang di journal.js).
+      const addPaxBatch = writeBatch(db);
+      const addPaxBookingRef = doc(collection(db, 'bookings'));
+      addPaxBatch.set(addPaxBookingRef, {
         bookingCode,
         groupBookingCode: groupEditTarget.code,
         groupPaxIndex: newIndex,
@@ -2513,11 +2533,16 @@ Terimakasih🙏`;
 
       await postBookingCreated({
         bookingId: addPaxBookingRef.id, bookingCode, totalAmount: price,
-        date: new Date().toISOString(), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-      }).catch(err => {
-        console.error('Gagal posting jurnal tambah pax grup:', err);
-        alert(`Pax baru (${bookingCode}) berhasil ditambahkan ke grup, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Piutang Jamaah) untuk booking ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance, atau tambahkan Jurnal Manual di Laporan Keuangan → Jurnal Umum.`);
+        date: new Date().toISOString(), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email,
+        batch: addPaxBatch
       });
+
+      try {
+        await addPaxBatch.commit();
+      } catch (err) {
+        alert(`Gagal menambahkan peserta baru: ${err.message}. TIDAK ada yang tersimpan (aman) — coba lagi, atau lapor ke tim IT kalau terus gagal.`);
+        return;
+      }
 
       // Sinkronkan groupTotalPax ke semua booking lain di grup ini juga,
       // biar badge "Grup X/Y" di tiap baris peserta tetap akurat.
@@ -2685,7 +2710,10 @@ Terimakasih🙏`;
             { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: 0, credit: -totalAmountDelta },
           ],
           createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-        }).catch(err => console.error('Gagal posting jurnal koreksi total booking grup:', err));
+        }).catch(err => {
+          console.error('Gagal posting jurnal koreksi total booking grup:', err);
+          alert(`Koreksi total booking grup tersimpan, TAPI jurnal koreksinya GAGAL diposting (${err.message}). Laporan Keuangan untuk koreksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+        });
       }));
 
       if (packageChanged) {
@@ -2747,7 +2775,10 @@ Terimakasih🙏`;
               accountId: groupEditForm.addAccountId, accountName: groupEditAccount?.name || '',
               date: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
               createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-            }).catch(err => console.error('Gagal posting jurnal setoran grup (edit):', err));
+            }).catch(err => {
+              console.error('Gagal posting jurnal setoran grup (edit):', err);
+              alert(`Setoran ${item.bookingCode} tersimpan, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk setoran ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+            });
           }
         }
 
@@ -2929,7 +2960,10 @@ Terimakasih🙏`;
               { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: 0, credit: carryOverAmount },
             ],
             createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-          }).catch(err => console.error('Gagal posting jurnal carry-over reschedule grup:', err));
+          }).catch(err => {
+            console.error('Gagal posting jurnal carry-over reschedule grup:', err);
+            alert(`Reschedule grup tersimpan, TAPI jurnal carry-over-nya GAGAL diposting (${err.message}). Laporan Keuangan untuk reschedule ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+          });
         }
 
         // Tutup buku booking lama — write-off sisa piutang yang nggak akan
@@ -2943,7 +2977,10 @@ Terimakasih🙏`;
               writeOffAmount: oldWriteOff, refundAmount: 0,
               isRecognized: !!(oldPkgForWriteOff && oldPkgForWriteOff.revenueRecognized),
               date: nowIso, createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-            }).catch(err => console.error('Gagal posting jurnal tutup buku booking lama (reschedule grup):', err));
+            }).catch(err => {
+              console.error('Gagal posting jurnal tutup buku booking lama (reschedule grup):', err);
+              alert(`Reschedule grup tersimpan, TAPI jurnal tutup buku booking lamanya GAGAL diposting (${err.message}). Laporan Keuangan untuk reschedule ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+            });
           }
         }
 
@@ -3100,7 +3137,10 @@ Terimakasih🙏`;
           refundToDeposit: groupCancelForm.refundMethod === 'Deposit / Saldo Akun',
           accountId: groupCancelForm.refundAccountId, accountName: refundAccount?.name || '',
           date: nowIso, createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-        }).catch(err => console.error('Gagal posting jurnal batal/refund booking grup:', err));
+        }).catch(err => {
+          console.error('Gagal posting jurnal batal/refund booking grup:', err);
+          alert(`Pembatalan booking grup tersimpan, TAPI jurnal batal/refund-nya GAGAL diposting (${err.message}). Laporan Keuangan untuk pembatalan ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+        });
       }));
 
       // Kuota seat yang dibatalkan dikembalikan ke paket — 1 updateDoc pakai
@@ -3191,7 +3231,10 @@ Terimakasih🙏`;
       // TIAP booking di grup ini WAJIB ikut dihapus, kalau nggak Piutang
       // Jamaah di Neraca kelebihan catat selamanya buat grup yang udah
       // nggak ada ini.
-      await Promise.all(allItems.map(item => deleteAllJournalEntriesForBooking(item.id).catch(err => console.error('Gagal menghapus jurnal booking grup yang dihapus:', err))));
+      await Promise.all(allItems.map(item => deleteAllJournalEntriesForBooking(item.id).catch(err => {
+        console.error('Gagal menghapus jurnal booking grup yang dihapus:', err);
+        alert(`Booking ${item.bookingCode} berhasil dihapus, TAPI jurnal yang nempel ke booking ini GAGAL ikut dihapus (${err.message}). Piutang Jamaah di Neraca bisa kelebihan catat sampai dikoreksi manual — segera lapor ke tim IT/Finance.`);
+      })));
 
       if (!partnerLinkSnap.empty) {
         await Promise.all(partnerLinkSnap.docs.map(d => deleteDoc(d.ref)));
@@ -4187,7 +4230,10 @@ Terimakasih🙏`;
                 { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: 0, credit: -totalAmountDelta },
               ],
               createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-            }).catch(err => console.error('Gagal posting jurnal koreksi total booking:', err));
+            }).catch(err => {
+              console.error('Gagal posting jurnal koreksi total booking:', err);
+              alert(`Koreksi total booking tersimpan, TAPI jurnal koreksinya GAGAL diposting (${err.message}). Laporan Keuangan untuk koreksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+            });
           }
         }
 
@@ -4209,7 +4255,10 @@ Terimakasih🙏`;
             paymentMethod: formData.paymentMethod, accountId: formData.accountId, accountName: payAccount?.name || '',
             date: resolvePaymentCreatedAt(formData.paymentDate),
             createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-          }).catch(err => console.error('Gagal posting jurnal setoran edit booking:', err));
+          }).catch(err => {
+            console.error('Gagal posting jurnal setoran edit booking:', err);
+            alert(`Setoran tersimpan, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk setoran ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+          });
           if (formData.paymentMethod === 'Saldo Deposit') {
             await adjustDepositBalance(ordererId, ordererName, -paymentVal, 'usage', `Bayar setoran booking ${currentBooking.bookingCode}`, currentBooking.bookingCode);
           } else {
@@ -4265,7 +4314,19 @@ Terimakasih🙏`;
           const bookingCode = `BK-${Date.now().toString().slice(-6)}`;
           const singleTotalAmount = addPPN(price + chargesTotalInput - discountsTotalInput).total; // + PPN 1,1%
 
-          const newBookingRef = await addDoc(collection(db, 'bookings'), {
+          // Booking + jurnal `booking_created` (+ setoran DP awal + jurnal
+          // `income_payment`-nya, kalau ada) SEKARANG diposting ATOMIK lewat
+          // 1 `writeBatch` — nggak ada lagi celah "dokumen kesimpen, jurnal
+          // diam-diam gagal" kayak yang kejadian 11-14 Sep 2026 (lihat
+          // catatan panjang di journal.js). Kalau jurnalnya nggak balance
+          // (bug/data aneh), `postBookingCreated`/`postIncomePayment` throw
+          // SEBELUM batch di-commit — booking-nya juga otomatis IKUT GAGAL
+          // tersimpan (bukan nyangkut setengah jalan kayak sebelumnya),
+          // jadi staf langsung tau ada masalah lewat pesan error, bukan
+          // nemuin belakangan pas Neraca udah selisih.
+          const bookingBatch = writeBatch(db);
+          const newBookingRef = doc(collection(db, 'bookings'));
+          bookingBatch.set(newBookingRef, {
             bookingCode,
             packageId: selectedPkg.id,
             packageName: selectedPkg.name,
@@ -4303,14 +4364,14 @@ Terimakasih🙏`;
 
           await postBookingCreated({
             bookingId: newBookingRef.id, bookingCode, totalAmount: singleTotalAmount,
-            date: resolvePaymentCreatedAt(formData.paymentDate), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-          }).catch(err => {
-            console.error('Gagal posting jurnal booking baru:', err);
-            alert(`Booking baru (${bookingCode}) berhasil dibuat, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Piutang Jamaah) untuk booking ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance, atau tambahkan Jurnal Manual di Laporan Keuangan → Jurnal Umum.`);
+            date: resolvePaymentCreatedAt(formData.paymentDate), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email,
+            batch: bookingBatch
           });
 
+          let payRef = null;
           if (paymentVal > 0) {
-            const payRef = await addDoc(collection(db, 'payments_income'), {
+            payRef = doc(collection(db, 'payments_income'));
+            bookingBatch.set(payRef, {
               bookingId: newBookingRef.id,
               bookingCode: bookingCode,
               jamaahName: selectedJamaah.fullName,
@@ -4326,8 +4387,19 @@ Terimakasih🙏`;
               paymentId: payRef.id, bookingCode, amount: paymentVal,
               paymentMethod: formData.paymentMethod, accountId: formData.accountId, accountName: payAccount?.name || '',
               date: resolvePaymentCreatedAt(formData.paymentDate),
-              createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-            }).catch(err => console.error('Gagal posting jurnal DP booking baru:', err));
+              createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email,
+              batch: bookingBatch
+            });
+          }
+
+          try {
+            await bookingBatch.commit();
+          } catch (err) {
+            alert(`Gagal menyimpan booking baru: ${err.message}. Booking TIDAK tersimpan sama sekali (aman, nggak ada data setengah jalan) — coba lagi, atau lapor ke tim IT kalau terus gagal.`);
+            return;
+          }
+
+          if (paymentVal > 0) {
             if (formData.paymentMethod === 'Saldo Deposit') {
               await adjustDepositBalance(ordererId, ordererName, -paymentVal, 'usage', `Bayar DP booking ${bookingCode}`, bookingCode);
             } else {
@@ -4374,6 +4446,15 @@ Terimakasih🙏`;
           const chargeSharesPerItem = formCharges.map(c => splitFlatAmount(Number(c.amount) || 0, paxCount));
           const discountSharesPerItem = formDiscounts.map(d => splitFlatAmount(Number(d.amount) || 0, paxCount));
 
+          // SATU batch buat SELURUH grup (semua booking + jurnal
+          // `booking_created` + setoran DP + jurnal `income_payment`-nya) —
+          // atomik: kalau ada 1 aja yang gagal (misal jurnal nggak balance),
+          // SEMUA pax di grup ini otomatis ikut GAGAL tersimpan, bukan
+          // nyangkut setengah (sebagian pax kesimpen, sebagian nggak, jurnal
+          // sebagian bolong) kayak yang bisa kejadian di pola lama. Lihat
+          // catatan panjang di journal.js.
+          const groupBatch = writeBatch(db);
+
           for (let i = 0; i < paxList.length; i++) {
             const pax = paxList[i];
             const paxShare = baseShare + (i === 0 ? remainder : 0);
@@ -4384,7 +4465,8 @@ Terimakasih🙏`;
             const paxDiscountTotal = paxDiscounts.reduce((acc, d) => acc + d.amount, 0);
             const paxTotalAmount = addPPN(price + paxChargeTotal - paxDiscountTotal).total; // + PPN 1,1%
 
-            const newBookingRef = await addDoc(collection(db, 'bookings'), {
+            const newBookingRef = doc(collection(db, 'bookings'));
+            groupBatch.set(newBookingRef, {
               bookingCode,
               groupBookingCode,
               groupPaxIndex: i + 1,
@@ -4426,14 +4508,13 @@ Terimakasih🙏`;
 
             await postBookingCreated({
               bookingId: newBookingRef.id, bookingCode, totalAmount: paxTotalAmount,
-              date: resolvePaymentCreatedAt(formData.paymentDate), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-            }).catch(err => {
-              console.error('Gagal posting jurnal booking grup baru:', err);
-              alert(`Booking grup baru (${bookingCode}) berhasil dibuat, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Piutang Jamaah) untuk booking ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance, atau tambahkan Jurnal Manual di Laporan Keuangan → Jurnal Umum.`);
+              date: resolvePaymentCreatedAt(formData.paymentDate), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email,
+              batch: groupBatch
             });
 
             if (paxShare > 0) {
-              const groupNewPayRef = await addDoc(collection(db, 'payments_income'), {
+              const groupNewPayRef = doc(collection(db, 'payments_income'));
+              groupBatch.set(groupNewPayRef, {
                 bookingId: newBookingRef.id,
                 bookingCode,
                 jamaahName: pax.jamaahName,
@@ -4450,9 +4531,17 @@ Terimakasih🙏`;
                 paymentId: groupNewPayRef.id, bookingCode, amount: paxShare,
                 paymentMethod: formData.paymentMethod, accountId: formData.accountId, accountName: payAccount?.name || '',
                 date: resolvePaymentCreatedAt(formData.paymentDate),
-                createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-              }).catch(err => console.error('Gagal posting jurnal DP booking grup baru:', err));
+                createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email,
+                batch: groupBatch
+              });
             }
+          }
+
+          try {
+            await groupBatch.commit();
+          } catch (err) {
+            alert(`Gagal menyimpan booking grup baru: ${err.message}. SELURUH grup TIDAK tersimpan sama sekali (aman, nggak ada pax yang nyangkut setengah jalan) — coba lagi, atau lapor ke tim IT kalau terus gagal.`);
+            return;
           }
 
           // Mutasi Kas/Bank dicatat SATU KALI per transaksi DP awal grup ini
