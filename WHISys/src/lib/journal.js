@@ -833,6 +833,60 @@ export const applyMissingBookingJournalsCorrection = async ({ affected, createdB
 };
 
 // ---------------------------------------------------------------------
+// Diagnosa & koreksi SETORAN JAMAAH (payments_income) yang KESIMPEN tapi
+// jurnalnya GAGAL keposting — pola SAMA PERSIS kayak
+// diagnoseMissingBookingJournals di atas (postIncomePayment juga dipanggil
+// pakai `.catch(console.error)`, jadi setoran-nya sendiri tetap tersimpan
+// walau jurnalnya gagal). Ini KETEMU nyusul laporan user: booking yang
+// KELIHATAN "dobel" di Rekonsiliasi Piutang per Booking ternyata, begitu
+// rincian jurnalnya dibuka, cuma ada SATU entry `booking_created` doang —
+// nggak ada `income_payment`-nya sama sekali padahal booking itu udah ada
+// setorannya (totalPaid > 0). Diff-nya PERSIS sebesar totalPaid booking
+// itu — artinya bukan dobel-posting, tapi SETORANNYA yang nggak pernah
+// kejurnal, jadi Piutang Jamaah di jurnal nggak pernah "keturunin" pas ada
+// pembayaran, walau uangnya udah beneran masuk & totalPaid udah kesimpen.
+// ---------------------------------------------------------------------
+export const diagnoseMissingIncomePaymentJournals = ({ paymentsIncome, journalEntries }) => {
+  const journaledPaymentIds = new Set(
+    (journalEntries || []).filter(e => e.source === 'income_payment').map(e => e.sourceDocId)
+  );
+  const affected = (paymentsIncome || [])
+    .filter(p => Number(p.amount || 0) > 0)
+    .filter(p => !journaledPaymentIds.has(p.id))
+    .map(p => ({
+      paymentId: p.id, bookingCode: p.bookingCode, jamaahName: p.jamaahName,
+      amount: Number(p.amount || 0), paymentMethod: p.paymentMethod,
+      accountId: p.accountId, accountName: p.accountName, createdAt: p.createdAt,
+    }));
+  const totalAmount = affected.reduce((acc, p) => acc + p.amount, 0);
+  return { affected, totalAmount, count: affected.length };
+};
+
+export const applyMissingIncomePaymentJournalsCorrection = async ({ affected, createdByUid, createdByName }) => {
+  const summary = { corrected: 0, skipped: 0, errors: [] };
+  for (const item of (affected || [])) {
+    try {
+      const existing = await getDocs(query(
+        collection(db, 'journal_entries'),
+        where('source', '==', 'income_payment'),
+        where('sourceDocId', '==', item.paymentId)
+      ));
+      if (existing.docs.length > 0) { summary.skipped += 1; continue; }
+
+      const posted = await postIncomePayment({
+        paymentId: item.paymentId, bookingCode: item.bookingCode, amount: item.amount,
+        paymentMethod: item.paymentMethod, accountId: item.accountId, accountName: item.accountName,
+        date: item.createdAt || new Date().toISOString(), createdByUid, createdByName
+      });
+      if (posted) summary.corrected += 1; else summary.skipped += 1;
+    } catch (err) {
+      summary.errors.push(`${item.bookingCode || item.paymentId}: ${err.message}`);
+    }
+  }
+  return summary;
+};
+
+// ---------------------------------------------------------------------
 // Diagnosa & koreksi Pembayaran Komisi Mitra/Agen (AgentsModule.jsx) yang
 // KESIMPEN tapi jurnalnya BELUM PERNAH keposting sama sekali — beda kasus
 // sama yang di atas (yang itu jurnalnya SEMPAT gagal karena error), ini
