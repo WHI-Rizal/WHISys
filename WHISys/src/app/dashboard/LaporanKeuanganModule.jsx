@@ -19,7 +19,8 @@ import {
   backfillOpexJournalCategories, diagnoseRescheduleMigrationImpact, applyRescheduleMigrationCorrection,
   diagnoseMissingBookingJournals, applyMissingBookingJournalsCorrection,
   diagnoseArReconciliation, removeDuplicateBookingCreatedEntries, removeOrphanBookingJournalEntries,
-  diagnoseMissingCommissionJournals, applyMissingCommissionJournalsCorrection, deleteJournalEntryById
+  diagnoseMissingCommissionJournals, applyMissingCommissionJournalsCorrection, deleteJournalEntryById,
+  diagnoseMissingIncomePaymentJournals, applyMissingIncomePaymentJournalsCorrection
 } from '../../lib/journal';
 
 const DEFAULT_COMPANY_PROFILE = {
@@ -251,6 +252,15 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
   const [missingCommissionDiagnosis, setMissingCommissionDiagnosis] = useState(null);
   const [applyingMissingCommissionFix, setApplyingMissingCommissionFix] = useState(false);
 
+  // Diagnosa & koreksi jurnal Setoran Jamaah (payments_income) yang gagal
+  // keposting — lihat diagnoseMissingIncomePaymentJournals, lib/journal.js.
+  // Ini KETEMU nyusul laporan user pas ngecek rincian jurnal per booking di
+  // "Rekonsiliasi Piutang per Booking" — bukan dobel-posting, tapi setoran
+  // yang nggak pernah kejurnal sama sekali.
+  const [showMissingIncomeDiagnosis, setShowMissingIncomeDiagnosis] = useState(false);
+  const [missingIncomeDiagnosis, setMissingIncomeDiagnosis] = useState(null);
+  const [applyingMissingIncomeFix, setApplyingMissingIncomeFix] = useState(false);
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -441,6 +451,31 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
     setDeletingEntryId(null);
   };
 
+  const handleOpenMissingIncomeDiagnosis = () => {
+    const result = diagnoseMissingIncomePaymentJournals({ paymentsIncome, journalEntries });
+    setMissingIncomeDiagnosis(result);
+    setShowMissingIncomeDiagnosis(true);
+  };
+
+  const handleApplyMissingIncomeFix = async () => {
+    if (!missingIncomeDiagnosis || missingIncomeDiagnosis.affected.length === 0) return;
+    if (!confirm(`Posting jurnal buat ${missingIncomeDiagnosis.affected.length} setoran jamaah yang belum pernah kejurnal? Aman diulang, yang udah kejurnal otomatis dilewati.`)) return;
+    setApplyingMissingIncomeFix(true);
+    try {
+      const summary = await applyMissingIncomePaymentJournalsCorrection({
+        affected: missingIncomeDiagnosis.affected,
+        createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      });
+      alert(`Koreksi selesai!\n\nSetoran dikoreksi: ${summary.corrected}\nDilewati (udah kejurnal duluan): ${summary.skipped}\nError: ${summary.errors.length}${summary.errors.length > 0 ? `\n\nDetail error:\n${summary.errors.slice(0, 10).join('\n')}` : ''}`);
+      await fetchData();
+      setShowMissingIncomeDiagnosis(false);
+      setMissingIncomeDiagnosis(null);
+    } catch (err) {
+      alert('Gagal menerapkan koreksi: ' + err.message);
+    }
+    setApplyingMissingIncomeFix(false);
+  };
+
   const handleOpenMissingCommissionDiagnosis = () => {
     const result = diagnoseMissingCommissionJournals({ commissionPayments, journalEntries });
     setMissingCommissionDiagnosis(result);
@@ -522,6 +557,15 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
               title="Cari tau persis booking mana yang bikin Piutang Jamaah di Neraca beda sama Total Piutang Jamaah di tab Piutang & Hutang"
             >
               <Scale className="w-3.5 h-3.5" /> Rekonsiliasi Piutang per Booking
+            </button>
+          )}
+          {isSuperAdmin && (
+            <button
+              onClick={handleOpenMissingIncomeDiagnosis}
+              className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium rounded-lg flex items-center gap-1.5"
+              title="Cek setoran jamaah yang belum pernah kejurnal (booking_created ada tapi income_payment-nya nggak ada)"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Cek Setoran Belum Terjurnal
             </button>
           )}
           {isSuperAdmin && (
@@ -651,6 +695,67 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
                   className="w-full px-3 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg disabled:opacity-60"
                 >
                   {applyingMissingJournalFix ? 'Memproses...' : `Posting Jurnal buat ${missingJournalDiagnosis.count} Booking Ini`}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showMissingIncomeDiagnosis && missingIncomeDiagnosis && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className={`${styles.cardBg} border rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-5`}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className={`text-sm font-bold ${styles.textTitle}`}>Setoran Jamaah Belum Terjurnal</h3>
+              <button onClick={() => { setShowMissingIncomeDiagnosis(false); setMissingIncomeDiagnosis(null); }} className={styles.textSub}><X className="w-4 h-4" /></button>
+            </div>
+            <p className={`text-xs ${styles.textSub} mb-3`}>
+              Sama kayak "Cek Booking Belum Terjurnal", tapi buat sisi SETORAN (payments_income) — kadang jurnalnya bisa gagal keposting (misal koneksi putus) walau setorannya sendiri tetap tersimpan & totalPaid booking udah kena update. Daftar di bawah ini setoran yang KESIMPEN tapi belum ada jurnal "Setoran"-nya sama sekali — akibatnya Piutang Jamaah di jurnal nggak pernah "keturunin" pas ada pembayaran ini, jadi keliatan lebih besar dari yang sebenarnya. Ini diagnosa read-only dulu, belum ada jurnal apapun yang diposting.
+            </p>
+            {missingIncomeDiagnosis.count === 0 ? (
+              <div className={`p-4 rounded-lg ${styles.innerBg} border text-xs ${styles.textSub} flex items-center gap-2`}>
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Nggak ada setoran yang kelewat. Semua udah kejurnal.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+                    <p className={`text-[10.5px] ${styles.textSub}`}>Setoran kena dampak</p>
+                    <p className={`text-lg font-bold ${styles.textTitle}`}>{missingIncomeDiagnosis.count}</p>
+                  </div>
+                  <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+                    <p className={`text-[10.5px] ${styles.textSub}`}>Total belum kejurnal</p>
+                    <p className="text-lg font-bold text-amber-500">{formatRp(missingIncomeDiagnosis.totalAmount)}</p>
+                  </div>
+                </div>
+                <div className="overflow-x-auto mb-3">
+                  <table className="w-full text-[11px]">
+                    <thead className={styles.tableHeaderBg}>
+                      <tr>
+                        <th className="text-left p-2 font-medium">Booking</th>
+                        <th className="text-left p-2 font-medium">Jamaah</th>
+                        <th className="text-left p-2 font-medium">Tanggal</th>
+                        <th className="text-right p-2 font-medium">Nominal</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                      {missingIncomeDiagnosis.affected.map(item => (
+                        <tr key={item.paymentId}>
+                          <td className="p-2">{item.bookingCode || '-'}</td>
+                          <td className="p-2">{item.jamaahName || '-'}</td>
+                          <td className="p-2">{formatDateDDMMYYYY((item.createdAt || '').slice(0, 10))}</td>
+                          <td className="p-2 text-right">{formatRp(item.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  onClick={handleApplyMissingIncomeFix}
+                  disabled={applyingMissingIncomeFix}
+                  className="w-full px-3 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg disabled:opacity-60"
+                >
+                  {applyingMissingIncomeFix ? 'Memproses...' : `Posting Jurnal buat ${missingIncomeDiagnosis.count} Setoran Ini`}
                 </button>
               </>
             )}
