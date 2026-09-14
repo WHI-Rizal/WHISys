@@ -21,14 +21,28 @@
 //   pembayaran". Ini juga bikin Piutang Jamaah di Neraca itu ANGKA HASIL
 //   JURNAL (bisa diaudit), bukan cuma live-sum field totalAmount-totalPaid.
 //
-// Semua fungsi di sini NON-ATOMIC (sequential await biasa), niru gaya
-// adjustAccountBalance/dkk yang udah ada di FinanceModule.jsx — bukan
-// Firestore transaction — biar konsisten sama risiko yang udah diterima
-// kode lama, nggak nambah kerumitan baru.
+// Sebagian besar fungsi di sini NON-ATOMIC (sequential await biasa, niru
+// gaya adjustAccountBalance/dkk yang udah ada di FinanceModule.jsx) — TAPI
+// (ditambahin 14 Sep 2026, nyusul insiden selisih Piutang Jamaah yang
+// akar masalahnya persis di titik ini: `postIncomePayment` gagal keposting
+// tanpa ketauan) dua alur PALING SERING & PALING BERISIKO — booking baru
+// & setoran jamaah — SEKARANG BISA di-posting ATOMIK bareng dokumen
+// aslinya lewat parameter `batch` opsional (lihat `postBookingCreated`/
+// `postIncomePayment` di bawah, dan `buildJournalEntryDoc`/
+// `setJournalEntryInBatch`). Kalau pemanggil ngasih `batch` (dari
+// `writeBatch(db)`), fungsi ini nulis ke batch itu (BUKAN addDoc
+// terpisah) — begitu `batch.commit()` dipanggil, dokumen transaksi ASLI
+// (booking/setoran) dan JURNAL-nya SAMA-SAMA sukses atau SAMA-SAMA gagal,
+// nggak ada lagi celah "dokumen kesimpen tapi jurnalnya diam-diam gagal".
+// Fungsi lain yang levelnya lebih jarang/kecil resikonya (biaya vendor,
+// opex, dst) TETAP pola lama (addDoc + `.catch()` + alert ke user) —
+// bisa disusul dibikin atomik juga kalau perlu, tapi 2 alur di atas yang
+// paling prioritas karena PALING SERING kejadian & paling gede dampaknya
+// ke Neraca kalau sampai bolong.
 
 import { db } from './firebase';
 import {
-  collection, addDoc, doc, getDoc, setDoc, deleteDoc, query, where, getDocs, orderBy
+  collection, addDoc, doc, getDoc, setDoc, deleteDoc, query, where, getDocs, orderBy, writeBatch
 } from 'firebase/firestore';
 import { calculatePPN } from './ppn';
 
@@ -115,7 +129,13 @@ export const seedChartOfAccounts = async () => {
 // kalau ini nge-throw berarti ada bug di salah satu helper/pemanggilnya,
 // bukan kondisi normal yang perlu ditolerir diam-diam.
 // ---------------------------------------------------------------------
-export const postJournalEntry = async ({
+// Bangun & validasi isi 1 dokumen jurnal (balance check, buang baris
+// kosong, isi default) TANPA nulis ke Firestore — dipakai bareng oleh
+// `postJournalEntry` (jalur lama, `addDoc` sendirian) dan
+// `setJournalEntryInBatch` (jalur baru, atomik bareng dokumen transaksi
+// aslinya lewat `writeBatch`). SATU-SATUNYA tempat aturan balance
+// ditegakkan, biar dua jalur itu nggak bisa pernah beda perilaku.
+const buildJournalEntryDoc = ({
   date, description, source, sourceDocId, reference, lines,
   createdByUid, createdByName, isManual = false, isReversal = false
 }) => {
@@ -126,10 +146,10 @@ export const postJournalEntry = async ({
   if (validLines.length === 0) return null; // nggak ada nominal, nggak usah bikin entry kosong
 
   if (Math.abs(totalDebit - totalCredit) > 1) { // toleransi Rp1 buat pembulatan
-    throw new Error(`Jurnal tidak balance (Debit Rp${totalDebit.toLocaleString('id-ID')} vs Kredit Rp${totalCredit.toLocaleString('id-ID')}) — "${description}". Transaksi TIDAK disimpan ke jurnal, tapi transaksi aslinya sendiri tetap tersimpan. Segera lapor ke tim IT.`);
+    throw new Error(`Jurnal tidak balance (Debit Rp${totalDebit.toLocaleString('id-ID')} vs Kredit Rp${totalCredit.toLocaleString('id-ID')}) — "${description}". Segera lapor ke tim IT.`);
   }
 
-  return addDoc(collection(db, 'journal_entries'), {
+  return {
     date: date || new Date().toISOString(),
     description: description || '-',
     source: source || 'manual',
@@ -143,7 +163,26 @@ export const postJournalEntry = async ({
     createdByUid: createdByUid || '',
     createdByName: createdByName || '',
     createdAt: new Date().toISOString()
-  });
+  };
+};
+
+export const postJournalEntry = async (params) => {
+  const data = buildJournalEntryDoc(params);
+  if (!data) return null;
+  return addDoc(collection(db, 'journal_entries'), data);
+};
+
+// Versi ATOMIK — nulis ke `batch` (dari `writeBatch(db)`) yang udah
+// dipegang pemanggil, BUKAN `addDoc` sendirian. Pemanggil WAJIB bikin doc
+// ref-nya sendiri dulu (`doc(collection(db, 'journal_entries'))`) SEBELUM
+// manggil ini, biar id-nya bisa langsung dipakai (misal buat notifikasi)
+// tanpa nunggu commit. Balik `null` (bukan nulis apapun ke batch) kalau
+// nominalnya 0 — SAMA PERSIS perilaku `postJournalEntry` biasa.
+const setJournalEntryInBatch = (batch, journalRef, params) => {
+  const data = buildJournalEntryDoc(params);
+  if (!data) return null;
+  batch.set(journalRef, data);
+  return journalRef;
 };
 
 // ---------------------------------------------------------------------
@@ -155,10 +194,14 @@ export const postJournalEntry = async ({
 
 // 1. Booking baru dibuat — akui piutang & pendapatan diterima dimuka
 //    PENUH sebesar totalAmount (bukan cuma sebesar DP yang udah masuk).
-export const postBookingCreated = async ({ bookingId, bookingCode, totalAmount, date, createdByUid, createdByName }) => {
+//    `batch` OPSIONAL (dari `writeBatch(db)`) — kalau diisi, jurnal ini
+//    ditulis ATOMIK bareng batch itu (biasanya batch yang sama juga
+//    nulis dokumen booking-nya sendiri), BUKAN `addDoc` terpisah. Lihat
+//    catatan panjang di atas file ini kenapa ini penting.
+export const postBookingCreated = async ({ bookingId, bookingCode, totalAmount, date, createdByUid, createdByName, batch }) => {
   const amt = Number(totalAmount) || 0;
   if (amt <= 0) return null;
-  return postJournalEntry({
+  const params = {
     date, description: `Booking baru ${bookingCode || bookingId}`,
     source: 'booking_created', sourceDocId: bookingId, reference: bookingCode || '',
     lines: [
@@ -166,25 +209,30 @@ export const postBookingCreated = async ({ bookingId, bookingCode, totalAmount, 
       glLine(ACC.PENDAPATAN_DITERIMA_DIMUKA, 0, amt),
     ],
     createdByUid, createdByName
-  });
+  };
+  if (batch) return setJournalEntryInBatch(batch, doc(collection(db, 'journal_entries')), params);
+  return postJournalEntry(params);
 };
 
 // 2. Setoran/pembayaran jamaah masuk (payments_income) — kurangi Piutang
 //    Jamaah, sisi lain Kas/Bank (atau Utang Deposit Jamaah kalau
-//    dibayar pakai Saldo Deposit customer).
-export const postIncomePayment = async ({ paymentId, bookingCode, amount, paymentMethod, accountId, accountName, date, createdByUid, createdByName }) => {
+//    dibayar pakai Saldo Deposit customer). `batch` opsional, sama kayak
+//    postBookingCreated di atas.
+export const postIncomePayment = async ({ paymentId, bookingCode, amount, paymentMethod, accountId, accountName, date, createdByUid, createdByName, batch }) => {
   const amt = Number(amount) || 0;
   if (amt <= 0) return null;
   const viaDeposit = paymentMethod === 'Saldo Deposit';
   const debitLine = viaDeposit
     ? glLine(ACC.UTANG_DEPOSIT_JAMAAH, amt, 0)
     : glLine(ACC.KAS_BANK, amt, 0, { accountId, accountName });
-  return postJournalEntry({
+  const params = {
     date, description: `Setoran - ${bookingCode || paymentId}`,
     source: 'income_payment', sourceDocId: paymentId, reference: bookingCode || '',
     lines: [debitLine, glLine(ACC.PIUTANG_JAMAAH, 0, amt)],
     createdByUid, createdByName
-  });
+  };
+  if (batch) return setJournalEntryInBatch(batch, doc(collection(db, 'journal_entries')), params);
+  return postJournalEntry(params);
 };
 
 // 3. Titip Deposit customer (belum tentu dipakai buat booking mana) — kas
