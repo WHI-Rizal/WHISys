@@ -3310,6 +3310,16 @@ function BankReconciliationTab({ styles, isDark, currentUser, financialAccounts 
   const [importing, setImporting] = useState(false);
   const [savingLineId, setSavingLineId] = useState(null);
 
+  // Buat fitur "cocokkan banyak baris bank sekaligus ke 1 mutasi sistem"
+  // (skenario: 1 pembayaran sistem senilai 50jt yang aslinya masuk lewat
+  // 5x transfer terpisah 10jt-an). selectedLineIds nyimpen id baris
+  // bank_statement_lines yang lagi dicentang staf, dibatasi cuma boleh
+  // dari akun yang sama (karena account_mutations itu scoped per akun).
+  const [selectedLineIds, setSelectedLineIds] = useState(new Set());
+  const [showGroupMatchModal, setShowGroupMatchModal] = useState(false);
+  const [groupMatchSearch, setGroupMatchSearch] = useState('');
+  const [groupMatchSubmitting, setGroupMatchSubmitting] = useState(false);
+
   const isSuperAdmin = (currentUser?.role || '').toLowerCase().includes('super');
 
   const fetchReconciliationData = async () => {
@@ -3391,6 +3401,81 @@ function BankReconciliationTab({ styles, isDark, currentUser, financialAccounts 
       alert('Gagal menandai diabaikan: ' + err.message);
     }
     setSavingLineId(null);
+  };
+
+  // Toggle centang 1 baris bank buat mode "cocokkan banyak sekaligus".
+  // Dibatasi: cuma baris 'unmatched', dan cuma boleh 1 akun dalam 1
+  // seleksi (kalau staf centang baris dari akun lain, seleksi lama
+  // direset dulu ke baris itu doang) — soalnya account_mutations itu
+  // scoped per akun, jadi nggak masuk akal gabung lintas akun.
+  const toggleLineSelection = (line) => {
+    if (line.matchStatus !== 'unmatched') return;
+    setSelectedLineIds(prev => {
+      const next = new Set(prev);
+      const selectedLines = lines.filter(l => next.has(l.id));
+      const currentAccountId = selectedLines[0]?.accountId;
+      if (next.has(line.id)) {
+        next.delete(line.id);
+      } else {
+        if (currentAccountId && currentAccountId !== line.accountId) {
+          // Ganti akun — mulai seleksi baru dari baris ini aja.
+          next.clear();
+        }
+        next.add(line.id);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedLineIds(new Set());
+
+  const selectedLines = lines.filter(l => selectedLineIds.has(l.id));
+  const selectedTotal = selectedLines.reduce((sum, l) => sum + ((l.credit || 0) - (l.debit || 0)), 0);
+  const selectedAccountId = selectedLines[0]?.accountId || null;
+
+  // Buat modal pemilihan mutasi target: mutasi sistem di akun yang sama,
+  // arah yang sama (in kalau total kredit, out kalau total debit), belum
+  // dipakai baris lain, diurutin dari yang nominalnya paling deket sama
+  // total gabungan baris yang dicentang (biar kandidat paling masuk akal
+  // muncul duluan) + bisa disaring pakai kata kunci keterangan.
+  const groupMatchCandidates = (() => {
+    if (!selectedAccountId || selectedLines.length === 0) return [];
+    const wantType = selectedTotal >= 0 ? 'in' : 'out';
+    const searchLower = groupMatchSearch.trim().toLowerCase();
+    return mutations
+      .filter(m => m.accountId === selectedAccountId && m.type === wantType && !usedMutationIds.has(m.id))
+      .filter(m => !searchLower || (m.description || '').toLowerCase().includes(searchLower))
+      .sort((a, b) => Math.abs((Number(a.amount) || 0) - Math.abs(selectedTotal)) - Math.abs((Number(b.amount) || 0) - Math.abs(selectedTotal)))
+      .slice(0, 30);
+  })();
+
+  const handleGroupMatchConfirm = async (mutation) => {
+    if (selectedLines.length === 0) return;
+    const diff = Math.abs(Math.abs(selectedTotal) - Math.abs(Number(mutation.amount) || 0));
+    if (diff > 0) {
+      const proceed = confirm(`Total ${selectedLines.length} baris yang dicentang (${formatRp(Math.abs(selectedTotal))}) BEDA ${formatRp(diff)} sama nominal mutasi sistem ini (${formatRp(mutation.amount)}). Tetap cocokkan? (Pastikan ini emang bukan salah pilih baris — kalau beda karena ada biaya admin/potongan bank, bisa lanjut, tapi kalau ragu batalkan dulu & cek ulang.)`);
+      if (!proceed) return;
+    }
+    setGroupMatchSubmitting(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const matchedBy = currentUser?.fullName || currentUser?.email || '-';
+      const batch = writeBatch(db);
+      selectedLines.forEach(line => {
+        batch.update(doc(db, 'bank_statement_lines', line.id), {
+          matchStatus: 'matched', matchedMutationId: mutation.id,
+          matchedBy, matchedAt: nowIso,
+        });
+      });
+      await batch.commit();
+      setShowGroupMatchModal(false);
+      setGroupMatchSearch('');
+      clearSelection();
+      await fetchReconciliationData();
+    } catch (err) {
+      alert('Gagal mencocokkan gabungan: ' + err.message);
+    }
+    setGroupMatchSubmitting(false);
   };
 
   // ID dokumen deterministik per baris mutasi — sanitize teks keterangan
@@ -3530,6 +3615,25 @@ function BankReconciliationTab({ styles, isDark, currentUser, financialAccounts 
           </select>
         </div>
 
+        {selectedLineIds.size > 0 && (
+          <div className={`mb-3 p-3 rounded-lg border border-indigo-500 bg-indigo-500/10 flex flex-col md:flex-row md:items-center md:justify-between gap-2`}>
+            <p className={`text-[10.5px] font-medium ${styles.textTitle}`}>
+              {selectedLineIds.size} baris dicentang · Total {formatRp(Math.abs(selectedTotal))} ({selectedTotal >= 0 ? 'masuk' : 'keluar'}) · {accountLabel(selectedAccountId)}
+            </p>
+            <div className="flex gap-1.5 flex-shrink-0">
+              <button
+                onClick={() => setShowGroupMatchModal(true)}
+                className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[10.5px] font-medium rounded-md"
+              >
+                Cocokkan ke 1 Mutasi Sistem
+              </button>
+              <button onClick={clearSelection} className={`px-2.5 py-1.5 text-[10.5px] font-medium rounded-md border ${styles.textSub}`}>
+                Batalkan Pilihan
+              </button>
+            </div>
+          </div>
+        )}
+
         {loading ? (
           <p className={`text-xs ${styles.textSub} text-center py-6`}>Memuat data...</p>
         ) : filteredLines.length === 0 ? (
@@ -3545,13 +3649,24 @@ function BankReconciliationTab({ styles, isDark, currentUser, financialAccounts 
               const suggested = findSuggestedMatch(line);
               const matchedMutation = line.matchedMutationId ? mutations.find(m => m.id === line.matchedMutationId) : null;
               return (
-                <div key={line.id} className={`p-3 rounded-lg border ${styles.innerBg}`}>
+                <div key={line.id} className={`p-3 rounded-lg border ${styles.innerBg} ${selectedLineIds.has(line.id) ? 'ring-2 ring-indigo-500' : ''}`}>
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                    <div>
-                      <p className={`text-xs font-medium ${styles.textTitle}`}>{line.description || '-'}</p>
-                      <p className={`text-[10.5px] ${styles.textSub} mt-0.5`}>
-                        {formatDateDDMMYYYY((line.date || '').slice(0, 10))} · {line.bankCode} · {accountLabel(line.accountId)}
-                      </p>
+                    <div className="flex items-start gap-2">
+                      {line.matchStatus === 'unmatched' && (
+                        <input
+                          type="checkbox"
+                          checked={selectedLineIds.has(line.id)}
+                          onChange={() => toggleLineSelection(line)}
+                          className="mt-0.5 flex-shrink-0"
+                          title="Centang buat cocokkan gabungan beberapa baris ke 1 mutasi sistem"
+                        />
+                      )}
+                      <div>
+                        <p className={`text-xs font-medium ${styles.textTitle}`}>{line.description || '-'}</p>
+                        <p className={`text-[10.5px] ${styles.textSub} mt-0.5`}>
+                          {formatDateDDMMYYYY((line.date || '').slice(0, 10))} · {line.bankCode} · {accountLabel(line.accountId)}
+                        </p>
+                      </div>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className={`text-sm font-bold ${(line.credit || 0) > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
@@ -3651,6 +3766,50 @@ function BankReconciliationTab({ styles, isDark, currentUser, financialAccounts 
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${importing ? 'animate-spin' : ''}`} /> {importing ? 'Memproses...' : 'Import Sekarang'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGroupMatchModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className={`${styles.cardBg} border rounded-xl max-w-lg w-full p-5 max-h-[85vh] flex flex-col`}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className={`text-sm font-bold ${styles.textTitle}`}>Cocokkan Gabungan ke 1 Mutasi Sistem</h3>
+              <button onClick={() => { setShowGroupMatchModal(false); setGroupMatchSearch(''); }} className={styles.textSub}><X className="w-4 h-4" /></button>
+            </div>
+            <p className={`text-[10.5px] ${styles.textSub} mb-3`}>
+              {selectedLines.length} baris mutasi bank dicentang (total {formatRp(Math.abs(selectedTotal))}, {selectedTotal >= 0 ? 'masuk' : 'keluar'}). Pilih 1 mutasi sistem di bawah buat dijadikan padanannya — dipakai buat kasus 1 pembayaran sistem yang aslinya masuk lewat beberapa kali transfer bank terpisah (misal DP dicicil).
+            </p>
+            <input
+              type="text" placeholder="Cari keterangan mutasi sistem..."
+              value={groupMatchSearch} onChange={e => setGroupMatchSearch(e.target.value)}
+              className={`w-full px-2 py-2 rounded-lg border text-xs mb-2 ${styles.inputBg}`}
+            />
+            <div className="overflow-y-auto flex-1 space-y-1.5 pr-1">
+              {groupMatchCandidates.length === 0 ? (
+                <p className={`text-[10.5px] ${styles.textSub} text-center py-4`}>Nggak ada kandidat mutasi sistem yang cocok arah/akunnya. Coba ubah kata kunci pencarian, atau cek lagi baris yang dicentang.</p>
+              ) : groupMatchCandidates.map(m => {
+                const diff = Math.abs((Number(m.amount) || 0) - Math.abs(selectedTotal));
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => handleGroupMatchConfirm(m)}
+                    disabled={groupMatchSubmitting}
+                    className={`w-full text-left p-2.5 rounded-lg border ${styles.innerBg} hover:border-indigo-500 disabled:opacity-50 flex items-center justify-between gap-2`}
+                  >
+                    <div>
+                      <p className={`text-xs font-medium ${styles.textTitle}`}>{m.description || '-'}</p>
+                      <p className={`text-[10.5px] ${styles.textSub}`}>{formatDateDDMMYYYY((m.createdAt || '').slice(0, 10))} · {formatRp(m.amount)}</p>
+                    </div>
+                    {diff === 0 ? (
+                      <span className="text-[9.5px] px-1.5 py-0.5 rounded-full font-bold bg-emerald-500/15 text-emerald-500 flex-shrink-0">PAS</span>
+                    ) : (
+                      <span className="text-[9.5px] px-1.5 py-0.5 rounded-full font-bold bg-amber-500/15 text-amber-500 flex-shrink-0">Beda {formatRp(diff)}</span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
