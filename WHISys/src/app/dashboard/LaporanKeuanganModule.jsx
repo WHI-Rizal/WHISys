@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit, writeBatch, documentId } from 'firebase/firestore';
 import {
   BookOpen, Wallet, TrendingUp, Scale, Users, RefreshCw, Download,
   ChevronDown, ChevronRight, ShieldCheck, X, BarChart3, CheckCircle2, RotateCcw,
@@ -22,6 +22,7 @@ import {
   diagnoseMissingCommissionJournals, applyMissingCommissionJournalsCorrection, deleteJournalEntryById,
   diagnoseMissingIncomePaymentJournals, applyMissingIncomePaymentJournalsCorrection
 } from '../../lib/journal';
+import { parseBankStatementFile } from '../../lib/bankStatementParser';
 
 const DEFAULT_COMPANY_PROFILE = {
   name: 'PT. WISATA HALAL INTERNASIONAL',
@@ -1037,6 +1038,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
           { key: 'cash_flow', label: 'Arus Kas', icon: TrendingUp },
           { key: 'ar_ap', label: 'Piutang & Hutang', icon: Users },
           { key: 'margin_analysis', label: 'Analisa Margin', icon: ArrowUpRight },
+          { key: 'bank_reconciliation', label: 'Rekonsiliasi Bank', icon: RefreshCw },
         ].map(t => (
           <button
             key={t.key}
@@ -1079,6 +1081,9 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
       )}
       {activeTab === 'cash_bank' && (
         <CashBankTab styles={styles} isDark={isDark} currentUser={currentUser} financialAccounts={financialAccounts} onRefresh={fetchData} />
+      )}
+      {activeTab === 'bank_reconciliation' && (
+        <BankReconciliationTab styles={styles} isDark={isDark} currentUser={currentUser} financialAccounts={financialAccounts} />
       )}
     </div>
   );
@@ -3270,6 +3275,382 @@ function MarginAnalysisTab({ styles, isDark, packagesList, journalEntries, compa
             <div className={`pt-2 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'} text-xs space-y-1`}>
               <div className="flex justify-between"><span className={styles.textSub}>Realisasi Income (DPP)</span><span className="font-medium">{formatRp(selectedPkgDetail.realisasiIncome)}</span></div>
               <div className="flex justify-between"><span className={styles.textSub}>Realisasi HPP Vendor</span><span className="font-medium">{formatRp(selectedPkgDetail.realisasiHpp)}</span></div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// TAB: REKONSILIASI BANK — mutasi bank hasil IMPORT FILE (Excel/CSV,
+// diupload manual staf lewat tombol "Import File Mutasi" — dibaca &
+// diparse langsung di browser, lihat src/lib/bankStatementParser.js,
+// nggak ada server/Google Cloud yang terlibat) dicocokin manual sama
+// account_mutations sistem. SENGAJA nggak auto-match/auto-commit — staf
+// yang konfirmasi tiap kecocokan (lihat catatan di bawah kenapa).
+//
+// Import-nya IDEMPOTEN — file yang sama diupload berkali-kali nggak
+// bakal bikin data dobel: tiap baris mutasi dikasih ID dokumen Firestore
+// yang deterministik (dibentuk dari akun+tanggal+keterangan+nominal),
+// jadi baris yang persis sama otomatis cuma nempel ke dokumen yang sama
+// (dilewatin kalau udah ada, BUKAN ditimpa — biar status kecocokan yang
+// udah dikonfirmasi nggak kereset gara-gara import ulang).
+// =====================================================================
+function BankReconciliationTab({ styles, isDark, currentUser, financialAccounts }) {
+  const [lines, setLines] = useState([]);
+  const [mutations, setMutations] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterAccountId, setFilterAccountId] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('unmatched');
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importAccountId, setImportAccountId] = useState('');
+  const [importFile, setImportFile] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [savingLineId, setSavingLineId] = useState(null);
+
+  const isSuperAdmin = (currentUser?.role || '').toLowerCase().includes('super');
+
+  const fetchReconciliationData = async () => {
+    setLoading(true);
+    try {
+      const [linesSnap, mutSnap] = await Promise.all([
+        getDocs(query(collection(db, 'bank_statement_lines'), orderBy('date', 'desc'), limit(500))),
+        getDocs(query(collection(db, 'account_mutations'), orderBy('createdAt', 'desc'), limit(500))),
+      ]);
+      setLines(linesSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setMutations(mutSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (err) {
+      console.error('Gagal memuat data rekonsiliasi bank:', err);
+      alert('Gagal memuat data rekonsiliasi bank: ' + err.message);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchReconciliationData(); }, []);
+
+  // Kandidat kecocokan buat 1 baris mutasi bank — dicari dari
+  // account_mutations akun yang sama, arah yang sama (in/out), nominal
+  // sama persis, dalam rentang tanggal toleransi (bank kadang beda 1-2
+  // hari kliring dari catatan sistem), DAN belum dipakai jadi kandidat
+  // buat baris lain di render ini (biar nggak nyaranin 1 mutasi sistem
+  // buat 2 baris bank yang berbeda). Ini cuma SARAN — staf yang
+  // konfirmasi manual lewat tombol, nggak ada yang otomatis nge-commit.
+  const usedMutationIds = new Set(lines.filter(l => l.matchStatus === 'matched' && l.matchedMutationId).map(l => l.matchedMutationId));
+  const findSuggestedMatch = (line) => {
+    if (line.matchStatus !== 'unmatched') return null;
+    const wantType = (Number(line.credit) || 0) > 0 ? 'in' : 'out';
+    const wantAmount = Math.round(Math.max(Number(line.debit) || 0, Number(line.credit) || 0));
+    const lineDate = new Date((line.date || '').slice(0, 10));
+    return mutations.find(m => {
+      if (usedMutationIds.has(m.id)) return false;
+      if (m.accountId !== line.accountId) return false;
+      if (m.type !== wantType) return false;
+      if (Math.round(Number(m.amount) || 0) !== wantAmount) return false;
+      const mDate = new Date((m.createdAt || '').slice(0, 10));
+      const diffDays = Math.abs((mDate - lineDate) / (1000 * 60 * 60 * 24));
+      return diffDays <= 3;
+    }) || null;
+  };
+
+  const handleConfirmMatch = async (line, mutationId) => {
+    setSavingLineId(line.id);
+    try {
+      await updateDoc(doc(db, 'bank_statement_lines', line.id), {
+        matchStatus: 'matched', matchedMutationId: mutationId,
+        matchedBy: currentUser?.fullName || currentUser?.email || '-', matchedAt: new Date().toISOString(),
+      });
+      await fetchReconciliationData();
+    } catch (err) {
+      alert('Gagal konfirmasi kecocokan: ' + err.message);
+    }
+    setSavingLineId(null);
+  };
+
+  const handleUnmatch = async (line) => {
+    setSavingLineId(line.id);
+    try {
+      await updateDoc(doc(db, 'bank_statement_lines', line.id), {
+        matchStatus: 'unmatched', matchedMutationId: null, matchedBy: null, matchedAt: null,
+      });
+      await fetchReconciliationData();
+    } catch (err) {
+      alert('Gagal membatalkan kecocokan: ' + err.message);
+    }
+    setSavingLineId(null);
+  };
+
+  const handleIgnore = async (line) => {
+    if (!confirm(`Tandai baris mutasi bank ini ("${line.description}", ${formatRp(line.debit || line.credit)}) sebagai DIABAIKAN? Pakai ini kalau mutasi ini emang nggak ada padanannya di sistem (misal biaya admin bank yang belum dicatat) — bukan buat nyembunyiin selisih yang belum jelas sebabnya.`)) return;
+    setSavingLineId(line.id);
+    try {
+      await updateDoc(doc(db, 'bank_statement_lines', line.id), { matchStatus: 'ignored' });
+      await fetchReconciliationData();
+    } catch (err) {
+      alert('Gagal menandai diabaikan: ' + err.message);
+    }
+    setSavingLineId(null);
+  };
+
+  // ID dokumen deterministik per baris mutasi — sanitize teks keterangan
+  // biar valid jadi Firestore doc ID (nggak boleh ada '/', dibatasi
+  // panjangnya), + index kemunculan (occurrence) buat baris yang
+  // tanggal+keterangan+nominalnya PERSIS SAMA dalam 1 file yang sama
+  // (misal 2 transfer identik di hari yang sama) — biar dianggap 2
+  // transaksi beda, bukan 1 transaksi yang "sama" & saling menimpa.
+  const buildLineDocId = (accountId, row, occurrenceIndex) => {
+    const dateStr = (row.date || '').slice(0, 10);
+    const descSlug = (row.description || '-').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
+    return `${accountId}_${dateStr}_${descSlug}_${Math.round(row.debit)}_${Math.round(row.credit)}_${occurrenceIndex}`;
+  };
+
+  const handleImportSubmit = async () => {
+    if (!importAccountId) { alert('Pilih dulu akun Kas/Bank tujuan import ini.'); return; }
+    if (!importFile) { alert('Pilih dulu file Excel/CSV mutasi bank-nya.'); return; }
+    setImporting(true);
+    try {
+      const buffer = await importFile.arrayBuffer();
+      const { rows, skipped, totalRowsScanned } = parseBankStatementFile(buffer);
+      if (rows.length === 0) {
+        alert(`File terbaca, tapi nggak ada baris mutasi yang valid ketemu (${skipped} baris dilewati dari ${totalRowsScanned} baris di-scan). Cek lagi isi filenya.`);
+        setImporting(false);
+        return;
+      }
+
+      // Bentuk ID dokumen tiap baris + hitung occurrence index buat baris
+      // yang signature-nya (tanggal+keterangan+nominal) kembar.
+      const occurrenceCounter = {};
+      const rowsWithId = rows.map(row => {
+        const baseKey = `${(row.date || '').slice(0, 10)}|${row.description}|${row.debit}|${row.credit}`;
+        const occ = occurrenceCounter[baseKey] || 0;
+        occurrenceCounter[baseKey] = occ + 1;
+        return { row, docId: buildLineDocId(importAccountId, row, occ) };
+      });
+
+      // Cek mana yang UDAH ADA di Firestore (dari import sebelumnya) —
+      // biar nggak ditimpa ulang (import idempoten, status kecocokan yang
+      // udah dikonfirmasi harus tetap nempel). Query by document ID,
+      // dipecah per potongan <=30 (batas Firestore buat where(...,'in',...)).
+      const allIds = rowsWithId.map(r => r.docId);
+      const existingIds = new Set();
+      for (let i = 0; i < allIds.length; i += 30) {
+        const chunk = allIds.slice(i, i + 30);
+        const snap = await getDocs(query(collection(db, 'bank_statement_lines'), where(documentId(), 'in', chunk)));
+        snap.docs.forEach(d => existingIds.add(d.id));
+      }
+
+      const toWrite = rowsWithId.filter(r => !existingIds.has(r.docId));
+      const nowIso = new Date().toISOString();
+      // writeBatch Firestore maks 500 operasi — dipecah per 400 biar aman.
+      for (let i = 0; i < toWrite.length; i += 400) {
+        const chunk = toWrite.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach(({ row, docId }) => {
+          batch.set(doc(db, 'bank_statement_lines', docId), {
+            accountId: importAccountId, date: row.date, description: row.description || '-',
+            debit: row.debit || 0, credit: row.credit || 0, balanceAfter: row.balanceAfter,
+            amount: (row.credit || 0) - (row.debit || 0),
+            matchStatus: 'unmatched', matchedMutationId: null, matchedBy: null, matchedAt: null,
+            importedAt: nowIso, importedBy: currentUser?.fullName || currentUser?.email || '-',
+          });
+        });
+        await batch.commit();
+      }
+
+      alert(`Selesai!\n\nBaris dibaca: ${rows.length}\nBaris baru masuk: ${toWrite.length}\nBaris dilewati (udah pernah diimport sebelumnya, isinya identik): ${rowsWithId.length - toWrite.length}\nBaris di file yang dilewati parser (kosong/nggak lengkap): ${skipped}`);
+      setShowImportModal(false);
+      setImportFile(null);
+      setImportAccountId('');
+      await fetchReconciliationData();
+    } catch (err) {
+      alert('Gagal import file mutasi: ' + err.message);
+    }
+    setImporting(false);
+  };
+
+  const filteredLines = lines.filter(l => {
+    if (filterAccountId !== 'all' && l.accountId !== filterAccountId) return false;
+    if (filterStatus !== 'all' && l.matchStatus !== filterStatus) return false;
+    return true;
+  });
+
+  const unmatchedCount = lines.filter(l => l.matchStatus === 'unmatched').length;
+  const matchedCount = lines.filter(l => l.matchStatus === 'matched').length;
+  const ignoredCount = lines.filter(l => l.matchStatus === 'ignored').length;
+
+  const accountLabel = (accountId) => {
+    const fa = financialAccounts.find(a => a.id === accountId);
+    return fa ? describeFinancialAccount(fa) : (accountId || '-');
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className={`${styles.cardBg} border rounded-xl p-4`}>
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
+          <div>
+            <h3 className={`text-sm font-bold ${styles.textTitle}`}>Rekonsiliasi Bank</h3>
+            <p className={`text-[10.5px] ${styles.textSub} mt-0.5`}>Mutasi bank hasil import file Excel/CSV (diupload manual, dibaca langsung di browser) dicocokin manual sama riwayat mutasi sistem. Konfirmasi kecocokan cuma nempelin catatan — nggak mengubah saldo/jurnal apapun. Import file yang sama berkali-kali aman, nggak bikin data dobel.</p>
+          </div>
+          {isSuperAdmin && (
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 disabled:opacity-60 flex-shrink-0"
+            >
+              <Download className="w-3.5 h-3.5" /> Import File Mutasi
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+            <p className={`text-[10.5px] ${styles.textSub}`}>Belum Dicocokkan</p>
+            <p className={`text-lg font-bold ${unmatchedCount > 0 ? 'text-amber-500' : styles.textTitle}`}>{unmatchedCount}</p>
+          </div>
+          <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+            <p className={`text-[10.5px] ${styles.textSub}`}>Sudah Cocok</p>
+            <p className={`text-lg font-bold text-emerald-500`}>{matchedCount}</p>
+          </div>
+          <div className={`p-3 rounded-lg ${styles.innerBg} border`}>
+            <p className={`text-[10.5px] ${styles.textSub}`}>Diabaikan</p>
+            <p className={`text-lg font-bold ${styles.textTitle}`}>{ignoredCount}</p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 mb-3">
+          <select value={filterAccountId} onChange={e => setFilterAccountId(e.target.value)} className={`px-2 py-1.5 rounded-lg border text-xs ${styles.inputBg}`}>
+            <option value="all">Semua Akun</option>
+            {financialAccounts.map(fa => <option key={fa.id} value={fa.id}>{describeFinancialAccount(fa)}</option>)}
+          </select>
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className={`px-2 py-1.5 rounded-lg border text-xs ${styles.inputBg}`}>
+            <option value="unmatched">Belum Dicocokkan</option>
+            <option value="matched">Sudah Cocok</option>
+            <option value="ignored">Diabaikan</option>
+            <option value="all">Semua</option>
+          </select>
+        </div>
+
+        {loading ? (
+          <p className={`text-xs ${styles.textSub} text-center py-6`}>Memuat data...</p>
+        ) : filteredLines.length === 0 ? (
+          <div className={`p-4 rounded-lg ${styles.innerBg} border text-xs ${styles.textSub} flex items-center gap-2`}>
+            <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+            {lines.length === 0
+              ? 'Belum ada mutasi bank yang diimport. Klik "Import File Mutasi" buat upload file Excel/CSV rekening koran.'
+              : 'Nggak ada baris yang cocok filter ini.'}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {filteredLines.map(line => {
+              const suggested = findSuggestedMatch(line);
+              const matchedMutation = line.matchedMutationId ? mutations.find(m => m.id === line.matchedMutationId) : null;
+              return (
+                <div key={line.id} className={`p-3 rounded-lg border ${styles.innerBg}`}>
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                    <div>
+                      <p className={`text-xs font-medium ${styles.textTitle}`}>{line.description || '-'}</p>
+                      <p className={`text-[10.5px] ${styles.textSub} mt-0.5`}>
+                        {formatDateDDMMYYYY((line.date || '').slice(0, 10))} · {line.bankCode} · {accountLabel(line.accountId)}
+                      </p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className={`text-sm font-bold ${(line.credit || 0) > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                        {(line.credit || 0) > 0 ? '+' : '-'}{formatRp(line.debit || line.credit)}
+                      </p>
+                      <span className={`text-[9.5px] px-1.5 py-0.5 rounded-full font-bold ${
+                        line.matchStatus === 'matched' ? 'bg-emerald-500/15 text-emerald-500' :
+                        line.matchStatus === 'ignored' ? 'bg-slate-500/15 text-slate-400' : 'bg-amber-500/15 text-amber-500'
+                      }`}>
+                        {line.matchStatus === 'matched' ? 'COCOK' : line.matchStatus === 'ignored' ? 'DIABAIKAN' : 'BELUM COCOK'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {line.matchStatus === 'matched' && matchedMutation && (
+                    <div className={`mt-2 pt-2 border-t border-dashed text-[10.5px] ${styles.textSub} flex items-center justify-between gap-2`}>
+                      <span>Dicocokkan ke: {matchedMutation.description} ({formatDateDDMMYYYY((matchedMutation.createdAt || '').slice(0, 10))}) — oleh {line.matchedBy || '-'}</span>
+                      <button onClick={() => handleUnmatch(line)} disabled={savingLineId === line.id} className="text-rose-500 hover:text-rose-400 disabled:opacity-50 flex-shrink-0">Batalkan</button>
+                    </div>
+                  )}
+
+                  {line.matchStatus === 'unmatched' && (
+                    <div className="mt-2 pt-2 border-t border-dashed flex flex-col gap-1.5">
+                      {suggested ? (
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-1.5">
+                          <p className={`text-[10.5px] ${styles.textSub}`}>
+                            Saran kecocokan: <span className={styles.textTitle}>{suggested.description}</span> ({formatDateDDMMYYYY((suggested.createdAt || '').slice(0, 10))}, {formatRp(suggested.amount)})
+                          </p>
+                          <div className="flex gap-1.5 flex-shrink-0">
+                            <button
+                              onClick={() => handleConfirmMatch(line, suggested.id)}
+                              disabled={savingLineId === line.id}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10.5px] font-medium rounded-md disabled:opacity-50"
+                            >
+                              Konfirmasi Cocok
+                            </button>
+                            <button
+                              onClick={() => handleIgnore(line)}
+                              disabled={savingLineId === line.id}
+                              className={`px-2.5 py-1 text-[10.5px] font-medium rounded-md border ${styles.textSub}`}
+                            >
+                              Abaikan
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <p className={`text-[10.5px] ${styles.textSub} flex items-center gap-1`}>
+                            <AlertTriangle className="w-3 h-3 text-amber-500 flex-shrink-0" /> Nggak ada saran kecocokan otomatis — cek manual di tab Kas & Bank, atau tandai diabaikan kalau memang nggak ada padanannya.
+                          </p>
+                          <button
+                            onClick={() => handleIgnore(line)}
+                            disabled={savingLineId === line.id}
+                            className={`px-2.5 py-1 text-[10.5px] font-medium rounded-md border ${styles.textSub} flex-shrink-0`}
+                          >
+                            Abaikan
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className={`${styles.cardBg} border rounded-xl max-w-md w-full p-5`}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className={`text-sm font-bold ${styles.textTitle}`}>Import File Mutasi Bank</h3>
+              <button onClick={() => { setShowImportModal(false); setImportFile(null); setImportAccountId(''); }} className={styles.textSub}><X className="w-4 h-4" /></button>
+            </div>
+            <p className={`text-[10.5px] ${styles.textSub} mb-3`}>Upload file Excel/CSV hasil export mutasi rekening koran — dibaca langsung di browser, nggak diupload ke server manapun selain Firestore WHISys sendiri. Import file yang sama berkali-kali aman (nggak bikin data dobel).</p>
+            <div className="space-y-3">
+              <div>
+                <label className={`block text-[10.5px] font-medium mb-1 ${styles.textSub}`}>Akun Kas/Bank Tujuan</label>
+                <select value={importAccountId} onChange={e => setImportAccountId(e.target.value)} className={`w-full px-2 py-2 rounded-lg border text-xs ${styles.inputBg}`}>
+                  <option value="">Pilih akun...</option>
+                  {financialAccounts.map(fa => <option key={fa.id} value={fa.id}>{describeFinancialAccount(fa)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={`block text-[10.5px] font-medium mb-1 ${styles.textSub}`}>File Excel/CSV</label>
+                <input
+                  type="file" accept=".xlsx,.xls,.csv"
+                  onChange={e => setImportFile(e.target.files?.[0] || null)}
+                  className={`w-full text-xs ${styles.textSub}`}
+                />
+              </div>
+              <button
+                onClick={handleImportSubmit}
+                disabled={importing}
+                className="w-full px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 disabled:opacity-60"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${importing ? 'animate-spin' : ''}`} /> {importing ? 'Memproses...' : 'Import Sekarang'}
+              </button>
             </div>
           </div>
         </div>
