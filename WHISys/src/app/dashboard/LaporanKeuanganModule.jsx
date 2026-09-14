@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
 import {
   BookOpen, Wallet, TrendingUp, Scale, Users, RefreshCw, Download,
   ChevronDown, ChevronRight, ShieldCheck, X, BarChart3, CheckCircle2, RotateCcw,
-  Clock, ArrowDownLeft, ArrowUpRight, Eye, Pencil, Trash2
+  Clock, ArrowDownLeft, ArrowUpRight, Eye, Pencil, Trash2, AlertTriangle
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -501,6 +501,39 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
     setApplyingMissingCommissionFix(false);
   };
 
+  // Banner rekonsiliasi PASIF — dihitung otomatis dari data yang udah
+  // ke-load (nggak nunggu staf klik tombol "Cek ..." manapun), biar kondisi
+  // real laporan keuangan (ada selisih/jurnal bolong atau nggak) langsung
+  // kelihatan begitu halaman ini dibuka. Ini bagian dari "tutup celah" biar
+  // gap kayak kasus Piutang Jamaah (14 Sep 2026) nggak bisa lagi kegulung
+  // diam-diam berminggu-minggu sebelum ketauan — sekarang staf/manajemen
+  // langsung liat peringatan di paling atas halaman.
+  const liveReconciliationSummary = useMemo(() => {
+    const arDiag = diagnoseArReconciliation({ bookings: bookingsList, journalEntries });
+    const missingBooking = diagnoseMissingBookingJournals({ bookings: bookingsList, journalEntries });
+    const missingIncome = diagnoseMissingIncomePaymentJournals({ paymentsIncome, journalEntries });
+    const missingCommission = diagnoseMissingCommissionJournals({ commissionPayments, journalEntries });
+
+    // Total selisih Piutang Jamaah = jumlah absolut selisih per booking yang
+    // beda (arDiag.mismatches, kalau ada), bukan cuma net (biar selisih plus
+    // & minus antar booking nggak saling menutupi jadi keliatan "0" padahal
+    // sebenarnya ada masalah di beberapa booking).
+    const arMismatchTotal = (arDiag?.mismatches || []).reduce((acc, m) => acc + Math.abs(Number(m.diff) || 0), 0);
+    const arMismatchCount = (arDiag?.mismatches || []).length;
+    const orphanCount = (arDiag?.orphanEntries || []).length;
+    const duplicateCount = (arDiag?.duplicateBookingCreated || []).length;
+
+    const totalGaps = arMismatchCount + orphanCount + duplicateCount + missingBooking.count + missingIncome.count + missingCommission.count;
+    return {
+      isClean: totalGaps === 0,
+      arMismatchTotal, arMismatchCount, orphanCount, duplicateCount,
+      missingBookingCount: missingBooking.count,
+      missingIncomeCount: missingIncome.count,
+      missingCommissionCount: missingCommission.count,
+      totalGaps,
+    };
+  }, [bookingsList, journalEntries, paymentsIncome, commissionPayments]);
+
   if (loading) {
     return (
       <div className={`${styles.cardBg} border rounded-xl p-12 text-center`}>
@@ -579,6 +612,40 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
           )}
         </div>
       </div>
+
+      {liveReconciliationSummary.isClean ? (
+        <div className={`rounded-xl p-3 border flex items-center gap-2 text-xs ${isDark ? 'bg-emerald-950/30 border-emerald-800/50 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+          <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+          <span>Rekonsiliasi otomatis: nggak ada selisih/jurnal bolong yang kedeteksi saat ini. Piutang Jamaah di Neraca sudah balance sama data live.</span>
+        </div>
+      ) : (
+        <div className={`rounded-xl p-3 border text-xs ${isDark ? 'bg-rose-950/30 border-rose-800/50 text-rose-400' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
+          <div className="flex items-center gap-2 font-bold mb-1.5">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            <span>Rekonsiliasi otomatis nemuin {liveReconciliationSummary.totalGaps} celah di laporan keuangan — cek & benerin sebelum laporan ini dipakai manajemen.</span>
+          </div>
+          <ul className="pl-6 list-disc space-y-0.5">
+            {liveReconciliationSummary.arMismatchCount > 0 && (
+              <li>{liveReconciliationSummary.arMismatchCount} booking selisih antara Piutang Jamaah di jurnal vs data live (total selisih Rp {liveReconciliationSummary.arMismatchTotal.toLocaleString('id-ID')}) — buka "Rekonsiliasi Piutang per Booking".</li>
+            )}
+            {liveReconciliationSummary.orphanCount > 0 && (
+              <li>{liveReconciliationSummary.orphanCount} jurnal yatim piatu (nempel ke booking yang udah dihapus permanen) — buka "Rekonsiliasi Piutang per Booking".</li>
+            )}
+            {liveReconciliationSummary.duplicateCount > 0 && (
+              <li>{liveReconciliationSummary.duplicateCount} booking kena jurnal "Booking baru" dobel-posting — buka "Rekonsiliasi Piutang per Booking".</li>
+            )}
+            {liveReconciliationSummary.missingBookingCount > 0 && (
+              <li>{liveReconciliationSummary.missingBookingCount} booking belum pernah kejurnal sama sekali — klik "Cek Booking Belum Terjurnal".</li>
+            )}
+            {liveReconciliationSummary.missingIncomeCount > 0 && (
+              <li>{liveReconciliationSummary.missingIncomeCount} setoran jamaah belum kejurnal — klik "Cek Setoran Belum Terjurnal".</li>
+            )}
+            {liveReconciliationSummary.missingCommissionCount > 0 && (
+              <li>{liveReconciliationSummary.missingCommissionCount} pembayaran komisi Mitra/Agen belum kejurnal — klik "Cek Komisi Mitra Belum Terjurnal".</li>
+            )}
+          </ul>
+        </div>
+      )}
 
       {showRescheduleDiagnosis && rescheduleDiagnosis && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
