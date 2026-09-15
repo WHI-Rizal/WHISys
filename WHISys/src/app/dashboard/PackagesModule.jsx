@@ -26,6 +26,33 @@ const formatMonthYear = (dateString) => {
   return date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
 };
 
+// Kompres & ubah file gambar (flyer promosi paket) jadi data URL base64,
+// disimpen LANGSUNG di dokumen Firestore paket (bukan Firebase Storage —
+// WHISys belum pakai Storage sama sekali di manapun, jadi biar konsisten
+// & nggak nambah setup baru, gambar disimpen inline kayak logo PDF Kwitansi
+// yang juga di-encode ke data URL). Dikecilkan dulu ke maks 1000px lebar +
+// dikompres JPEG kualitas 0.72 biar ukurannya aman jauh di bawah limit 1MB
+// per dokumen Firestore (termasuk field lain kayak itinerary/budget items).
+const compressImageToDataUrl = (file, maxWidth = 1000, quality = 0.72) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onerror = reject;
+  reader.onload = () => {
+    const img = new Image();
+    img.onerror = reject;
+    img.onload = () => {
+      const scale = Math.min(1, maxWidth / img.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+
 // Daftar default Destinasi/Kota Tujuan (paket Wisata Halal & LA Only) —
 // dibuat jadi kategori baku (bisa ditambah/diedit lewat "Kelola Kategori")
 // biar penulisannya seragam, nggak ada lagi yang nulis "Japan" vs "Jepang".
@@ -227,8 +254,12 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     priceIncludes: DEFAULT_PRICE_INCLUDES,
     priceExcludes: DEFAULT_PRICE_EXCLUDES,
     flightSegments: DEFAULT_FLIGHT_SEGMENTS,
-    specialNote: ''
+    specialNote: '',
+    // Flyer promosi paket (opsional) — dipakai di halaman 1 dokumen Detail
+    // Paket Wisata, disimpen sebagai data URL base64 (lihat compressImageToDataUrl).
+    flyerImageDataUrl: ''
   });
+  const [uploadingFlyer, setUploadingFlyer] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -308,7 +339,8 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       priceIncludes: DEFAULT_PRICE_INCLUDES,
       priceExcludes: DEFAULT_PRICE_EXCLUDES,
       flightSegments: DEFAULT_FLIGHT_SEGMENTS,
-      specialNote: ''
+      specialNote: '',
+      flyerImageDataUrl: ''
     });
     setShowModal(true);
   };
@@ -352,7 +384,8 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         ? pkg.priceExcludes : DEFAULT_PRICE_EXCLUDES,
       flightSegments: (Array.isArray(pkg.flightSegments) && pkg.flightSegments.length > 0)
         ? pkg.flightSegments : DEFAULT_FLIGHT_SEGMENTS,
-      specialNote: pkg.specialNote || ''
+      specialNote: pkg.specialNote || '',
+      flyerImageDataUrl: pkg.flyerImageDataUrl || ''
     });
     setShowModal(true);
   };
@@ -679,24 +712,48 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         }).join('')
       : '<li style="color:#94a3b8;list-style:none;">Belum diisi.</li>';
 
+    // Kop surat: logo di kiri (lebih besar, biar senada sama contoh flyer
+    // promosi WHI Tour & Travel), nama PT + alamat rata kanan di sisi kanan.
+    // Kalau paket ada flyer promosi yang diupload staf, halaman 1 dibikin 2
+    // kolom (flyer di kiri, kartu Detail Paket + Informasi Pemesanan di
+    // kanan) — persis pola contoh dokumen. Kalau nggak ada flyer, kartu
+    // detailnya tampil sendirian full-width (fallback, tetap rapi).
+    const hasFlyer = !!pkg.flyerImageDataUrl;
+    const detailCardsHtml = `
+      <div class="detail-card">
+        <div class="card-bar">DETAIL PAKET WISATA</div>
+        <table class="info-grid">
+          <tr><td class="info-label">Nama Paket</td><td class="info-value">${pkg.name || '-'}</td></tr>
+          <tr><td class="info-label">Jenis Paket</td><td class="info-value">${pkg.type || '-'}</td></tr>
+          <tr><td class="info-label">Tujuan / Destinasi</td><td class="info-value">${pkg.destinationCity || '-'}</td></tr>
+          <tr><td class="info-label">Durasi Wisata</td><td class="info-value">${pkg.durationDays || '-'}</td></tr>
+          <tr><td class="info-label">Waktu Keberangkatan</td><td class="info-value">${formatDateDDMMYYYY(pkg.departureDate)}</td></tr>
+          <tr><td class="info-label">Harga Paket</td><td class="info-value price-cell">${fmtRp(priceMainNum)} / Pax</td></tr>
+        </table>
+      </div>
+      <div class="detail-card">
+        <div class="card-bar">INFORMASI PEMESANAN</div>
+        <div class="card-body">
+          <p>Kantor Pusat: <strong>${compName}</strong></p>
+          <p>Telepon / WA: <strong>${compPhone}</strong></p>
+          <p>Email: <strong>${compEmail}</strong></p>
+        </div>
+      </div>
+    `;
+
     const page1 = `
       <div class="kop-header">
         <img src="/logo.png" class="kop-logo" onerror="this.style.display='none'" />
-        <div>
+        <div class="kop-text">
           <h1 class="company-logo-title">${compName}</h1>
           <p class="company-address">${compAddress}</p>
         </div>
       </div>
-      <h2 class="doc-title">DETAIL PAKET WISATA</h2>
 
-      <table class="info-grid">
-        <tr><td class="info-label">Nama Paket</td><td class="info-value">${pkg.name || '-'}</td></tr>
-        <tr><td class="info-label">Jenis Paket</td><td class="info-value">${pkg.type || '-'}</td></tr>
-        <tr><td class="info-label">Tujuan / Destinasi</td><td class="info-value">${pkg.destinationCity || '-'}</td></tr>
-        <tr><td class="info-label">Durasi Wisata</td><td class="info-value">${pkg.durationDays || '-'}</td></tr>
-        <tr><td class="info-label">Waktu Keberangkatan</td><td class="info-value">${formatDateDDMMYYYY(pkg.departureDate)}</td></tr>
-        <tr><td class="info-label">Harga Paket</td><td class="info-value price-cell">${fmtRp(priceMainNum)} / Pax</td></tr>
-      </table>
+      <div class="page1-body ${hasFlyer ? 'with-flyer' : ''}">
+        ${hasFlyer ? `<img src="${pkg.flyerImageDataUrl}" class="flyer-image" alt="Flyer ${pkg.name || ''}" />` : ''}
+        <div class="page1-right">${detailCardsHtml}</div>
+      </div>
 
       <h3 class="section-title">Fasilitas & Layanan</h3>
       <div class="facilities-grid">
@@ -708,12 +765,6 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
           <h4>Harga Tidak Termasuk</h4>
           <ul>${excludesHtml}</ul>
         </div>
-      </div>
-
-      <div class="booking-info-box">
-        <h4>Informasi Pemesanan</h4>
-        <p>Kantor Pusat: <strong>${compName}</strong></p>
-        <p>Telepon / WA: <strong>${compPhone}</strong> &bull; Email: <strong>${compEmail}</strong></p>
       </div>
     `;
 
@@ -776,15 +827,28 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color:#1e293b; margin:0; padding:0; }
             .doc-page { padding:35px; page-break-after:always; }
             .doc-page:last-child { page-break-after:auto; }
-            .kop-header { display:flex; align-items:center; gap:14px; border-bottom:3px double #059669; padding-bottom:14px; margin-bottom:14px; }
-            .kop-logo { width:48px; height:48px; object-fit:contain; }
-            .company-logo-title { font-size:18px; font-weight:800; color:#065f46; margin:0; }
-            .company-address { font-size:10.5px; color:#475569; margin:2px 0 0 0; max-width:480px; }
+            .kop-header { display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:3px double #059669; padding-bottom:14px; margin-bottom:18px; }
+            .kop-logo { width:64px; height:64px; object-fit:contain; flex-shrink:0; }
+            .kop-text { text-align:right; }
+            .company-logo-title { font-size:20px; font-weight:800; color:#059669; margin:0; letter-spacing:0.3px; }
+            .company-address { font-size:10px; color:#64748b; margin:3px 0 0 0; max-width:420px; margin-left:auto; line-height:1.5; }
             .doc-title { font-size:15px; font-weight:800; color:#0f172a; text-align:center; letter-spacing:0.5px; margin:0 0 16px 0; }
             .section-title { font-size:12px; font-weight:800; color:#059669; text-transform:uppercase; letter-spacing:0.5px; margin:18px 0 8px 0; border-bottom:1px solid #e2e8f0; padding-bottom:4px; }
-            .info-grid { width:100%; border-collapse:collapse; margin-bottom:8px; }
-            .info-grid td { padding:5px 8px; font-size:11.5px; border-bottom:1px solid #f1f5f9; }
-            .info-label { color:#64748b; width:38%; }
+            /* Halaman 1: flyer (opsional) di kiri + kartu Detail Paket/Informasi
+               Pemesanan di kanan, persis pola contoh dokumen promosi. Tanpa
+               flyer, kartu detailnya jadi sendirian full-width (fallback). */
+            .page1-body { display:flex; gap:16px; margin-bottom:6px; }
+            .page1-body.with-flyer .page1-right { flex:1; display:flex; flex-direction:column; gap:12px; min-width:0; }
+            .page1-body:not(.with-flyer) .page1-right { width:100%; display:flex; flex-direction:column; gap:12px; }
+            .flyer-image { width:46%; flex-shrink:0; object-fit:cover; border-radius:10px; border:1px solid #e2e8f0; max-height:420px; }
+            .detail-card { border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; }
+            .card-bar { background:#047857; color:#fff; font-size:11.5px; font-weight:800; letter-spacing:0.5px; padding:8px 14px; }
+            .detail-card .info-grid { margin-bottom:0; }
+            .detail-card .card-body { padding:10px 14px; font-size:11px; color:#334155; }
+            .detail-card .card-body p { margin:3px 0; }
+            .info-grid { width:100%; border-collapse:collapse; }
+            .info-grid td { padding:7px 14px; font-size:11.5px; border-bottom:1px solid #f1f5f9; }
+            .info-label { color:#64748b; width:42%; }
             .info-value { color:#0f172a; font-weight:600; }
             .price-cell { color:#059669; font-size:13px; }
             .facilities-grid { display:flex; gap:14px; margin-bottom:14px; }
@@ -796,9 +860,6 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
             .facility-exclude h4 { color:#c2410c; }
             .facility-box ul { margin:0; padding-left:16px; }
             .facility-box li { margin-bottom:3px; }
-            .booking-info-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px; font-size:11px; color:#334155; }
-            .booking-info-box h4 { margin:0 0 6px 0; font-size:11px; color:#0f172a; text-transform:uppercase; }
-            .booking-info-box p { margin:2px 0; }
             .desc-package-name { font-size:16px; font-weight:800; color:#0f172a; margin:0 0 2px 0; }
             .desc-sub { font-size:11px; color:#64748b; margin:0 0 8px 0; }
             .desc-price { font-size:14px; font-weight:800; color:#059669; margin:0 0 6px 0; }
@@ -899,6 +960,37 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     setFormData(prev => ({ ...prev, flightSegments: prev.flightSegments.filter((_, i) => i !== idx) }));
   };
 
+  // ============ Flyer Promosi Paket (opsional) ============
+  const handleFlyerFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // biar bisa pilih file yang sama lagi kalau mau ganti ulang
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('File harus berupa gambar (JPG/PNG/dll).');
+      return;
+    }
+    setUploadingFlyer(true);
+    try {
+      const dataUrl = await compressImageToDataUrl(file);
+      // Firestore batasin 1 dokumen maks ~1MB — dijaga jauh di bawah itu
+      // (500KB) biar masih ada ruang buat field lain (itinerary, budget
+      // items, dll) di dokumen paket yang sama.
+      if (dataUrl.length > 500 * 1024) {
+        alert('Gambar masih terlalu besar walau udah dikompres. Coba pakai foto lain yang lebih sederhana/resolusi lebih rendah.');
+      } else {
+        setFormData(prev => ({ ...prev, flyerImageDataUrl: dataUrl }));
+      }
+    } catch (err) {
+      console.error('Gagal memproses flyer:', err);
+      alert('Gagal memproses gambar flyer: ' + err.message);
+    }
+    setUploadingFlyer(false);
+  };
+
+  const handleRemoveFlyer = () => {
+    setFormData(prev => ({ ...prev, flyerImageDataUrl: '' }));
+  };
+
   // Dipakai buat preview live di modal DAN buat hitung budgetCostTotal yang
   // disimpen ke Firestore pas Simpan.
   const sumBudgetItems = (items) => (items || []).reduce((acc, it) => acc + (Number(it.amount) || 0), 0);
@@ -957,6 +1049,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         priceExcludes: cleanedPriceExcludes,
         flightSegments: cleanedFlightSegments,
         specialNote: formData.specialNote || '',
+        flyerImageDataUrl: formData.flyerImageDataUrl || '',
         updatedAt: new Date().toISOString()
       };
 
@@ -1673,6 +1766,30 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                   value={formData.name}
                   onChange={e => setFormData({ ...formData, name: e.target.value })}
                 />
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Flyer Promosi Paket (opsional)</label>
+                <p className="text-[10.5px] opacity-60 mb-2">Kalau diisi, gambar ini bakal muncul di halaman pertama dokumen "Cetak Detail Paket" — persis kayak poster promosi di sisi kiri contoh dokumen.</p>
+                {formData.flyerImageDataUrl ? (
+                  <div className="flex items-start gap-3">
+                    <img src={formData.flyerImageDataUrl} alt="Preview flyer" className="w-32 h-32 object-cover rounded-lg border" />
+                    <div className="flex flex-col gap-2">
+                      <label className={`px-3 py-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} rounded-lg text-[11px] font-medium cursor-pointer text-center`}>
+                        {uploadingFlyer ? 'Memproses...' : 'Ganti Gambar'}
+                        <input type="file" accept="image/*" className="hidden" disabled={uploadingFlyer} onChange={handleFlyerFileChange} />
+                      </label>
+                      <button type="button" onClick={handleRemoveFlyer} className="px-3 py-1.5 text-rose-500 hover:bg-rose-500/10 rounded-lg text-[11px] font-medium">
+                        Hapus Flyer
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <label className={`flex items-center justify-center gap-1.5 py-3 border-2 border-dashed ${isDark ? 'border-slate-700 hover:border-emerald-500 text-slate-400' : 'border-slate-300 hover:border-emerald-500 text-slate-500'} hover:text-emerald-500 rounded-xl text-xs font-semibold transition-colors cursor-pointer`}>
+                    {uploadingFlyer ? 'Memproses gambar...' : (<><Plus className="w-4 h-4" /> Upload Flyer</>)}
+                    <input type="file" accept="image/*" className="hidden" disabled={uploadingFlyer} onChange={handleFlyerFileChange} />
+                  </label>
+                )}
               </div>
 
               <div className="grid grid-cols-3 gap-3">
