@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings, List, LayoutGrid, CalendarRange } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 import { logActivity } from '../../lib/activityLog';
@@ -85,6 +85,36 @@ const DEFAULT_BUDGET_VARIABLE_COST_ITEMS = [
   { label: 'Lain-lain', amount: '' }
 ];
 
+// Item default "Harga Termasuk" (Fasilitas & Layanan) — dipakai buat
+// dokumen "DETAIL PAKET WISATA" (kop surat + fasilitas + deskripsi flight),
+// staf bebas tambah/edit/hapus baris per paket, sama persis pola-nya kayak
+// Rencana Anggaran di atas (array of strings biasa, nggak butuh nominal).
+const DEFAULT_PRICE_INCLUDES = [
+  'Tiket Pesawat PP',
+  'Hotel Sesuai Program',
+  'Private Bus AC',
+  'Tiket Wisata sesuai program',
+  'Makan sesuai program',
+  'Tour Leader dari Jakarta',
+  'Guide Lokal Muslim'
+];
+
+// Item default "Harga Tidak Termasuk" — beda dari Harga Termasuk, tiap baris
+// BISA punya nominal (opsional, biar bisa nulis baris polos kayak "PPN 1.1%"
+// tanpa nominal, atau baris berharga kayak "Tipping 750.000/pax") + catatan
+// bebas (opsional, buat keterangan kayak "(Optional)" atau syarat tertentu).
+const DEFAULT_PRICE_EXCLUDES = [
+  { label: 'Tipping', amount: '', note: '/pax' },
+  { label: 'Kelebihan Bagasi (bila ada)', amount: '', note: '' },
+  { label: 'PPN 1.1%', amount: '', note: '' }
+];
+
+// Item default rincian penerbangan (buat halaman "Deskripsi Paket") — 1
+// baris per leg/segmen (biasanya ada transit, jadi 1 paket bisa 2-4 baris).
+const DEFAULT_FLIGHT_SEGMENTS = [
+  { flightNumber: '', date: '', route: '', depTime: '', arrTime: '' }
+];
+
 export default function PackagesModule({ theme = 'dark', userRole = '', currentUser = null }) {
   const isDark = theme === 'dark';
 
@@ -149,6 +179,23 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
   const [itineraryDays, setItineraryDays] = useState([]);
   const [savingItinerary, setSavingItinerary] = useState(false);
 
+  // Kop surat (nama PT, alamat, telepon, email) buat dokumen "Detail Paket
+  // Wisata" — sumbernya sama persis kayak Invoice di BookingsModule.jsx
+  // (settings/company_profile, diatur dari menu Pengaturan > Identitas PT),
+  // biar semua dokumen yang keluar dari WHISys konsisten kop suratnya.
+  const [companyInfo, setCompanyInfo] = useState(null);
+  useEffect(() => {
+    const fetchCompanyInfo = async () => {
+      try {
+        const docSnap = await getDoc(doc(db, 'settings', 'company_profile'));
+        if (docSnap.exists()) setCompanyInfo(docSnap.data().company);
+      } catch (err) {
+        console.error('Gagal mengambil data profil perusahaan untuk Detail Paket:', err);
+      }
+    };
+    fetchCompanyInfo();
+  }, []);
+
   const [formData, setFormData] = useState({
     code: '',
     name: '',
@@ -174,7 +221,13 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     // dijual) vs "Margin Realisasi" (angka riil pas Akui Pendapatan) di tab
     // Analisa Margin — lihat LaporanKeuanganModule.jsx.
     budgetFixedCostItems: DEFAULT_BUDGET_FIXED_COST_ITEMS,
-    budgetVariableCostItems: DEFAULT_BUDGET_VARIABLE_COST_ITEMS
+    budgetVariableCostItems: DEFAULT_BUDGET_VARIABLE_COST_ITEMS,
+    // Fasilitas & Layanan + rincian penerbangan — buat dokumen "Detail Paket
+    // Wisata" (kop surat, harga termasuk/tidak termasuk, deskripsi flight).
+    priceIncludes: DEFAULT_PRICE_INCLUDES,
+    priceExcludes: DEFAULT_PRICE_EXCLUDES,
+    flightSegments: DEFAULT_FLIGHT_SEGMENTS,
+    specialNote: ''
   });
 
   const fetchData = async () => {
@@ -251,7 +304,11 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       priceDouble: '',
       priceChild: '',
       budgetFixedCostItems: DEFAULT_BUDGET_FIXED_COST_ITEMS,
-      budgetVariableCostItems: DEFAULT_BUDGET_VARIABLE_COST_ITEMS
+      budgetVariableCostItems: DEFAULT_BUDGET_VARIABLE_COST_ITEMS,
+      priceIncludes: DEFAULT_PRICE_INCLUDES,
+      priceExcludes: DEFAULT_PRICE_EXCLUDES,
+      flightSegments: DEFAULT_FLIGHT_SEGMENTS,
+      specialNote: ''
     });
     setShowModal(true);
   };
@@ -285,7 +342,17 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       budgetFixedCostItems: (Array.isArray(pkg.budgetFixedCostItems) && pkg.budgetFixedCostItems.length > 0)
         ? pkg.budgetFixedCostItems : DEFAULT_BUDGET_FIXED_COST_ITEMS,
       budgetVariableCostItems: (Array.isArray(pkg.budgetVariableCostItems) && pkg.budgetVariableCostItems.length > 0)
-        ? pkg.budgetVariableCostItems : DEFAULT_BUDGET_VARIABLE_COST_ITEMS
+        ? pkg.budgetVariableCostItems : DEFAULT_BUDGET_VARIABLE_COST_ITEMS,
+      // Paket lama (dibuat sebelum fitur Fasilitas & Layanan / Flight ada)
+      // belum punya field ini — fallback ke daftar default, sama pola-nya
+      // kayak Rencana Anggaran di atas.
+      priceIncludes: (Array.isArray(pkg.priceIncludes) && pkg.priceIncludes.length > 0)
+        ? pkg.priceIncludes : DEFAULT_PRICE_INCLUDES,
+      priceExcludes: (Array.isArray(pkg.priceExcludes) && pkg.priceExcludes.length > 0)
+        ? pkg.priceExcludes : DEFAULT_PRICE_EXCLUDES,
+      flightSegments: (Array.isArray(pkg.flightSegments) && pkg.flightSegments.length > 0)
+        ? pkg.flightSegments : DEFAULT_FLIGHT_SEGMENTS,
+      specialNote: pkg.specialNote || ''
     });
     setShowModal(true);
   };
@@ -583,33 +650,175 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
+  // Dokumen "Detail Paket Wisata" lengkap (3 halaman): (1) kop surat + info
+  // paket + harga + Fasilitas & Layanan (Harga Termasuk/Tidak Termasuk) +
+  // Informasi Pemesanan, (2) Deskripsi Paket + rincian penerbangan, (3)
+  // Itinerary Program hari-per-hari. Dulu cuma nyetak itinerary polos tanpa
+  // kop surat — sekarang diganti total jadi dokumen lengkap yang bisa
+  // langsung dikirim ke calon jamaah/peserta, gantiin cara lama (bikin
+  // manual di Word/Canva per paket).
   const handlePrintItinerary = (pkg, days) => {
+    const compName = companyInfo?.name || 'PT. WISATA HALAL INTERNASIONAL';
+    const compAddress = companyInfo?.address || 'Ruko Graha Cirendeu No.1C Jl. Cirendeu Raya, Tangerang Selatan, Banten, Indonesia, 15445';
+    const compPhone = companyInfo?.phone || '-';
+    const compEmail = companyInfo?.email || 'admin@wisatahalalindonesia.id';
+
+    const priceMainNum = Number(pkg.priceMain) || 0;
+    const fmtRp = (n) => `Rp ${Math.round(Number(n) || 0).toLocaleString('id-ID')}`;
+
+    // ===== HALAMAN 1: Detail Paket + Fasilitas & Layanan =====
+    const includesList = (Array.isArray(pkg.priceIncludes) && pkg.priceIncludes.length > 0) ? pkg.priceIncludes : [];
+    const excludesList = (Array.isArray(pkg.priceExcludes) && pkg.priceExcludes.length > 0) ? pkg.priceExcludes : [];
+    const includesHtml = includesList.length > 0
+      ? includesList.map(v => `<li>${v}</li>`).join('')
+      : '<li style="color:#94a3b8;list-style:none;">Belum diisi.</li>';
+    const excludesHtml = excludesList.length > 0
+      ? excludesList.map(it => {
+          const amountPart = Number(it.amount) > 0 ? ` : ${fmtRp(it.amount)}${it.note ? ` ${it.note}` : ''}` : (it.note ? ` ${it.note}` : '');
+          return `<li>${it.label}${amountPart}</li>`;
+        }).join('')
+      : '<li style="color:#94a3b8;list-style:none;">Belum diisi.</li>';
+
+    const page1 = `
+      <div class="kop-header">
+        <img src="/logo.png" class="kop-logo" onerror="this.style.display='none'" />
+        <div>
+          <h1 class="company-logo-title">${compName}</h1>
+          <p class="company-address">${compAddress}</p>
+        </div>
+      </div>
+      <h2 class="doc-title">DETAIL PAKET WISATA</h2>
+
+      <table class="info-grid">
+        <tr><td class="info-label">Nama Paket</td><td class="info-value">${pkg.name || '-'}</td></tr>
+        <tr><td class="info-label">Jenis Paket</td><td class="info-value">${pkg.type || '-'}</td></tr>
+        <tr><td class="info-label">Tujuan / Destinasi</td><td class="info-value">${pkg.destinationCity || '-'}</td></tr>
+        <tr><td class="info-label">Durasi Wisata</td><td class="info-value">${pkg.durationDays || '-'}</td></tr>
+        <tr><td class="info-label">Waktu Keberangkatan</td><td class="info-value">${formatDateDDMMYYYY(pkg.departureDate)}</td></tr>
+        <tr><td class="info-label">Harga Paket</td><td class="info-value price-cell">${fmtRp(priceMainNum)} / Pax</td></tr>
+      </table>
+
+      <h3 class="section-title">Fasilitas & Layanan</h3>
+      <div class="facilities-grid">
+        <div class="facility-box facility-include">
+          <h4>Harga Termasuk</h4>
+          <ul>${includesHtml}</ul>
+        </div>
+        <div class="facility-box facility-exclude">
+          <h4>Harga Tidak Termasuk</h4>
+          <ul>${excludesHtml}</ul>
+        </div>
+      </div>
+
+      <div class="booking-info-box">
+        <h4>Informasi Pemesanan</h4>
+        <p>Kantor Pusat: <strong>${compName}</strong></p>
+        <p>Telepon / WA: <strong>${compPhone}</strong> &bull; Email: <strong>${compEmail}</strong></p>
+      </div>
+    `;
+
+    // ===== HALAMAN 2: Deskripsi Paket + Rincian Penerbangan =====
+    const segments = (Array.isArray(pkg.flightSegments) && pkg.flightSegments.length > 0) ? pkg.flightSegments : [];
+    const flightRowsHtml = segments.length > 0
+      ? segments.map((s, idx) => `
+          <tr>
+            <td>${idx + 1}.</td>
+            <td>${s.flightNumber || '-'}</td>
+            <td>${formatDateDDMMYYYY(s.date)}</td>
+            <td>${s.route || '-'}</td>
+            <td>${s.depTime || '-'} - ${s.arrTime || '-'}</td>
+          </tr>`).join('')
+      : `<tr><td colspan="5" style="color:#94a3b8;">Belum ada rincian penerbangan.</td></tr>`;
+
+    const page2 = `
+      <h2 class="doc-title">DESKRIPSI PAKET</h2>
+      <p class="desc-package-name">${pkg.name || '-'}</p>
+      <p class="desc-sub">Periode: ${formatDateDDMMYYYY(pkg.departureDate)} &bull; Durasi ${pkg.durationDays || '-'}</p>
+      <p class="desc-price">${fmtRp(priceMainNum)} / Pax</p>
+
+      <h3 class="section-title">Flight by ${pkg.airline || '-'}</h3>
+      <table class="flight-table">
+        <thead><tr><th></th><th>No. Flight</th><th>Tanggal</th><th>Rute</th><th>Jam (Berangkat - Tiba)</th></tr></thead>
+        <tbody>${flightRowsHtml}</tbody>
+      </table>
+
+      ${pkg.specialNote ? `
+        <div class="note-box">
+          <h5>Catatan</h5>
+          <p style="white-space:pre-wrap;">${pkg.specialNote}</p>
+        </div>` : ''}
+    `;
+
+    // ===== HALAMAN 3+: Itinerary Program =====
     const dayRowsHtml = days.map((d, idx) => `
-      <div style="margin-bottom:18px;padding-bottom:14px;border-bottom:1px dashed #e2e8f0;">
-        <h3 style="margin:0 0 6px 0;font-size:13px;color:#065f46;">Hari ke-${idx + 1}${d.title ? ' &mdash; ' + d.title : ''}</h3>
-        <p style="margin:0 0 6px 0;font-size:12px;color:#334155;white-space:pre-wrap;">${d.description || '-'}</p>
-        <div style="font-size:11px;color:#64748b;">
+      <div class="itinerary-day">
+        <h3>Hari ke-${idx + 1}${d.title ? ' &mdash; ' + d.title : ''}</h3>
+        <p class="itinerary-desc">${d.description || '-'}</p>
+        <div class="itinerary-meta">
           ${d.hotel ? `🏨 Hotel: <strong>${d.hotel}</strong><br/>` : ''}
           ${d.meals ? `🍽️ Makan: <strong>${d.meals}</strong>` : ''}
         </div>
       </div>
     `).join('');
 
+    const page3 = `
+      <h2 class="doc-title">ITINERARY PROGRAM</h2>
+      ${dayRowsHtml || '<p style="color:#94a3b8;">Belum ada itinerary.</p>'}
+      <p class="footer-note">Catatan: Itinerary tidak mengikat, sewaktu-waktu bisa berubah menyesuaikan situasi & kondisi saat di lapangan.</p>
+    `;
+
     const docContent = `
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Itinerary - ${pkg.name}</title>
+          <title>Detail Paket - ${pkg.name}</title>
           <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color:#1e293b; padding:35px; }
-            h1 { font-size:20px; color:#065f46; margin-bottom:2px; }
-            p.sub { font-size:11px; color:#64748b; margin-top:0; margin-bottom:20px; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color:#1e293b; margin:0; padding:0; }
+            .doc-page { padding:35px; page-break-after:always; }
+            .doc-page:last-child { page-break-after:auto; }
+            .kop-header { display:flex; align-items:center; gap:14px; border-bottom:3px double #059669; padding-bottom:14px; margin-bottom:14px; }
+            .kop-logo { width:48px; height:48px; object-fit:contain; }
+            .company-logo-title { font-size:18px; font-weight:800; color:#065f46; margin:0; }
+            .company-address { font-size:10.5px; color:#475569; margin:2px 0 0 0; max-width:480px; }
+            .doc-title { font-size:15px; font-weight:800; color:#0f172a; text-align:center; letter-spacing:0.5px; margin:0 0 16px 0; }
+            .section-title { font-size:12px; font-weight:800; color:#059669; text-transform:uppercase; letter-spacing:0.5px; margin:18px 0 8px 0; border-bottom:1px solid #e2e8f0; padding-bottom:4px; }
+            .info-grid { width:100%; border-collapse:collapse; margin-bottom:8px; }
+            .info-grid td { padding:5px 8px; font-size:11.5px; border-bottom:1px solid #f1f5f9; }
+            .info-label { color:#64748b; width:38%; }
+            .info-value { color:#0f172a; font-weight:600; }
+            .price-cell { color:#059669; font-size:13px; }
+            .facilities-grid { display:flex; gap:14px; margin-bottom:14px; }
+            .facility-box { flex:1; border-radius:8px; padding:12px 14px; font-size:11px; }
+            .facility-include { background:#f0fdf4; border:1px solid #bbf7d0; }
+            .facility-exclude { background:#fff7ed; border:1px solid #fed7aa; }
+            .facility-box h4 { margin:0 0 6px 0; font-size:11px; text-transform:uppercase; letter-spacing:0.4px; }
+            .facility-include h4 { color:#047857; }
+            .facility-exclude h4 { color:#c2410c; }
+            .facility-box ul { margin:0; padding-left:16px; }
+            .facility-box li { margin-bottom:3px; }
+            .booking-info-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px; font-size:11px; color:#334155; }
+            .booking-info-box h4 { margin:0 0 6px 0; font-size:11px; color:#0f172a; text-transform:uppercase; }
+            .booking-info-box p { margin:2px 0; }
+            .desc-package-name { font-size:16px; font-weight:800; color:#0f172a; margin:0 0 2px 0; }
+            .desc-sub { font-size:11px; color:#64748b; margin:0 0 8px 0; }
+            .desc-price { font-size:14px; font-weight:800; color:#059669; margin:0 0 6px 0; }
+            .flight-table { width:100%; border-collapse:collapse; font-size:11px; margin-top:4px; }
+            .flight-table th { background:#f1f5f9; text-align:left; padding:6px 8px; font-size:10px; text-transform:uppercase; color:#475569; border-bottom:2px solid #cbd5e1; }
+            .flight-table td { padding:6px 8px; border-bottom:1px solid #f1f5f9; }
+            .note-box { margin-top:16px; background:#fffbeb; border:1px dashed #fbbf24; border-radius:8px; padding:10px 14px; font-size:10.5px; color:#78350f; }
+            .note-box h5 { margin:0 0 4px 0; font-size:11px; }
+            .itinerary-day { margin-bottom:16px; padding-bottom:12px; border-bottom:1px dashed #e2e8f0; }
+            .itinerary-day h3 { margin:0 0 6px 0; font-size:13px; color:#065f46; }
+            .itinerary-desc { margin:0 0 6px 0; font-size:12px; color:#334155; white-space:pre-wrap; }
+            .itinerary-meta { font-size:11px; color:#64748b; }
+            .footer-note { text-align:center; font-size:10px; color:#94a3b8; margin-top:20px; border-top:1px solid #f1f5f9; padding-top:10px; }
+            @media print { .doc-page { padding:20px 30px; } }
           </style>
         </head>
         <body>
-          <h1>Itinerary Perjalanan</h1>
-          <p class="sub">${pkg.name} (${pkg.code}) &bull; ${pkg.durationDays || '-'} &bull; Berangkat ${formatDateDDMMYYYY(pkg.departureDate)}</p>
-          ${dayRowsHtml || '<p style="color:#94a3b8;">Belum ada itinerary.</p>'}
+          <div class="doc-page">${page1}</div>
+          <div class="doc-page">${page2}</div>
+          <div class="doc-page">${page3}</div>
         </body>
       </html>
     `;
@@ -655,6 +864,41 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     setFormData(prev => ({ ...prev, [kind]: prev[kind].filter((_, i) => i !== idx) }));
   };
 
+  // ============ Fasilitas & Layanan (Harga Termasuk/Tidak Termasuk) + Rincian Penerbangan ============
+  // Pola array-of-rows sama persis kayak Rencana Anggaran di atas — bedanya
+  // "priceIncludes" array of string polos (nggak butuh nominal), sedangkan
+  // "priceExcludes" & "flightSegments" array of object (beberapa kolom).
+
+  const handleIncludeItemChange = (idx, value) => {
+    setFormData(prev => ({ ...prev, priceIncludes: prev.priceIncludes.map((v, i) => i === idx ? value : v) }));
+  };
+  const handleAddIncludeItem = () => {
+    setFormData(prev => ({ ...prev, priceIncludes: [...prev.priceIncludes, ''] }));
+  };
+  const handleRemoveIncludeItem = (idx) => {
+    setFormData(prev => ({ ...prev, priceIncludes: prev.priceIncludes.filter((_, i) => i !== idx) }));
+  };
+
+  const handleExcludeItemChange = (idx, field, value) => {
+    setFormData(prev => ({ ...prev, priceExcludes: prev.priceExcludes.map((it, i) => i === idx ? { ...it, [field]: value } : it) }));
+  };
+  const handleAddExcludeItem = () => {
+    setFormData(prev => ({ ...prev, priceExcludes: [...prev.priceExcludes, { label: '', amount: '', note: '' }] }));
+  };
+  const handleRemoveExcludeItem = (idx) => {
+    setFormData(prev => ({ ...prev, priceExcludes: prev.priceExcludes.filter((_, i) => i !== idx) }));
+  };
+
+  const handleFlightSegmentChange = (idx, field, value) => {
+    setFormData(prev => ({ ...prev, flightSegments: prev.flightSegments.map((it, i) => i === idx ? { ...it, [field]: value } : it) }));
+  };
+  const handleAddFlightSegment = () => {
+    setFormData(prev => ({ ...prev, flightSegments: [...prev.flightSegments, { flightNumber: '', date: '', route: '', depTime: '', arrTime: '' }] }));
+  };
+  const handleRemoveFlightSegment = (idx) => {
+    setFormData(prev => ({ ...prev, flightSegments: prev.flightSegments.filter((_, i) => i !== idx) }));
+  };
+
   // Dipakai buat preview live di modal DAN buat hitung budgetCostTotal yang
   // disimpen ke Firestore pas Simpan.
   const sumBudgetItems = (items) => (items || []).reduce((acc, it) => acc + (Number(it.amount) || 0), 0);
@@ -678,6 +922,16 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       const cleanedVariableCostItems = (formData.budgetVariableCostItems || [])
         .filter(it => (it.label && it.label.trim()) || Number(it.amount) > 0)
         .map(it => ({ label: it.label || '', amount: Number(it.amount) || 0 }));
+      const cleanedPriceIncludes = (formData.priceIncludes || []).map(v => (v || '').trim()).filter(Boolean);
+      const cleanedPriceExcludes = (formData.priceExcludes || [])
+        .filter(it => it.label && it.label.trim())
+        .map(it => ({ label: it.label.trim(), amount: Number(it.amount) || 0, note: (it.note || '').trim() }));
+      const cleanedFlightSegments = (formData.flightSegments || [])
+        .filter(it => (it.flightNumber && it.flightNumber.trim()) || (it.route && it.route.trim()))
+        .map(it => ({
+          flightNumber: (it.flightNumber || '').trim(), date: it.date || '',
+          route: (it.route || '').trim(), depTime: (it.depTime || '').trim(), arrTime: (it.arrTime || '').trim()
+        }));
       const payload = {
         code: formData.code,
         name: formData.name,
@@ -699,6 +953,10 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         budgetFixedCostItems: cleanedFixedCostItems,
         budgetVariableCostItems: cleanedVariableCostItems,
         budgetCostTotal: sumBudgetItems(cleanedFixedCostItems) + sumBudgetItems(cleanedVariableCostItems),
+        priceIncludes: cleanedPriceIncludes,
+        priceExcludes: cleanedPriceExcludes,
+        flightSegments: cleanedFlightSegments,
+        specialNote: formData.specialNote || '',
         updatedAt: new Date().toISOString()
       };
 
@@ -1596,6 +1854,130 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                 )}
               </div>
 
+              {/* FASILITAS & LAYANAN (Harga Termasuk/Tidak Termasuk) — dipakai
+                  buat dokumen "Detail Paket Wisata" (kop surat), lihat tombol
+                  Cetak di modal Itinerary Perjalanan. */}
+              <div className={`${styles.innerBg} p-4 rounded-xl border space-y-3`}>
+                <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">
+                  Fasilitas & Layanan — buat Dokumen Detail Paket
+                </p>
+
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold opacity-70">Harga Termasuk</p>
+                  {formData.priceIncludes.map((val, idx) => (
+                    <div key={`inc-${idx}`} className="flex gap-2 items-center">
+                      <input
+                        type="text" placeholder="cth: Tiket Pesawat PP"
+                        className={`flex-1 ${styles.inputBg} rounded-lg p-2 text-xs`}
+                        value={val}
+                        onChange={e => handleIncludeItemChange(idx, e.target.value)}
+                      />
+                      <button type="button" onClick={() => handleRemoveIncludeItem(idx)} className="text-rose-500 hover:text-rose-400 p-1">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={handleAddIncludeItem} className="text-[11px] text-emerald-500 hover:underline flex items-center gap-1">
+                    <Plus className="w-3 h-3" /> Tambah Item Harga Termasuk
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold opacity-70">Harga Tidak Termasuk</p>
+                  <p className="text-[10px] opacity-60">Nominal & catatan (mis. "/pax" atau "(Optional)") boleh dikosongkan kalau baris ini nggak butuh angka, cth: "PPN 1.1%".</p>
+                  {formData.priceExcludes.map((item, idx) => (
+                    <div key={`exc-${idx}`} className="flex gap-2 items-center">
+                      <input
+                        type="text" placeholder="Nama item, cth: Tipping"
+                        className={`flex-1 ${styles.inputBg} rounded-lg p-2 text-xs`}
+                        value={item.label}
+                        onChange={e => handleExcludeItemChange(idx, 'label', e.target.value)}
+                      />
+                      <input
+                        type="number" placeholder="Nominal (ops.)"
+                        className={`w-28 ${styles.inputBg} rounded-lg p-2 text-xs`}
+                        value={item.amount}
+                        onChange={e => handleExcludeItemChange(idx, 'amount', e.target.value)}
+                      />
+                      <input
+                        type="text" placeholder="Catatan (ops.)"
+                        className={`w-32 ${styles.inputBg} rounded-lg p-2 text-xs`}
+                        value={item.note}
+                        onChange={e => handleExcludeItemChange(idx, 'note', e.target.value)}
+                      />
+                      <button type="button" onClick={() => handleRemoveExcludeItem(idx)} className="text-rose-500 hover:text-rose-400 p-1">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={handleAddExcludeItem} className="text-[11px] text-emerald-500 hover:underline flex items-center gap-1">
+                    <Plus className="w-3 h-3" /> Tambah Item Harga Tidak Termasuk
+                  </button>
+                </div>
+              </div>
+
+              {/* RINCIAN PENERBANGAN — buat halaman "Deskripsi Paket" di
+                  dokumen Detail Paket. 1 baris per leg/segmen penerbangan
+                  (biasanya ada transit, jadi bisa 2-4 baris per paket). */}
+              <div className={`${styles.innerBg} p-4 rounded-xl border space-y-3`}>
+                <p className="text-[11px] font-bold text-sky-500 uppercase tracking-wider">
+                  Rincian Penerbangan — buat Dokumen Detail Paket
+                </p>
+                <div className="space-y-2">
+                  {formData.flightSegments.map((seg, idx) => (
+                    <div key={`flt-${idx}`} className="grid grid-cols-12 gap-2 items-center">
+                      <input
+                        type="text" placeholder="No. Flight, cth: MH 716"
+                        className={`col-span-3 ${styles.inputBg} rounded-lg p-2 text-xs`}
+                        value={seg.flightNumber}
+                        onChange={e => handleFlightSegmentChange(idx, 'flightNumber', e.target.value)}
+                      />
+                      <input
+                        type="date"
+                        className={`col-span-3 ${styles.inputBg} rounded-lg p-2 text-xs`}
+                        value={seg.date}
+                        onChange={e => handleFlightSegmentChange(idx, 'date', e.target.value)}
+                      />
+                      <input
+                        type="text" placeholder="Rute, cth: CGK-KUL"
+                        className={`col-span-2 ${styles.inputBg} rounded-lg p-2 text-xs`}
+                        value={seg.route}
+                        onChange={e => handleFlightSegmentChange(idx, 'route', e.target.value)}
+                      />
+                      <input
+                        type="text" placeholder="Jam Berangkat"
+                        className={`col-span-2 ${styles.inputBg} rounded-lg p-2 text-xs`}
+                        value={seg.depTime}
+                        onChange={e => handleFlightSegmentChange(idx, 'depTime', e.target.value)}
+                      />
+                      <input
+                        type="text" placeholder="Jam Tiba"
+                        className={`col-span-1 ${styles.inputBg} rounded-lg p-2 text-xs`}
+                        value={seg.arrTime}
+                        onChange={e => handleFlightSegmentChange(idx, 'arrTime', e.target.value)}
+                      />
+                      <button type="button" onClick={() => handleRemoveFlightSegment(idx)} className="col-span-1 text-rose-500 hover:text-rose-400 p-1 justify-self-center">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={handleAddFlightSegment} className="text-[11px] text-emerald-500 hover:underline flex items-center gap-1">
+                    <Plus className="w-3 h-3" /> Tambah Segmen Penerbangan
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block mb-1 text-[11px] font-semibold opacity-70">Catatan Khusus (opsional)</label>
+                  <textarea
+                    rows={2}
+                    placeholder={'cth: No bed with meals: disc 500.000\nUsia di bawah 23 bulan no bed (Infant with Basinet): Disc 50%'}
+                    className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
+                    value={formData.specialNote}
+                    onChange={e => setFormData({ ...formData, specialNote: e.target.value })}
+                  />
+                </div>
+              </div>
+
               {/* RENCANA ANGGARAN (PLANNING COST) — buat itung Margin Planning
                   di awal, sebelum paket dijual. Lihat tab "Analisa Margin"
                   di Laporan Keuangan buat perbandingan sama Margin Realisasi. */}
@@ -1937,8 +2319,9 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                   type="button"
                   onClick={() => handlePrintItinerary(selectedPackageForItinerary, itineraryDays)}
                   className={`flex items-center justify-center gap-1.5 px-3.5 py-2 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} rounded-lg text-xs font-medium transition-colors`}
+                  title="Cetak dokumen lengkap: kop surat, detail paket, Fasilitas & Layanan, deskripsi + flight, dan itinerary harian"
                 >
-                  <Printer className="w-3.5 h-3.5" /> Cetak
+                  <Printer className="w-3.5 h-3.5" /> Cetak Detail Paket
                 </button>
               </div>
               <div className="flex gap-2 justify-end">
