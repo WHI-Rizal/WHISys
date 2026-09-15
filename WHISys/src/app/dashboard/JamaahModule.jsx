@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, writeBatch } from 'firebase/firestore';
 import { Users, Plus, Search, Edit, Trash2, X, AlertCircle, UserCheck } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 import { logActivity } from '../../lib/activityLog';
@@ -309,16 +309,75 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
     }
   };
 
+  // Booking (SO) nyimpen SALINAN nama jamaah pas dibuat (field jamaahName /
+  // ordererName), bukan sekadar nunjuk balik ke data master lewat jamaahId/
+  // ordererId — makanya kalau nama di Data Master Jamaah direvisi, booking
+  // yang UDAH ADA nggak ikut berubah otomatis (itu 2 field yang beda,
+  // salinannya "beku" dari waktu booking dibuat). Fungsi ini nyamain lagi
+  // salinan nama itu di semua booking terkait begitu nama master direvisi —
+  // dicari lewat jamaahId (peserta) & ordererId (pemesan), pola query-nya
+  // sama kayak pengecekan "masih ada booking terkait" di handleDelete di
+  // atas. Ditambah fallback cari-by-nama-lama (jamaahName == oldName) buat
+  // jaring booking lawas yang jamaahId-nya sempat nggak kesimpen/nggak sinkron.
+  const syncNameToExistingBookings = async (jamaahId, oldName, newName) => {
+    if (!oldName || !newName || oldName === newName) return 0;
+
+    const [byJamaahIdSnap, byOrdererIdSnap, byOldNameSnap] = await Promise.all([
+      getDocs(query(collection(db, 'bookings'), where('jamaahId', '==', jamaahId))),
+      getDocs(query(collection(db, 'bookings'), where('ordererId', '==', jamaahId))),
+      getDocs(query(collection(db, 'bookings'), where('jamaahName', '==', oldName))),
+    ]);
+
+    // Kumpulin per-dokumen field apa aja yang perlu diupdate (bisa jadi 1
+    // booking butuh jamaahName DAN ordererName diupdate sekaligus, misal
+    // pemesan grup yang juga jadi salah satu peserta).
+    const updates = new Map(); // docId -> { ref, data }
+    const setField = (docSnap, field) => {
+      const existing = updates.get(docSnap.id) || { ref: docSnap.ref, data: {} };
+      existing.data[field] = newName;
+      updates.set(docSnap.id, existing);
+    };
+    byJamaahIdSnap.docs.forEach((d) => setField(d, 'jamaahName'));
+    byOrdererIdSnap.docs.forEach((d) => setField(d, 'ordererName'));
+    // Fallback nama lama: cuma isi jamaahName-nya KALAU booking itu belum
+    // kejaring lewat jamaahId (jaga-jaga data lawas yang jamaahId-nya kosong).
+    byOldNameSnap.docs.forEach((d) => {
+      if (!updates.has(d.id)) setField(d, 'jamaahName');
+    });
+
+    if (updates.size === 0) return 0;
+
+    // Batch Firestore dibatasi 500 write/batch — dipecah per 400 biar aman
+    // (sama pola chunk yang udah dipakai di modul Booking buat kasus serupa).
+    const entries = Array.from(updates.values());
+    for (let i = 0; i < entries.length; i += 400) {
+      const batch = writeBatch(db);
+      entries.slice(i, i + 400).forEach(({ ref, data }) => batch.update(ref, data));
+      await batch.commit();
+    }
+    return updates.size;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isSavingJamaah) return;
     setIsSavingJamaah(true);
     try {
       if (editingId) {
+        const oldName = jamaahList.find((j) => j.id === editingId)?.fullName || '';
         await updateDoc(doc(db, 'jamaah', editingId), {
           ...formData,
           updatedAt: new Date().toISOString(),
         });
+
+        let syncedCount = 0;
+        try {
+          syncedCount = await syncNameToExistingBookings(editingId, oldName, formData.fullName);
+        } catch (syncErr) {
+          console.error('Gagal menyinkronkan nama ke booking terkait:', syncErr);
+          alert(`Data jamaah tersimpan, TAPI nama di booking (SO) yang sudah ada GAGAL ikut disinkronkan (${syncErr.message}). Nama di booking lama mungkin masih yang lama — coba ulangi edit ini, atau lapor ke tim IT kalau terus gagal.`);
+        }
+
         logActivity({
           userId: currentUser?.uid,
           userName: currentUser?.fullName || currentUser?.email,
@@ -326,7 +385,9 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
           action: 'update',
           module: 'Data Master Jamaah',
           targetLabel: formData.fullName,
-          details: 'Mengubah data jamaah',
+          details: syncedCount > 0
+            ? `Mengubah data jamaah, nama disinkronkan ke ${syncedCount} booking terkait.`
+            : 'Mengubah data jamaah',
         });
       } else {
         // Selalu generate kode customer yang fresh & atomik pas beneran
