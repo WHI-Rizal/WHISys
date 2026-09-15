@@ -1731,6 +1731,93 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                 </select>
               </div>
 
+              {/* RINCIAN PENERBANGAN — sengaja ditaruh persis di bawah field
+                  Maskapai (bukan deket bagian Harga) biar jelas nyambung:
+                  ini rincian jadwal/segmen penerbangan dari maskapai yang
+                  dipilih di atas. Dipakai buat halaman "Deskripsi Paket" di
+                  dokumen Detail Paket. 1 kartu per leg/segmen penerbangan
+                  (biasanya ada transit, jadi bisa 2-4 kartu per paket). */}
+              <div className={`${styles.innerBg} p-4 rounded-xl border space-y-3`}>
+                <p className="text-[11px] font-bold text-sky-500 uppercase tracking-wider">
+                  Rincian Penerbangan (Maskapai di atas) — buat Dokumen Detail Paket
+                </p>
+                <div className="space-y-2.5">
+                  {formData.flightSegments.map((seg, idx) => (
+                    <div key={`flt-${idx}`} className={`${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'} p-3 rounded-lg border space-y-2`}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10.5px] font-bold text-sky-500">Segmen ke-{idx + 1}</span>
+                        <button type="button" onClick={() => handleRemoveFlightSegment(idx)} className="text-rose-500 hover:text-rose-400 p-1" title="Hapus segmen ini">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block mb-1 text-[10px] font-medium opacity-60">No. Flight</label>
+                          <input
+                            type="text" placeholder="cth: MH 716"
+                            className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
+                            value={seg.flightNumber}
+                            onChange={e => handleFlightSegmentChange(idx, 'flightNumber', e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="block mb-1 text-[10px] font-medium opacity-60">Tanggal</label>
+                          <input
+                            type="date"
+                            className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
+                            value={seg.date}
+                            onChange={e => handleFlightSegmentChange(idx, 'date', e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block mb-1 text-[10px] font-medium opacity-60">Rute</label>
+                        <input
+                          type="text" placeholder="cth: CGK-KUL (Jakarta - Kuala Lumpur)"
+                          className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
+                          value={seg.route}
+                          onChange={e => handleFlightSegmentChange(idx, 'route', e.target.value)}
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block mb-1 text-[10px] font-medium opacity-60">Jam Berangkat</label>
+                          <input
+                            type="text" placeholder="cth: 12:15"
+                            className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
+                            value={seg.depTime}
+                            onChange={e => handleFlightSegmentChange(idx, 'depTime', e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="block mb-1 text-[10px] font-medium opacity-60">Jam Tiba</label>
+                          <input
+                            type="text" placeholder="cth: 15:20"
+                            className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
+                            value={seg.arrTime}
+                            onChange={e => handleFlightSegmentChange(idx, 'arrTime', e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <button type="button" onClick={handleAddFlightSegment} className="text-[11px] text-emerald-500 hover:underline flex items-center gap-1">
+                    <Plus className="w-3 h-3" /> Tambah Segmen Penerbangan
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block mb-1 text-[11px] font-semibold opacity-70">Catatan Khusus (opsional)</label>
+                  <textarea
+                    rows={2}
+                    placeholder={'cth: No bed with meals: disc 500.000\nUsia di bawah 23 bulan no bed (Infant with Basinet): Disc 50%'}
+                    className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
+                    value={formData.specialNote}
+                    onChange={e => setFormData({ ...formData, specialNote: e.target.value })}
+                  />
+                </div>
+              </div>
+
               {/* DYNAMIC FIELD */}
               {isTourOrLA ? (
                 <div className={`grid grid-cols-2 gap-4 ${styles.innerBg} p-3 rounded-xl border`}>
@@ -1913,68 +2000,6 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                   <button type="button" onClick={handleAddExcludeItem} className="text-[11px] text-emerald-500 hover:underline flex items-center gap-1">
                     <Plus className="w-3 h-3" /> Tambah Item Harga Tidak Termasuk
                   </button>
-                </div>
-              </div>
-
-              {/* RINCIAN PENERBANGAN — buat halaman "Deskripsi Paket" di
-                  dokumen Detail Paket. 1 baris per leg/segmen penerbangan
-                  (biasanya ada transit, jadi bisa 2-4 baris per paket). */}
-              <div className={`${styles.innerBg} p-4 rounded-xl border space-y-3`}>
-                <p className="text-[11px] font-bold text-sky-500 uppercase tracking-wider">
-                  Rincian Penerbangan — buat Dokumen Detail Paket
-                </p>
-                <div className="space-y-2">
-                  {formData.flightSegments.map((seg, idx) => (
-                    <div key={`flt-${idx}`} className="grid grid-cols-12 gap-2 items-center">
-                      <input
-                        type="text" placeholder="No. Flight, cth: MH 716"
-                        className={`col-span-3 ${styles.inputBg} rounded-lg p-2 text-xs`}
-                        value={seg.flightNumber}
-                        onChange={e => handleFlightSegmentChange(idx, 'flightNumber', e.target.value)}
-                      />
-                      <input
-                        type="date"
-                        className={`col-span-3 ${styles.inputBg} rounded-lg p-2 text-xs`}
-                        value={seg.date}
-                        onChange={e => handleFlightSegmentChange(idx, 'date', e.target.value)}
-                      />
-                      <input
-                        type="text" placeholder="Rute, cth: CGK-KUL"
-                        className={`col-span-2 ${styles.inputBg} rounded-lg p-2 text-xs`}
-                        value={seg.route}
-                        onChange={e => handleFlightSegmentChange(idx, 'route', e.target.value)}
-                      />
-                      <input
-                        type="text" placeholder="Jam Berangkat"
-                        className={`col-span-2 ${styles.inputBg} rounded-lg p-2 text-xs`}
-                        value={seg.depTime}
-                        onChange={e => handleFlightSegmentChange(idx, 'depTime', e.target.value)}
-                      />
-                      <input
-                        type="text" placeholder="Jam Tiba"
-                        className={`col-span-1 ${styles.inputBg} rounded-lg p-2 text-xs`}
-                        value={seg.arrTime}
-                        onChange={e => handleFlightSegmentChange(idx, 'arrTime', e.target.value)}
-                      />
-                      <button type="button" onClick={() => handleRemoveFlightSegment(idx)} className="col-span-1 text-rose-500 hover:text-rose-400 p-1 justify-self-center">
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                  <button type="button" onClick={handleAddFlightSegment} className="text-[11px] text-emerald-500 hover:underline flex items-center gap-1">
-                    <Plus className="w-3 h-3" /> Tambah Segmen Penerbangan
-                  </button>
-                </div>
-
-                <div>
-                  <label className="block mb-1 text-[11px] font-semibold opacity-70">Catatan Khusus (opsional)</label>
-                  <textarea
-                    rows={2}
-                    placeholder={'cth: No bed with meals: disc 500.000\nUsia di bawah 23 bulan no bed (Infant with Basinet): Disc 50%'}
-                    className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
-                    value={formData.specialNote}
-                    onChange={e => setFormData({ ...formData, specialNote: e.target.value })}
-                  />
                 </div>
               </div>
 
