@@ -836,9 +836,9 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                tengah (kartu, itinerary per hari) yang dijaga lewat
                page-break-inside:avoid di bawah. */
             .doc-page { padding:26px 35px; }
-            .kop-header { display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:3px double #059669; padding-bottom:14px; margin-bottom:18px; }
-            .kop-logo { width:210px; height:210px; object-fit:contain; flex-shrink:0; }
-            .kop-text { text-align:right; }
+            .kop-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; border-bottom:3px double #059669; padding-bottom:10px; margin-bottom:18px; }
+            .kop-logo { width:165px; height:165px; object-fit:contain; flex-shrink:0; }
+            .kop-text { text-align:right; padding-top:6px; }
             .company-logo-title { font-size:20px; font-weight:800; color:#059669; margin:0; letter-spacing:0.3px; }
             .company-address { font-size:10px; color:#64748b; margin:3px 0 0 0; max-width:420px; margin-left:auto; line-height:1.5; }
             .doc-title { font-size:15px; font-weight:800; color:#0f172a; text-align:center; letter-spacing:0.5px; margin:0 0 16px 0; }
