@@ -825,10 +825,19 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
           <title>Detail Paket - ${pkg.name}</title>
           <style>
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color:#1e293b; margin:0; padding:0; }
-            .doc-page { padding:35px; page-break-after:always; }
-            .doc-page:last-child { page-break-after:auto; }
+            /* Dulu tiap section (Detail Paket / Deskripsi+Flight / Itinerary)
+               dipaksa ganti halaman fisik sendiri-sendiri (page-break-after:
+               always) — hasilnya kalau isi 1 section pendek (misal flight
+               cuma 2 baris), sisa halaman itu kosong melompong sebelum
+               section berikutnya baru mulai di halaman baru. Sekarang
+               dibiarkan NGALIR NYAMBUNG aja (nggak ada page-break paksa),
+               biar isinya ngisi kertas penuh dulu baru pindah halaman kalau
+               emang udah kepenuhan — cuma blok yang nggak boleh kepotong di
+               tengah (kartu, itinerary per hari) yang dijaga lewat
+               page-break-inside:avoid di bawah. */
+            .doc-page { padding:26px 35px; }
             .kop-header { display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:3px double #059669; padding-bottom:14px; margin-bottom:18px; }
-            .kop-logo { width:64px; height:64px; object-fit:contain; flex-shrink:0; }
+            .kop-logo { width:96px; height:96px; object-fit:contain; flex-shrink:0; }
             .kop-text { text-align:right; }
             .company-logo-title { font-size:20px; font-weight:800; color:#059669; margin:0; letter-spacing:0.3px; }
             .company-address { font-size:10px; color:#64748b; margin:3px 0 0 0; max-width:420px; margin-left:auto; line-height:1.5; }
@@ -841,7 +850,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
             .page1-body.with-flyer .page1-right { flex:1; display:flex; flex-direction:column; gap:12px; min-width:0; }
             .page1-body:not(.with-flyer) .page1-right { width:100%; display:flex; flex-direction:column; gap:12px; }
             .flyer-image { width:46%; flex-shrink:0; object-fit:cover; border-radius:10px; border:1px solid #e2e8f0; max-height:420px; }
-            .detail-card { border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; }
+            .detail-card { border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; page-break-inside:avoid; }
             .card-bar { background:#047857; color:#fff; font-size:11.5px; font-weight:800; letter-spacing:0.5px; padding:8px 14px; }
             .detail-card .info-grid { margin-bottom:0; }
             .detail-card .card-body { padding:10px 14px; font-size:11px; color:#334155; }
@@ -852,7 +861,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
             .info-value { color:#0f172a; font-weight:600; }
             .price-cell { color:#059669; font-size:13px; }
             .facilities-grid { display:flex; gap:14px; margin-bottom:14px; }
-            .facility-box { flex:1; border-radius:8px; padding:12px 14px; font-size:11px; }
+            .facility-box { flex:1; border-radius:8px; padding:12px 14px; font-size:11px; page-break-inside:avoid; }
             .facility-include { background:#f0fdf4; border:1px solid #bbf7d0; }
             .facility-exclude { background:#fff7ed; border:1px solid #fed7aa; }
             .facility-box h4 { margin:0 0 6px 0; font-size:11px; text-transform:uppercase; letter-spacing:0.4px; }
@@ -868,12 +877,13 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
             .flight-table td { padding:6px 8px; border-bottom:1px solid #f1f5f9; }
             .note-box { margin-top:16px; background:#fffbeb; border:1px dashed #fbbf24; border-radius:8px; padding:10px 14px; font-size:10.5px; color:#78350f; }
             .note-box h5 { margin:0 0 4px 0; font-size:11px; }
-            .itinerary-day { margin-bottom:16px; padding-bottom:12px; border-bottom:1px dashed #e2e8f0; }
+            .itinerary-day { margin-bottom:16px; padding-bottom:12px; border-bottom:1px dashed #e2e8f0; page-break-inside:avoid; }
             .itinerary-day h3 { margin:0 0 6px 0; font-size:13px; color:#065f46; }
             .itinerary-desc { margin:0 0 6px 0; font-size:12px; color:#334155; white-space:pre-wrap; }
             .itinerary-meta { font-size:11px; color:#64748b; }
             .footer-note { text-align:center; font-size:10px; color:#94a3b8; margin-top:20px; border-top:1px solid #f1f5f9; padding-top:10px; }
-            @media print { .doc-page { padding:20px 30px; } }
+            .flight-table { page-break-inside:avoid; }
+            @media print { .doc-page { padding:16px 30px; } }
           </style>
         </head>
         <body>
