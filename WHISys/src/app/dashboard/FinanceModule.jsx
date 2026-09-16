@@ -52,6 +52,13 @@ const resolveBankName = (bankName, customBankName) => {
   return bankName || '';
 };
 
+// Nama kategori buat biaya admin bank — dipakai baik pas staf catat manual
+// maupun pas sistem otomatis nyatet dari field "Biaya Admin" di form Bayar
+// Vendor/Biaya Operasional. Disamain sama kategori "Biaya Administrasi
+// Bank" yang emang udah dipakai di sistem dari awal, biar di Laba Rugi
+// nggak pecah jadi 2 baris/akun kategori yang beda buat hal yang sama.
+const ADMIN_FEE_CATEGORY = 'Biaya Administrasi Bank';
+
 const OPERATIONAL_CATEGORIES = [
   'Sewa Kantor',
   'Gaji Staff',
@@ -59,11 +66,7 @@ const OPERATIONAL_CATEGORIES = [
   'ATK',
   'Marketing',
   'Komisi Mitra/Agen',
-  // Kategori khusus dipakai sistem buat nyatet Biaya Admin Bank yang
-  // diinput sekalian pas Bayar Vendor/Biaya Operasional (lihat field
-  // "Biaya Admin" di 2 form itu) — tetap muncul di daftar kategori biar
-  // konsisten kalau staf mau catat biaya admin secara manual juga.
-  'Biaya Admin Bank',
+  ADMIN_FEE_CATEGORY,
   'Lain-lain'
 ];
 
@@ -1565,7 +1568,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       // Biaya Admin Bank (opsional) — dipotong bank SEKALIAN pas transfer
       // pembayaran vendor ini, tapi itu pengeluaran KANTOR sendiri (bukan
       // bagian dari yang dibayar ke vendor). Dicatet sebagai entry Biaya
-      // Operasional TERPISAH (kategori "Biaya Admin Bank") + jurnalnya
+      // Operasional TERPISAH (pakai kategori "Biaya Administrasi Bank" yang
+      // sama dengan yang staf pakai kalau input manual, biar di Laba Rugi
+      // ketemu jadi 1 baris/akun aja, bukan pecah 2 kategori) + jurnalnya
       // sendiri, otomatis, biar staf nggak perlu buka form Biaya
       // Operasional lagi buat nyatet potongan admin ini. Cuma jalan kalau
       // bayarnya beneran lewat Kas/Bank (Saldo Deposit Vendor nggak nyentuh
@@ -1574,7 +1579,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       if (!isDepositPay && vendorAdminFeeVal > 0) {
         try {
           const adminFeeOpRef = await addDoc(collection(db, 'expenses_operational'), {
-            category: 'Biaya Admin Bank',
+            category: ADMIN_FEE_CATEGORY,
             amount: vendorAdminFeeVal,
             accountId: vendorForm.accountId,
             accountName: vendorAccount?.name || '',
@@ -1584,14 +1589,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             createdAt: paymentDateResolved
           });
           await adjustAccountBalance(vendorForm.accountId, -vendorAdminFeeVal, {
-            description: `Biaya Admin Bank - Transfer Vendor ${selectedVendor.name}`,
+            description: `${ADMIN_FEE_CATEGORY} - Transfer Vendor ${selectedVendor.name}`,
             reference: selectedVendor.name,
             source: 'operational_expense',
             date: paymentDateResolved,
             sourceDocId: adminFeeOpRef.id
           });
           await postOperationalExpense({
-            expenseId: adminFeeOpRef.id, category: 'Biaya Admin Bank', amount: vendorAdminFeeVal,
+            expenseId: adminFeeOpRef.id, category: ADMIN_FEE_CATEGORY, amount: vendorAdminFeeVal,
             accountId: vendorForm.accountId, accountName: vendorAccount?.name || '',
             date: paymentDateResolved,
             createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
@@ -1728,7 +1733,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
         // Biaya Admin Bank (opsional) — potongan admin transfer yang
         // kedebet SEKALIAN pas bayar biaya operasional ini. Dicatet sebagai
-        // entry Biaya Operasional TERPISAH (kategori "Biaya Admin Bank") +
+        // entry Biaya Operasional TERPISAH (pakai kategori "Biaya
+        // Administrasi Bank" yang sama dengan yang staf pakai kalau input
+        // manual, biar di Laba Rugi ketemu jadi 1 baris/akun aja) +
         // jurnalnya sendiri, otomatis, biar staf nggak perlu input manual
         // 2 kali. Cuma buat mode CATAT BARU (nggak dipakai pas edit, biar
         // nggak nyiptain entry dobel tiap kali biaya ini diedit ulang).
@@ -1736,7 +1743,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         if (opAdminFeeVal > 0) {
           try {
             const adminFeeOpRef = await addDoc(collection(db, 'expenses_operational'), {
-              category: 'Biaya Admin Bank',
+              category: ADMIN_FEE_CATEGORY,
               amount: opAdminFeeVal,
               accountId: operationalForm.accountId,
               accountName: opAccount?.name || '',
@@ -1746,14 +1753,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
               createdAt: journalDate
             });
             await adjustAccountBalance(operationalForm.accountId, -opAdminFeeVal, {
-              description: `Biaya Admin Bank - ${operationalForm.category}`,
+              description: `${ADMIN_FEE_CATEGORY} - ${operationalForm.category}`,
               reference: operationalForm.category || '',
               source: 'operational_expense',
               date: journalDate,
               sourceDocId: adminFeeOpRef.id
             });
             await postOperationalExpense({
-              expenseId: adminFeeOpRef.id, category: 'Biaya Admin Bank', amount: opAdminFeeVal,
+              expenseId: adminFeeOpRef.id, category: ADMIN_FEE_CATEGORY, amount: opAdminFeeVal,
               accountId: operationalForm.accountId, accountName: opAccount?.name || '',
               date: journalDate,
               createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
@@ -3716,7 +3723,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                     onChange={e => setVendorForm({ ...vendorForm, adminFee: e.target.value })}
                   />
                   <p className={`text-[10.5px] ${styles.textSub} mt-1`}>
-                    Isi kalau ada potongan biaya admin transfer dari bank (di luar nominal bayar vendor). Otomatis kecatet sebagai Biaya Operasional "Biaya Admin Bank" sendiri, nggak perlu input manual lagi lewat form terpisah.
+                    Isi kalau ada potongan biaya admin transfer dari bank (di luar nominal bayar vendor). Otomatis kecatet sebagai Biaya Operasional "Biaya Administrasi Bank" sendiri, nggak perlu input manual lagi lewat form terpisah.
                   </p>
                 </div>
               )}
@@ -4007,7 +4014,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                     onChange={e => setOperationalForm({ ...operationalForm, adminFee: e.target.value })}
                   />
                   <p className={`text-[10px] ${styles.textSub} mt-1`}>
-                    Isi kalau ada potongan biaya admin transfer dari bank (di luar nominal biaya di atas). Otomatis kecatet sebagai Biaya Operasional "Biaya Admin Bank" sendiri, nggak perlu input manual lagi lewat form terpisah.
+                    Isi kalau ada potongan biaya admin transfer dari bank (di luar nominal biaya di atas). Otomatis kecatet sebagai Biaya Operasional "Biaya Administrasi Bank" sendiri, nggak perlu input manual lagi lewat form terpisah.
                   </p>
                 </div>
               )}
