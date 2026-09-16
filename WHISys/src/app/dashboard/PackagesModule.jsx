@@ -404,6 +404,78 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     setShowModal(true);
   };
 
+  // ============ Sinkronisasi Katalog Produk Publik (`public_catalog`) ============
+  // Endpoint publik /api/public/catalog (dipanggil situs wisatahalalindonesia.com)
+  // TIDAK bisa pakai Firebase Admin SDK, karena pembuatan Service Account Key
+  // diblokir Org Policy Google Workspace punya perusahaan (lihat catatan di
+  // src/lib/firebaseAdmin.js). Sebagai gantinya, endpoint itu baca collection
+  // terpisah `public_catalog` (1 dokumen per paket AKTIF, doc ID = ID paket)
+  // yang ditulis di sini pakai Client SDK — sesi staf yang udah login lewat
+  // dashboard ini — tiap kali data paket yang relevan buat katalog berubah.
+  // Firestore Rules perlu dibuka PUBLIC READ ONLY khusus buat collection
+  // `public_catalog` ini (BUKAN collection `packages` asli yang berisi data
+  // internal/margin) — instruksi rule-nya udah dikasih terpisah ke user.
+  // Field yang disalin ke sini WAJIB lewat whitelist `PUBLIC_CATALOG_FIELDS`
+  // di bawah — JANGAN PERNAH taro field budget/margin/internal
+  // (budgetFixedCostItems, budgetCostTotal, revenueRecognized, dst) di sini.
+  const PUBLIC_CATALOG_FIELDS = [
+    'code', 'name', 'type', 'departureDate', 'durationDays', 'airline',
+    'hotelMakkah', 'hotelMadinah', 'destinationCity', 'hotelTour', 'laScope',
+    'quotaTotal', 'quotaRemaining', 'priceMain', 'priceQuad', 'priceTriple',
+    'priceDouble', 'priceChild', 'priceIncludes', 'priceExcludes',
+    'flightSegments', 'itinerary', 'specialNote', 'flyerImageDataUrl',
+  ];
+
+  const buildPublicCatalogDoc = (data) => {
+    const out = {};
+    PUBLIC_CATALOG_FIELDS.forEach((k) => { out[k] = data[k]; });
+    out.quotaTotal = Number(data.quotaTotal) || 0;
+    out.quotaRemaining = Number(data.quotaRemaining ?? data.quotaTotal ?? 0);
+    out.priceMain = Number(data.priceMain || data.priceQuad) || 0;
+    out.priceQuad = Number(data.priceQuad || data.priceMain) || 0;
+    out.priceTriple = Number(data.priceTriple) || 0;
+    out.priceDouble = Number(data.priceDouble) || 0;
+    out.priceChild = Number(data.priceChild) || 0;
+    out.priceIncludes = Array.isArray(data.priceIncludes) ? data.priceIncludes : [];
+    out.priceExcludes = Array.isArray(data.priceExcludes) ? data.priceExcludes : [];
+    out.flightSegments = Array.isArray(data.flightSegments) ? data.flightSegments : [];
+    out.itinerary = Array.isArray(data.itinerary) ? data.itinerary : [];
+    out.code = data.code || '';
+    out.name = data.name || '';
+    out.type = data.type || '';
+    out.departureDate = data.departureDate || '';
+    out.durationDays = data.durationDays || '';
+    out.airline = data.airline || '';
+    out.hotelMakkah = data.hotelMakkah || '';
+    out.hotelMadinah = data.hotelMadinah || '';
+    out.destinationCity = data.destinationCity || '';
+    out.hotelTour = data.hotelTour || '';
+    out.laScope = data.laScope || '';
+    out.specialNote = data.specialNote || '';
+    out.flyerImageDataUrl = data.flyerImageDataUrl || '';
+    out.updatedAt = new Date().toISOString();
+    return out;
+  };
+
+  // Dipanggil tiap kali field yang relevan buat katalog publik berubah:
+  // simpan/hapus dokumen cermin di `public_catalog`, sesuai status
+  // Aktif/Nonaktif-nya. Sengaja NGGAK dibikin fatal kalau gagal (mis.
+  // Firestore Rules-nya belum sempat di-update user) — data paket utama
+  // tetap kesimpen normal, cuma katalog publiknya yang telat kesinkron;
+  // errornya dicatat di console biar ketauan pas debug.
+  const syncPublicCatalog = async (pkgId, data) => {
+    try {
+      if (!pkgId) return;
+      if (data.isActive === false) {
+        await deleteDoc(doc(db, 'public_catalog', pkgId));
+      } else {
+        await setDoc(doc(db, 'public_catalog', pkgId), buildPublicCatalogDoc(data));
+      }
+    } catch (err) {
+      console.error('Gagal menyinkronkan Katalog Produk publik:', err);
+    }
+  };
+
   // Toggle cepat Aktif/Nonaktif tanpa perlu buka modal Edit lengkap — dipakai
   // dari tombol mata (Eye/EyeOff) di daftar paket. Nonaktif = paket tetap
   // ada & tetap bisa dikelola normal di dashboard internal (booking lama
@@ -417,6 +489,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     const nextActive = !(pkg.isActive !== false);
     try {
       await updateDoc(doc(db, 'packages', pkg.id), { isActive: nextActive, updatedAt: new Date().toISOString() });
+      await syncPublicCatalog(pkg.id, { ...pkg, isActive: nextActive });
       logActivity({
         userId: currentUser?.uid,
         userName: currentUser?.fullName || currentUser?.email,
@@ -468,6 +541,11 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       if (!confirm(`Apakah Anda yakin ingin menghapus paket "${pkg.name}"?`)) return;
 
       await deleteDoc(doc(db, 'packages', pkg.id));
+      // Ikut hapus cermin katalog publiknya juga — jangan sampai paket yang
+      // udah dihapus dari sistem masih nongol di wisatahalalindonesia.com.
+      await deleteDoc(doc(db, 'public_catalog', pkg.id)).catch((err) => {
+        console.error('Gagal menghapus dari Katalog Produk publik:', err);
+      });
 
       logActivity({
         userId: currentUser?.uid,
@@ -695,6 +773,9 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         itinerary: itineraryDays,
         updatedAt: new Date().toISOString()
       });
+      // Itinerary ikut ditampilin di Katalog Produk publik, jadi cermin
+      // `public_catalog`-nya perlu disinkron juga di sini.
+      await syncPublicCatalog(selectedPackageForItinerary.id, { ...selectedPackageForItinerary, itinerary: itineraryDays });
       setShowItineraryModal(false);
       fetchData();
     } catch (err) {
@@ -1118,6 +1199,11 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
           payload.quotaRemaining = Math.max(0, oldRemaining + delta);
         }
         await updateDoc(doc(db, 'packages', editingPackageId), payload);
+        // Sinkron cermin Katalog Produk publik — gabungin data paket lama
+        // (itinerary, dll yang nggak ikut di-touch payload form ini) sama
+        // field yang baru aja diubah, biar public_catalog tetap lengkap &
+        // up to date.
+        await syncPublicCatalog(editingPackageId, { ...originalPkg, ...payload });
 
         // Sinkronkan revisi harga jual ke SEMUA booking AKTIF yang masih
         // pakai paket ini. Booking nyimpen harga sendiri sebagai SNAPSHOT
@@ -1196,7 +1282,10 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         // booking ke paket ini bakal ditolak sistem karena dianggap 0 seat.
         payload.quotaRemaining = payload.quotaTotal;
         payload.createdAt = new Date().toISOString();
-        await addDoc(collection(db, 'packages'), payload);
+        const newPkgRef = await addDoc(collection(db, 'packages'), payload);
+        // Paket baru langsung disinkron ke Katalog Produk publik kalau
+        // statusnya Aktif (default-nya memang Aktif, lihat formData.isActive).
+        await syncPublicCatalog(newPkgRef.id, payload);
 
         logActivity({
           userId: currentUser?.uid,
