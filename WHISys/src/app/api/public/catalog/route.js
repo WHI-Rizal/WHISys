@@ -10,6 +10,11 @@ import { collection, getDocs } from 'firebase/firestore';
 // SENGAJA nggak pakai autentikasi sama sekali — datanya emang buat
 // ditampilkan ke publik/calon customer, sama kayak brosur/katalog cetak.
 //
+// CATATAN DOMAIN: WHISys jalan di subdomain `sys.wisatahalalindonesia.com`,
+// dan website utama publiknya ada di `wisatahalalindonesia.com` (dikelola
+// terpisah oleh Tim Web). CORS di bawah sengaja dibuka lebar (`*`) supaya
+// nggak masalah domain mana pun yang akhirnya manggil endpoint ini.
+//
 // KENAPA PAKAI CLIENT SDK (BUKAN ADMIN SDK) — beda dari /api/portal/*:
 // Endpoint ini awalnya pakai Firebase Admin SDK (getAdminDb(), sama
 // kayak /api/portal/*), tapi itu butuh `FIREBASE_SERVICE_ACCOUNT_KEY`.
@@ -56,9 +61,13 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
-  // Cache 5 menit di CDN/browser — katalog nggak butuh real-time detik-
-  // detikan, tapi tetep cukup update kalau staf baru aja ubah harga/status.
-  'Cache-Control': 'public, max-age=300, s-maxage=300, stale-while-revalidate=600',
+  // Cache 30 detik di CDN/browser (awalnya 5 menit — dipendekin 16 Sep 2026
+  // malam, soalnya user butuh ngecek paket baru muncul di katalog nggak
+  // lama setelah disave/toggle di WHISys, terutama pas lagi backfill paket
+  // lama). 30 detik masih cukup buat nahan lonjakan trafik ke Firestore
+  // kalau katalognya rame dibuka, tapi delay-nya udah jauh lebih kerasa
+  // cepet dibanding 5 menit sebelumnya.
+  'Cache-Control': 'public, max-age=30, s-maxage=30, stale-while-revalidate=60',
 };
 
 export async function GET() {
