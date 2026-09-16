@@ -59,6 +59,11 @@ const OPERATIONAL_CATEGORIES = [
   'ATK',
   'Marketing',
   'Komisi Mitra/Agen',
+  // Kategori khusus dipakai sistem buat nyatet Biaya Admin Bank yang
+  // diinput sekalian pas Bayar Vendor/Biaya Operasional (lihat field
+  // "Biaya Admin" di 2 form itu) — tetap muncul di daftar kategori biar
+  // konsisten kalau staf mau catat biaya admin secara manual juga.
+  'Biaya Admin Bank',
   'Lain-lain'
 ];
 
@@ -430,7 +435,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     accountId: '',
     billId: '',
     notes: 'DP Booking Seat',
-    paymentDate: todayISODate()
+    paymentDate: todayISODate(),
+    // Biaya admin bank (opsional) yang dipotong SEKALIAN sama transfer ini
+    // (mis. transfer Rp5.000.000, potongan admin Rp6.500, yang beneran
+    // kedebet dari rekening Rp5.006.500) — diisi di sini SEKALI, otomatis
+    // ikut kecatet sebagai Biaya Operasional "Biaya Admin Bank" sendiri pas
+    // submit, staf nggak perlu buka form Biaya Operasional kedua kalinya.
+    // Cuma relevan buat bayar via Kas/Bank (bukan Saldo Deposit Vendor,
+    // itu nggak nyentuh rekening bank sama sekali).
+    adminFee: ''
   });
 
   // Tagihan Vendor (vendor_bills) — invoice yang diterima dari vendor
@@ -456,7 +469,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     amount: '',
     accountId: '',
     notes: '',
-    expenseDate: todayISODate()
+    expenseDate: todayISODate(),
+    // Sama kayak adminFee di vendorForm — biaya admin bank yang dipotong
+    // sekalian sama transfer pembayaran biaya operasional ini. Cuma
+    // ditampilkan/dipakai pas CATAT BARU (nggak dipakai pas mode edit, biar
+    // nggak nyiptain entry Biaya Admin Bank dobel tiap kali biaya yang sama
+    // diedit ulang).
+    adminFee: ''
   });
   // null = mode catat baru, diisi id doc `expenses_operational` = mode edit
   // (misal salah pilih kategori/akun pas nyatet).
@@ -1543,6 +1562,49 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         alert(`Pembayaran vendor tersimpan & saldo Kas/Bank sudah terpotong, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
       });
 
+      // Biaya Admin Bank (opsional) — dipotong bank SEKALIAN pas transfer
+      // pembayaran vendor ini, tapi itu pengeluaran KANTOR sendiri (bukan
+      // bagian dari yang dibayar ke vendor). Dicatet sebagai entry Biaya
+      // Operasional TERPISAH (kategori "Biaya Admin Bank") + jurnalnya
+      // sendiri, otomatis, biar staf nggak perlu buka form Biaya
+      // Operasional lagi buat nyatet potongan admin ini. Cuma jalan kalau
+      // bayarnya beneran lewat Kas/Bank (Saldo Deposit Vendor nggak nyentuh
+      // rekening, nggak mungkin ada potongan admin bank).
+      const vendorAdminFeeVal = Number(vendorForm.adminFee) || 0;
+      if (!isDepositPay && vendorAdminFeeVal > 0) {
+        try {
+          const adminFeeOpRef = await addDoc(collection(db, 'expenses_operational'), {
+            category: 'Biaya Admin Bank',
+            amount: vendorAdminFeeVal,
+            accountId: vendorForm.accountId,
+            accountName: vendorAccount?.name || '',
+            notes: `Biaya admin transfer bayar vendor - ${selectedVendor.name} (${vendorForm.category})`,
+            expenseDate: (vendorForm.paymentDate || todayISODate()),
+            relatedVendorPaymentId: vendorRef.id,
+            createdAt: paymentDateResolved
+          });
+          await adjustAccountBalance(vendorForm.accountId, -vendorAdminFeeVal, {
+            description: `Biaya Admin Bank - Transfer Vendor ${selectedVendor.name}`,
+            reference: selectedVendor.name,
+            source: 'operational_expense',
+            date: paymentDateResolved,
+            sourceDocId: adminFeeOpRef.id
+          });
+          await postOperationalExpense({
+            expenseId: adminFeeOpRef.id, category: 'Biaya Admin Bank', amount: vendorAdminFeeVal,
+            accountId: vendorForm.accountId, accountName: vendorAccount?.name || '',
+            date: paymentDateResolved,
+            createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+          }).catch(err => {
+            console.error('Gagal posting jurnal biaya admin bank (vendor):', err);
+            alert(`Biaya Admin Bank tersimpan & saldo Kas/Bank sudah terpotong, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan untuk biaya admin ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+          });
+        } catch (adminFeeErr) {
+          console.error('Gagal mencatat biaya admin bank (vendor):', adminFeeErr);
+          alert(`Pembayaran vendor tersimpan, TAPI Biaya Admin Bank (Rp ${vendorAdminFeeVal.toLocaleString('id-ID')}) GAGAL ikut tercatat (${adminFeeErr.message}). Catat manual lewat "+ Biaya Operasional Kantor" kalau ini beneran ada potongannya.`);
+        }
+      }
+
       logActivity({
         userId: currentUser?.uid,
         userName: currentUser?.fullName || currentUser?.email,
@@ -1550,10 +1612,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         action: 'create',
         module: 'Pembayaran Vendor',
         targetLabel: selectedVendor.name,
-        details: `Mencatat pembayaran vendor "${selectedVendor.name}" (${vendorForm.category}) senilai Rp ${vendorAmountVal.toLocaleString('id-ID')} untuk paket "${selectedPkg.name}"${selectedBill ? ` (bayar tagihan ${selectedBill.billNumber || selectedBill.category})` : ''}`
+        details: `Mencatat pembayaran vendor "${selectedVendor.name}" (${vendorForm.category}) senilai Rp ${vendorAmountVal.toLocaleString('id-ID')} untuk paket "${selectedPkg.name}"${selectedBill ? ` (bayar tagihan ${selectedBill.billNumber || selectedBill.category})` : ''}${vendorAdminFeeVal > 0 ? ` + Biaya Admin Bank Rp ${vendorAdminFeeVal.toLocaleString('id-ID')}` : ''}`
       });
       setShowVendorModal(false);
-      setVendorForm({ packageId: '', vendorId: '', vendorName: '', category: vendorCategories[0], payMethod: 'Kas/Bank', amount: '', accountId: '', billId: '', notes: 'DP Booking Seat', paymentDate: todayISODate() });
+      setVendorForm({ packageId: '', vendorId: '', vendorName: '', category: vendorCategories[0], payMethod: 'Kas/Bank', amount: '', accountId: '', billId: '', notes: 'DP Booking Seat', paymentDate: todayISODate(), adminFee: '' });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat pembayaran vendor: " + err.message);
@@ -1664,6 +1726,47 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           alert(`Biaya operasional tersimpan & saldo Kas/Bank sudah terpotong, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar/Laba Rugi) untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
         });
 
+        // Biaya Admin Bank (opsional) — potongan admin transfer yang
+        // kedebet SEKALIAN pas bayar biaya operasional ini. Dicatet sebagai
+        // entry Biaya Operasional TERPISAH (kategori "Biaya Admin Bank") +
+        // jurnalnya sendiri, otomatis, biar staf nggak perlu input manual
+        // 2 kali. Cuma buat mode CATAT BARU (nggak dipakai pas edit, biar
+        // nggak nyiptain entry dobel tiap kali biaya ini diedit ulang).
+        const opAdminFeeVal = Number(operationalForm.adminFee) || 0;
+        if (opAdminFeeVal > 0) {
+          try {
+            const adminFeeOpRef = await addDoc(collection(db, 'expenses_operational'), {
+              category: 'Biaya Admin Bank',
+              amount: opAdminFeeVal,
+              accountId: operationalForm.accountId,
+              accountName: opAccount?.name || '',
+              notes: `Biaya admin transfer bayar biaya operasional - ${operationalForm.category}`,
+              expenseDate: expenseDateVal,
+              relatedOperationalExpenseId: opRef.id,
+              createdAt: journalDate
+            });
+            await adjustAccountBalance(operationalForm.accountId, -opAdminFeeVal, {
+              description: `Biaya Admin Bank - ${operationalForm.category}`,
+              reference: operationalForm.category || '',
+              source: 'operational_expense',
+              date: journalDate,
+              sourceDocId: adminFeeOpRef.id
+            });
+            await postOperationalExpense({
+              expenseId: adminFeeOpRef.id, category: 'Biaya Admin Bank', amount: opAdminFeeVal,
+              accountId: operationalForm.accountId, accountName: opAccount?.name || '',
+              date: journalDate,
+              createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+            }).catch(err => {
+              console.error('Gagal posting jurnal biaya admin bank (operasional):', err);
+              alert(`Biaya Admin Bank tersimpan & saldo Kas/Bank sudah terpotong, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan untuk biaya admin ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+            });
+          } catch (adminFeeErr) {
+            console.error('Gagal mencatat biaya admin bank (operasional):', adminFeeErr);
+            alert(`Biaya operasional tersimpan, TAPI Biaya Admin Bank (Rp ${opAdminFeeVal.toLocaleString('id-ID')}) GAGAL ikut tercatat (${adminFeeErr.message}). Catat manual lewat "+ Biaya Operasional Kantor" kalau ini beneran ada potongannya.`);
+          }
+        }
+
         logActivity({
           userId: currentUser?.uid,
           userName: currentUser?.fullName || currentUser?.email,
@@ -1671,13 +1774,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           action: 'create',
           module: 'Pengeluaran Operasional',
           targetLabel: operationalForm.category,
-          details: `Mencatat biaya operasional "${operationalForm.category}" senilai Rp ${opAmountVal.toLocaleString('id-ID')}`
+          details: `Mencatat biaya operasional "${operationalForm.category}" senilai Rp ${opAmountVal.toLocaleString('id-ID')}${opAdminFeeVal > 0 ? ` + Biaya Admin Bank Rp ${opAdminFeeVal.toLocaleString('id-ID')}` : ''}`
         });
       }
 
       setShowOperationalModal(false);
       setEditingOperationalId(null);
-      setOperationalForm({ category: operationalCategories[0], amount: '', accountId: '', notes: '', expenseDate: todayISODate() });
+      setOperationalForm({ category: operationalCategories[0], amount: '', accountId: '', notes: '', expenseDate: todayISODate(), adminFee: '' });
       fetchData();
     } catch (err) {
       alert("Gagal menyimpan biaya operasional: " + err.message);
@@ -3603,6 +3706,21 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 </select>
               </div>
 
+              {vendorForm.payMethod === 'Kas/Bank' && (
+                <div>
+                  <label className="block mb-1 font-medium">Biaya Admin Bank <span className="font-normal text-[10px]">(opsional)</span></label>
+                  <input
+                    type="number" placeholder="6500"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={vendorForm.adminFee}
+                    onChange={e => setVendorForm({ ...vendorForm, adminFee: e.target.value })}
+                  />
+                  <p className={`text-[10.5px] ${styles.textSub} mt-1`}>
+                    Isi kalau ada potongan biaya admin transfer dari bank (di luar nominal bayar vendor). Otomatis kecatet sebagai Biaya Operasional "Biaya Admin Bank" sendiri, nggak perlu input manual lagi lewat form terpisah.
+                  </p>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block mb-1 font-medium">Tanggal Pembayaran</label>
@@ -3878,6 +3996,21 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                   onChange={e => setOperationalForm({ ...operationalForm, notes: e.target.value })}
                 />
               </div>
+
+              {!editingOperationalId && (
+                <div>
+                  <label className="block mb-1 font-medium">Biaya Admin Bank <span className="font-normal text-[10px]">(opsional)</span></label>
+                  <input
+                    type="number" placeholder="6500"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={operationalForm.adminFee}
+                    onChange={e => setOperationalForm({ ...operationalForm, adminFee: e.target.value })}
+                  />
+                  <p className={`text-[10px] ${styles.textSub} mt-1`}>
+                    Isi kalau ada potongan biaya admin transfer dari bank (di luar nominal biaya di atas). Otomatis kecatet sebagai Biaya Operasional "Biaya Admin Bank" sendiri, nggak perlu input manual lagi lewat form terpisah.
+                  </p>
+                </div>
+              )}
 
               <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                 <button type="button" onClick={() => { setShowOperationalModal(false); setEditingOperationalId(null); }} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
