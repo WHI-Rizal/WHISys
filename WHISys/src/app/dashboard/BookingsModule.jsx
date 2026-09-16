@@ -345,6 +345,15 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   // Guard anti double-submit — cegah tap ganda (koneksi lambat) bikin
   // booking/jamaah kedobel saat handleSubmit masih berjalan.
   const [isSavingBooking, setIsSavingBooking] = useState(false);
+  // Lock submit KHUSUS buat "Edit Grup" — nyusul ditambahin setelah ketauan
+  // penyebab jurnal booking_edit_adjustment numpuk berkali-kali dgn nominal
+  // sama persis (kasus GRP-606826, 16 Sep 2026): tombol Simpan di modal ini
+  // dulu nggak punya pengaman apa-apa (beda sama tombol Simpan booking baru
+  // yang udah pakai isSavingBooking), jadi 2x klik/klik pas lemot bisa bikin
+  // handleGroupEditSubmit kepanggil 2x bareng — masing2 ngitung "selisih
+  // koreksi" dari snapshot data yang SAMA (groupEditTarget.items, belum
+  // ke-refresh), jadi masing2 posting jurnal koreksinya sendiri2 & numpuk.
+  const [isSavingGroupEdit, setIsSavingGroupEdit] = useState(false);
 
   // State Riwayat Setoran
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -2565,38 +2574,48 @@ Terimakasih🙏`;
   const handleGroupEditSubmit = async (e) => {
     e.preventDefault();
     if (!groupEditTarget) return;
-    // Edit data grup (paket/harga/biaya tambahan/diskon/setoran) tetap
-    // eksklusif Finance & Super Admin — TC/Sales cuma dikasih akses "Tambah
-    // Peserta" (handleAddPaxToGroup di atas), bukan form ini. Form ini
-    // sendiri disembunyikan dari TC/Sales di JSX, jadi cek ini jaga-jaga
-    // (defense in depth) kalau entah gimana caranya handler ini kepanggil.
-    if (!canManageBookings) {
-      alert("Cuma Finance & Super Admin yang boleh mengedit data booking (paket/harga/biaya tambahan). TC/Sales cuma bisa menambah peserta baru lewat form di atasnya.");
-      return;
-    }
-    if (!groupEditForm.packageId) {
-      alert("Pilih Paket Travel.");
-      return;
-    }
-    // Jaga-jaga (defense in depth) — field Paket Travel di form ini sengaja
-    // dikunci (disabled) di JSX, TC/Sales/Finance sekalipun cuma boleh ganti
-    // paket lewat "Reschedule Grup" (canReschedule = Finance/Super Admin
-    // doang), bukan dari Edit Grup ini. Tolak di sini juga kalau entah
-    // gimana caranya packageId tetap kekirim beda dari aslinya.
-    if (groupEditForm.packageId !== groupEditTarget.primary?.packageId) {
-      alert('Paket nggak bisa diganti lewat Edit Grup. Pakai tombol "Reschedule Grup" (Finance/Super Admin) buat pindah paket.');
-      return;
-    }
-    if (!groupEditForm.ordererId) {
-      alert("Pilih atau isi data Pemesan (yang melakukan pemesanan).");
-      return;
-    }
-    if (groupEditForm.ordererId === '__new__' && !groupEditNewOrdererForm.fullName.trim()) {
-      alert("Isi nama lengkap pemesan baru terlebih dahulu.");
-      return;
-    }
-
+    // Anti-dobel-submit — lihat penjelasan di deklarasi isSavingGroupEdit di
+    // atas. Ditaruh paling awal, SEBELUM validasi apapun, biar klik kedua
+    // (dobel-klik/klik pas masih lemot) langsung ke-block total, bukan cuma
+    // ke-block pas udah lewat validasi.
+    if (isSavingGroupEdit) return;
+    setIsSavingGroupEdit(true);
+    // Sisa validasi & proses simpennya semua digabung ke SATU try/finally
+    // (bukan cuma sebagian) — biar isSavingGroupEdit PASTI ke-reset ke false
+    // lewat jalur manapun form ini berhenti (validasi gagal, sukses, ATAU
+    // error), nggak ada celah tombol Simpan kelupaan ke-lock permanen.
     try {
+      // Edit data grup (paket/harga/biaya tambahan/diskon/setoran) tetap
+      // eksklusif Finance & Super Admin — TC/Sales cuma dikasih akses "Tambah
+      // Peserta" (handleAddPaxToGroup di atas), bukan form ini. Form ini
+      // sendiri disembunyikan dari TC/Sales di JSX, jadi cek ini jaga-jaga
+      // (defense in depth) kalau entah gimana caranya handler ini kepanggil.
+      if (!canManageBookings) {
+        alert("Cuma Finance & Super Admin yang boleh mengedit data booking (paket/harga/biaya tambahan). TC/Sales cuma bisa menambah peserta baru lewat form di atasnya.");
+        return;
+      }
+      if (!groupEditForm.packageId) {
+        alert("Pilih Paket Travel.");
+        return;
+      }
+      // Jaga-jaga (defense in depth) — field Paket Travel di form ini sengaja
+      // dikunci (disabled) di JSX, TC/Sales/Finance sekalipun cuma boleh ganti
+      // paket lewat "Reschedule Grup" (canReschedule = Finance/Super Admin
+      // doang), bukan dari Edit Grup ini. Tolak di sini juga kalau entah
+      // gimana caranya packageId tetap kekirim beda dari aslinya.
+      if (groupEditForm.packageId !== groupEditTarget.primary?.packageId) {
+        alert('Paket nggak bisa diganti lewat Edit Grup. Pakai tombol "Reschedule Grup" (Finance/Super Admin) buat pindah paket.');
+        return;
+      }
+      if (!groupEditForm.ordererId) {
+        alert("Pilih atau isi data Pemesan (yang melakukan pemesanan).");
+        return;
+      }
+      if (groupEditForm.ordererId === '__new__' && !groupEditNewOrdererForm.fullName.trim()) {
+        alert("Isi nama lengkap pemesan baru terlebih dahulu.");
+        return;
+      }
+
       // Cuma booking yang statusnya masih 'active' yang kena edit/quota math —
       // yang udah cancelled/rescheduled dibiarin apa adanya (histori lama).
       const activeItems = groupEditTarget.items.filter(b => (b.status || 'active') === 'active');
@@ -2822,6 +2841,8 @@ Terimakasih🙏`;
       });
     } catch (err) {
       alert("Gagal mengedit booking grup: " + err.message);
+    } finally {
+      setIsSavingGroupEdit(false);
     }
   };
 
@@ -7473,8 +7494,8 @@ Terimakasih🙏`;
                 <button type="button" onClick={() => setShowGroupEditModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
-                <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium">
-                  Simpan Perubahan Grup
+                <button type="submit" disabled={isSavingGroupEdit} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium disabled:opacity-60 disabled:cursor-not-allowed">
+                  {isSavingGroupEdit ? 'Menyimpan...' : 'Simpan Perubahan Grup'}
                 </button>
               </div>
             </form>
