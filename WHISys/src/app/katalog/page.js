@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Search, MapPin, Calendar, FileText, Loader2, AlertTriangle } from 'lucide-react';
+import {
+  formatTanggalPanjang, monthYearKey, monthYearLabel, formatRupiah, hargaMulai,
+} from '@/lib/publicCatalogFormat';
 
 // ============================================================================
 // KATALOG PRODUK PUBLIK — halaman ini SENGAJA ditaro langsung di dalam
@@ -15,56 +19,10 @@ import { Search, MapPin, Calendar, FileText, Loader2, AlertTriangle } from 'luci
 // paket yang statusnya Aktif yang ada di situ, jadi halaman ini otomatis
 // cuma nampilin paket Aktif tanpa perlu filter tambahan.
 //
-// GANTI nomor WA di bawah ini ke nomor CS/admin yang asli sebelum dipakai —
-// tombol "DETAIL PAKET" sementara diarahkan ke WhatsApp (bukan halaman
-// detail/itinerary tersendiri), karena halaman detail ala cetakan itinerary
-// belum dibahas/dibangun (disepakati dibahas belakangan, di luar scope
-// permintaan ini).
+// Tombol "DETAIL PAKET" di tiap kartu mengarah ke /katalog/[id] (lihat
+// src/app/katalog/[id]/page.js) — halaman detail ala cetakan itinerary,
+// bukan lagi ke WhatsApp langsung.
 // ============================================================================
-
-const WA_NUMBER = '628123456789'; // TODO: ganti ke nomor CS asli
-
-const BULAN_ID = [
-  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
-];
-
-function parseDeparture(iso) {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return null;
-  return d;
-}
-
-function formatTanggalPanjang(iso) {
-  const d = parseDeparture(iso);
-  if (!d) return '-';
-  return `${String(d.getDate()).padStart(2, '0')} ${BULAN_ID[d.getMonth()]} ${d.getFullYear()}`;
-}
-
-function monthYearKey(iso) {
-  const d = parseDeparture(iso);
-  if (!d) return null;
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function monthYearLabel(key) {
-  const [year, month] = key.split('-');
-  return `${BULAN_ID[Number(month) - 1]} ${year}`;
-}
-
-function formatRupiah(n) {
-  if (!n || !isFinite(n)) return null;
-  return 'Rp ' + Number(n).toLocaleString('id-ID');
-}
-
-function hargaMulai(pkg) {
-  const candidates = [pkg.priceQuad, pkg.priceTriple, pkg.priceDouble, pkg.priceMain]
-    .map((v) => Number(v))
-    .filter((v) => v > 0);
-  if (candidates.length === 0) return null;
-  return Math.min(...candidates);
-}
 
 export default function KatalogPublikPage() {
   const [packages, setPackages] = useState([]);
@@ -240,9 +198,6 @@ export default function KatalogPublikPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredPackages.map((pkg) => {
               const harga = hargaMulai(pkg);
-              const wa = `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(
-                `Assalamu'alaikum, saya tertarik dengan paket "${pkg.name || pkg.code}", boleh minta info detailnya?`
-              )}`;
               return (
                 <div
                   key={pkg.id}
@@ -290,14 +245,12 @@ export default function KatalogPublikPage() {
                         {harga ? formatRupiah(harga) : 'Hubungi kami'}
                       </strong>
                     </div>
-                    <a
-                      href={wa}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <Link
+                      href={`/katalog/${pkg.id}`}
                       className="mt-auto inline-flex items-center justify-center bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg px-4 py-2.5 transition-colors"
                     >
                       DETAIL PAKET
-                    </a>
+                    </Link>
                   </div>
                 </div>
               );
