@@ -6,6 +6,8 @@ import { collection, addDoc, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc,
 import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings, List, LayoutGrid, CalendarRange } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 import { logActivity } from '../../lib/activityLog';
+import { postJournalEntry, ACC } from '../../lib/journal';
+import { addPPN } from '../../lib/ppn';
 
 // Helper Format Tanggal dd/mm/yyyy
 const formatDateDDMMYYYY = (dateString) => {
@@ -1076,6 +1078,68 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         }
         await updateDoc(doc(db, 'packages', editingPackageId), payload);
 
+        // Sinkronkan revisi harga jual ke SEMUA booking AKTIF yang masih
+        // pakai paket ini. Booking nyimpen harga sendiri sebagai SNAPSHOT
+        // (field `totalAmount`, dihitung dari harga paket + biaya tambahan
+        // - diskon + PPN, dibekukan pas booking dibuat) — kalau nggak
+        // disinkronkan di sini, revisi harga paket master nggak bakal
+        // kebawa ke SO/tagihan customer yang udah ada, dan piutang jamaah
+        // di Laporan Keuangan tetap pakai harga lama selamanya. Booking
+        // yang statusnya bukan 'active' (batal/reschedule) dilewatin —
+        // harga mereka udah nggak relevan lagi.
+        let syncedBookingCount = 0;
+        const priceChanged = ['priceMain', 'priceQuad', 'priceTriple', 'priceDouble'].some(
+          k => Number(originalPkg?.[k] || 0) !== Number(payload[k] || 0)
+        );
+        if (originalPkg && priceChanged) {
+          try {
+            const bookingsSnap = await getDocs(query(collection(db, 'bookings'), where('packageId', '==', editingPackageId)));
+            const activeBookings = bookingsSnap.docs
+              .map(d => ({ id: d.id, ...d.data() }))
+              .filter(b => (b.status || 'active') === 'active');
+            const nowIso = new Date().toISOString();
+            for (const b of activeBookings) {
+              let newBasePrice = Number(payload.priceQuad || payload.priceMain || 0);
+              if (b.roomType === 'Triple') newBasePrice = Number(payload.priceTriple || newBasePrice);
+              if (b.roomType === 'Double') newBasePrice = Number(payload.priceDouble || newBasePrice);
+              const chargesTotal = (b.extraCharges || []).reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
+              const discountsTotal = (b.extraDiscounts || []).reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
+              const newTotalAmount = addPPN(newBasePrice + chargesTotal - discountsTotal).total;
+              const delta = newTotalAmount - Number(b.totalAmount || 0);
+              if (delta === 0) continue;
+              await updateDoc(doc(db, 'bookings', b.id), { totalAmount: newTotalAmount, updatedAt: nowIso });
+              // Piutang Jamaah & Pendapatan Diterima Dimuka disesuaikan
+              // sebesar selisihnya doang — akun ini balance-sheet-only,
+              // nggak nyentuh akun Pendapatan (4101) yang udah "Diakui" di
+              // P&L (kalaupun paketnya udah "Akui Pendapatan", itu dihitung
+              // dari uang yang beneran disetor, bukan dari totalAmount ini
+              // — jadi aman disinkronkan kapan pun).
+              await postJournalEntry({
+                date: nowIso,
+                description: `Sinkron Revisi Harga Paket "${payload.name}" - ${b.bookingCode || b.id}`,
+                source: 'booking_edit_adjustment', sourceDocId: b.id, reference: b.bookingCode || '',
+                lines: delta > 0 ? [
+                  { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: delta, credit: 0 },
+                  { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: 0, credit: delta },
+                ] : [
+                  { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: -delta, credit: 0 },
+                  { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: 0, credit: -delta },
+                ],
+                createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+              }).catch(err => {
+                console.error('Gagal posting jurnal sinkron revisi harga paket:', err);
+              });
+              syncedBookingCount++;
+            }
+            if (syncedBookingCount > 0) {
+              alert(`Harga paket "${payload.name}" berhasil diperbarui. ${syncedBookingCount} booking aktif yang masih pakai paket ini otomatis ikut disesuaikan tagihan & jurnalnya.`);
+            }
+          } catch (syncErr) {
+            console.error('Gagal menyinkronkan revisi harga ke booking existing:', syncErr);
+            alert(`Harga paket tersimpan, TAPI GAGAL menyinkronkan ke booking yang udah ada (${syncErr.message}). Tagihan/piutang booking lama mungkin masih pakai harga lama — cek manual di Booking & Manifest, atau lapor ke tim IT.`);
+          }
+        }
+
         logActivity({
           userId: currentUser?.uid,
           userName: currentUser?.fullName || currentUser?.email,
@@ -1083,7 +1147,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
           action: 'update',
           module: 'Paket Perjalanan',
           targetLabel: payload.name,
-          details: `Mengubah data paket "${payload.name}" (${payload.code || '-'}).`
+          details: `Mengubah data paket "${payload.name}" (${payload.code || '-'})${syncedBookingCount > 0 ? ` — ${syncedBookingCount} booking aktif ikut disesuaikan harga/tagihannya` : ''}.`
         });
       } else {
         // Paket baru: Sisa Kuota harus diisi penuh sama dengan Kuota Total
