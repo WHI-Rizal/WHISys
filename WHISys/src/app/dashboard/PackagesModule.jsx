@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
-import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings, List, LayoutGrid, CalendarRange } from 'lucide-react';
+import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings, List, LayoutGrid, CalendarRange, Eye, EyeOff } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 import { logActivity } from '../../lib/activityLog';
 import { postJournalEntry, ACC } from '../../lib/journal';
@@ -259,7 +259,14 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     specialNote: '',
     // Flyer promosi paket (opsional) — dipakai di halaman 1 dokumen Detail
     // Paket Wisata, disimpen sebagai data URL base64 (lihat compressImageToDataUrl).
-    flyerImageDataUrl: ''
+    flyerImageDataUrl: '',
+    // Status Aktif/Nonaktif — nentuin apakah paket ini tampil di Katalog
+    // Produk publik (wisatahalalindonesia.com, lewat endpoint
+    // /api/public/catalog). Default TRUE biar paket baru otomatis tayang.
+    // Ini CUMA soal visibilitas di katalog publik — nggak mempengaruhi
+    // booking/SO yang udah ada, staf tetap bisa lihat & kelola paket
+    // nonaktif seperti biasa di dashboard internal.
+    isActive: true
   });
   const [uploadingFlyer, setUploadingFlyer] = useState(false);
 
@@ -342,7 +349,8 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       priceExcludes: DEFAULT_PRICE_EXCLUDES,
       flightSegments: DEFAULT_FLIGHT_SEGMENTS,
       specialNote: '',
-      flyerImageDataUrl: ''
+      flyerImageDataUrl: '',
+      isActive: true
     });
     setShowModal(true);
   };
@@ -387,9 +395,41 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       flightSegments: (Array.isArray(pkg.flightSegments) && pkg.flightSegments.length > 0)
         ? pkg.flightSegments : DEFAULT_FLIGHT_SEGMENTS,
       specialNote: pkg.specialNote || '',
-      flyerImageDataUrl: pkg.flyerImageDataUrl || ''
+      flyerImageDataUrl: pkg.flyerImageDataUrl || '',
+      // Paket lama belum punya field ini sama sekali — default-nya TETAP
+      // aktif (bukan tiba-tiba ilang dari katalog cuma gara-gara field-nya
+      // belum pernah diisi).
+      isActive: pkg.isActive !== false
     });
     setShowModal(true);
+  };
+
+  // Toggle cepat Aktif/Nonaktif tanpa perlu buka modal Edit lengkap — dipakai
+  // dari tombol mata (Eye/EyeOff) di daftar paket. Nonaktif = paket tetap
+  // ada & tetap bisa dikelola normal di dashboard internal (booking lama
+  // nggak kena efek apa-apa), cuma nggak ikut ditampilin di Katalog Produk
+  // publik (wisatahalalindonesia.com) lewat endpoint /api/public/catalog.
+  const handleToggleActive = async (pkg) => {
+    if (!canManagePackages) {
+      alert("Cuma Super Admin & Operational yang boleh mengubah status paket.");
+      return;
+    }
+    const nextActive = !(pkg.isActive !== false);
+    try {
+      await updateDoc(doc(db, 'packages', pkg.id), { isActive: nextActive, updatedAt: new Date().toISOString() });
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'update',
+        module: 'Paket Perjalanan',
+        targetLabel: pkg.name,
+        details: `Mengubah status paket "${pkg.name}" (${pkg.code || '-'}) jadi ${nextActive ? 'AKTIF' : 'NONAKTIF'} di Katalog Produk publik.`
+      });
+      fetchData();
+    } catch (err) {
+      alert("Gagal mengubah status paket: " + err.message);
+    }
   };
 
   const handleDelete = async (pkg) => {
@@ -1062,6 +1102,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         flightSegments: cleanedFlightSegments,
         specialNote: formData.specialNote || '',
         flyerImageDataUrl: formData.flyerImageDataUrl || '',
+        isActive: formData.isActive !== false,
         updatedAt: new Date().toISOString()
       };
 
@@ -1468,6 +1509,13 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                       <td className={`p-4 font-semibold ${styles.textTitle}`}>
                         {pkg.name}
                         <span className="block text-[10px] text-emerald-500 font-mono">{pkg.code} • {pkg.durationDays || '9 Hari'}</span>
+                        <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${
+                          pkg.isActive !== false
+                            ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                            : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                        }`}>
+                          {pkg.isActive !== false ? 'Aktif di Katalog' : 'Nonaktif di Katalog'}
+                        </span>
                       </td>
                       <td className="p-4">
                         <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-2 py-0.5 rounded text-[10px] block w-fit mb-1 font-medium`}>{pkg.type}</span>
@@ -1520,6 +1568,13 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                           {canManagePackages && (
                             <>
                               <button
+                                onClick={() => handleToggleActive(pkg)}
+                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} ${pkg.isActive !== false ? 'text-amber-500' : 'text-slate-400'} rounded-lg transition-colors`}
+                                title={pkg.isActive !== false ? 'Nonaktifkan dari Katalog Produk' : 'Aktifkan di Katalog Produk'}
+                              >
+                                {pkg.isActive !== false ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                              </button>
+                              <button
                                 onClick={() => handleOpenEdit(pkg)}
                                 className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
                                 title="Edit Paket"
@@ -1560,6 +1615,13 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                   <div>
                     <div className={`font-semibold ${styles.textTitle}`}>{pkg.name}</div>
                     <div className="text-[10px] text-emerald-500 font-mono">{pkg.code} • {pkg.durationDays || '9 Hari'}</div>
+                    <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${
+                      pkg.isActive !== false
+                        ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                        : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                    }`}>
+                      {pkg.isActive !== false ? 'Aktif di Katalog' : 'Nonaktif di Katalog'}
+                    </span>
                   </div>
 
                   <div className={`space-y-1 ${styles.textSub}`}>
@@ -1615,6 +1677,13 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                     </button>
                     {canManagePackages && (
                       <>
+                        <button
+                          onClick={() => handleToggleActive(pkg)}
+                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} ${pkg.isActive !== false ? 'text-amber-500' : 'text-slate-400'} rounded-lg transition-colors`}
+                          title={pkg.isActive !== false ? 'Nonaktifkan dari Katalog Produk' : 'Aktifkan di Katalog Produk'}
+                        >
+                          {pkg.isActive !== false ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                        </button>
                         <button
                           onClick={() => handleOpenEdit(pkg)}
                           className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
@@ -1806,6 +1875,26 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
             </h3>
 
             <form onSubmit={handleSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div className={`${styles.innerBg} border rounded-lg p-3 flex items-center justify-between gap-3`}>
+                <div>
+                  <label className="block font-medium">Status Katalog Produk</label>
+                  <p className={`text-[10px] ${styles.textSub} mt-0.5`}>
+                    Nonaktifkan kalau paket ini nggak mau tampil di Katalog Produk publik (wisatahalalindonesia.com) — booking/SO yang udah ada TETAP jalan normal, ini cuma soal visibilitas di katalog.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, isActive: !(formData.isActive !== false) })}
+                  className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-colors ${
+                    formData.isActive !== false
+                      ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                      : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                  }`}
+                >
+                  {formData.isActive !== false ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  {formData.isActive !== false ? 'Aktif' : 'Nonaktif'}
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block mb-1 font-medium">Kode Paket</label>
