@@ -332,6 +332,35 @@ export const postVendorDepositConversion = async ({ paymentId, vendorName, packa
   });
 };
 
+// 5b. Koreksi Invoice Vendor (kelebihan bayar jadi Saldo Deposit) — BEDA
+//     kasus sama Konversi DP Vendor Batal di atas. Ini buat paket yang
+//     MASIH JALAN (nggak batal), cuma invoice vendornya dikoreksi turun
+//     (misal ada tiket CNB/infant yang bikin harga per-pax berubah dari
+//     nominal awal). Contoh: dibayar 50 juta, invoice final 45 juta ->
+//     `correctionAmount` = selisihnya (5 juta).
+//
+//     Bedanya sama Konversi DP Vendor Batal: di sini nominal yang TETEP
+//     nempel ke paket (45 juta) TIDAK ikut dijurnal sama sekali di sini —
+//     dia tetep di 1401 Biaya Dibayar Dimuka, ngalir normal lewat jalur
+//     "Akui Pendapatan" yang udah ada (baru jadi HPP pas revenue-nya
+//     diakui). Yang dijurnal di sini CUMA selisihnya doang: keluar dari
+//     Biaya Dibayar Dimuka, masuk jadi Piutang Deposit Vendor (bisa dipakai
+//     lagi buat booking berikutnya) — nggak ada porsi yang langsung diakui
+//     jadi beban, karena bukan kasus hangus/pembatalan.
+export const postVendorInvoiceCorrection = async ({ paymentId, vendorName, packageName, correctionAmount, date, createdByUid, createdByName }) => {
+  const amt = Math.max(0, Number(correctionAmount) || 0);
+  if (amt <= 0) return null;
+  return postJournalEntry({
+    date, description: `Koreksi Invoice Vendor (kelebihan bayar jadi Saldo Deposit) - ${vendorName || '-'}${packageName ? ` (${packageName})` : ''}`,
+    source: 'vendor_invoice_correction', sourceDocId: paymentId, reference: vendorName || '',
+    lines: [
+      glLine(ACC.PIUTANG_DEPOSIT_VENDOR, amt, 0),
+      glLine(ACC.BIAYA_DIBAYAR_DIMUKA, 0, amt),
+    ],
+    createdByUid, createdByName
+  });
+};
+
 // 6. Biaya Operasional — selalu tunai/bank, nggak ada opsi deposit.
 export const postOperationalExpense = async ({ expenseId, category, amount, accountId, accountName, date, createdByUid, createdByName }) => {
   const amt = Number(amount) || 0;
