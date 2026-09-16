@@ -1974,7 +1974,19 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
   // makanya dikeluarkan dari SEMUA perhitungan HPP/Biaya Dibayar Dimuka
   // "live" di tab ini (Akui Pendapatan, tabel Margin per Paket, dst), biar
   // nggak kehitung dobel pas paketnya diklik Akui Pendapatan.
-  const vendorPayments = allVendorPayments.filter(vp => !vp.convertedToDeposit);
+  // Pembayaran vendor yang pernah "Dikoreksi Invoice" (kelebihan bayar
+  // dipindah jadi Saldo Deposit Vendor, tanpa booking-nya batal — beda
+  // kasus sama Konversi DP Batal di atas, lihat postVendorInvoiceCorrection
+  // di journal.js) TETAP dihitung di sini, TAPI pakai nominal yang UDAH
+  // dikoreksi (`correctedAmount`), bukan nominal asli yang dibayar —
+  // supaya porsi yang udah lepas jadi Saldo Deposit Vendor nggak ikut
+  // kehitung dobel sebagai HPP/Biaya Dibayar Dimuka paket ini pas nanti
+  // "Akui Pendapatan". `amount` aslinya di Firestore TETAP utuh (jejak
+  // audit "beneran dibayar segini"), cuma di tab ini aja yang dipakai
+  // angka setelah dikoreksi.
+  const vendorPayments = allVendorPayments
+    .filter(vp => !vp.convertedToDeposit)
+    .map(vp => (vp.invoiceCorrected ? { ...vp, amount: Number(vp.correctedAmount ?? vp.amount) || 0 } : vp));
   const [plPeriod, setPlPeriod] = useState('all');
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [companyProfile, setCompanyProfile] = useState(DEFAULT_COMPANY_PROFILE);
