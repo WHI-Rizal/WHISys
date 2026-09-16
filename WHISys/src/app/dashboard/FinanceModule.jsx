@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, getDoc, setDoc, deleteDoc, doc, updateDoc, query, where, increment, writeBatch } from 'firebase/firestore';
-import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock, Download, Pencil, Plus, Settings, FileBarChart, ChevronDown, ChevronRight } from 'lucide-react';
+import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock, Download, Pencil, Plus, Settings, FileBarChart, ChevronDown, ChevronRight, FileEdit, History } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import DateFieldID from '@/components/DateFieldID';
@@ -11,7 +11,7 @@ import { logActivity } from '../../lib/activityLog';
 import { calculatePPN } from '../../lib/ppn';
 import {
   postIncomePayment, postDepositTopup, postVendorBillCreated, postVendorPayment,
-  postOperationalExpense, postVendorDepositConversion,
+  postOperationalExpense, postVendorDepositConversion, postVendorInvoiceCorrection,
   deleteJournalEntriesBySource
 } from '../../lib/journal';
 
@@ -362,6 +362,55 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   const [showVendorDepositAdjustModal, setShowVendorDepositAdjustModal] = useState(false);
   const [adjustingVendor, setAdjustingVendor] = useState(null);
   const [vendorAdjustForm, setVendorAdjustForm] = useState({ amount: '', notes: 'Saldo awal (migrasi data lama)' });
+
+  // Modal "Riwayat Mutasi Saldo Deposit Vendor" — collection
+  // 'vendor_deposit_ledger' udah ditulis dari dulu (tiap kali saldo deposit
+  // vendor nambah/kepake — lihat adjustVendorDepositBalance di atas), tapi
+  // sebelumnya nggak pernah ada tampilan buat mbacanya balik, jadi staf
+  // cuma bisa liat saldo akhir doang. Modal ini fetch on-demand per vendor
+  // pas tombol "Riwayat"-nya diklik (bukan sekaligus semua vendor pas
+  // halaman dibuka, biar nggak berat).
+  const [showVendorLedgerModal, setShowVendorLedgerModal] = useState(false);
+  const [ledgerVendor, setLedgerVendor] = useState(null);
+  const [vendorLedgerEntries, setVendorLedgerEntries] = useState([]);
+  const [loadingVendorLedger, setLoadingVendorLedger] = useState(false);
+
+  const handleOpenVendorLedger = async (v) => {
+    setLedgerVendor(v);
+    setShowVendorLedgerModal(true);
+    setLoadingVendorLedger(true);
+    try {
+      const snap = await getDocs(query(collection(db, 'vendor_deposit_ledger'), where('vendorId', '==', v.id)));
+      const entries = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+      setVendorLedgerEntries(entries);
+    } catch (err) {
+      console.error('Gagal mengambil riwayat saldo deposit vendor:', err);
+      alert("Gagal mengambil riwayat saldo deposit vendor: " + err.message);
+      setVendorLedgerEntries([]);
+    } finally {
+      setLoadingVendorLedger(false);
+    }
+  };
+
+  const VENDOR_LEDGER_TYPE_LABEL = {
+    refund_conversion: { label: 'Konversi DP Batal', color: 'text-blue-500' },
+    invoice_correction: { label: 'Koreksi Invoice', color: 'text-amber-500' },
+    manual_adjustment: { label: 'Koreksi Manual', color: 'text-slate-400' },
+    usage: { label: 'Dipakai Bayar Vendor', color: 'text-rose-500' },
+    usage_reversal: { label: 'Batal Pakai (Hapus Transaksi)', color: 'text-emerald-500' },
+  };
+
+  // Modal "Koreksi Invoice Vendor" — BEDA sama "Konversi ke Saldo Deposit"
+  // di atas. Ini buat paket yang MASIH JALAN (bukan batal), tapi invoice
+  // vendornya dikoreksi turun (misal ada tiket CNB/infant yang bikin harga
+  // per-pax berubah). Kelebihan bayarnya jadi Saldo Deposit Vendor, sisanya
+  // tetep nempel ke paket sebagai Biaya Dibayar Dimuka normal (baru jadi
+  // HPP pas "Akui Pendapatan", BUKAN langsung diakui kayak "Konversi").
+  const [showInvoiceCorrectionModal, setShowInvoiceCorrectionModal] = useState(false);
+  const [correctingPayment, setCorrectingPayment] = useState(null);
+  const [invoiceCorrectionForm, setInvoiceCorrectionForm] = useState({ newAmount: '', notes: '' });
+  const [savingInvoiceCorrection, setSavingInvoiceCorrection] = useState(false);
 
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [showVendorModal, setShowVendorModal] = useState(false);
@@ -978,6 +1027,103 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     }
   };
 
+  // ============ Koreksi Invoice Vendor (kelebihan bayar -> Saldo Deposit, paket TETAP JALAN) ============
+
+  const handleOpenInvoiceCorrectionModal = (vp) => {
+    if (vp.convertedToDeposit) {
+      alert("Transaksi ini udah pernah dikonversi ke Saldo Deposit (DP batal). Nggak bisa dikoreksi invoice lagi.");
+      return;
+    }
+    if (vp.invoiceCorrected) {
+      alert(`Transaksi ini udah pernah dikoreksi invoicenya sebelumnya (dari Rp ${Number(vp.originalAmountBeforeCorrection || vp.amount).toLocaleString('id-ID')} jadi Rp ${Number(vp.correctedAmount).toLocaleString('id-ID')}). Kalau masih salah, koreksi lagi lewat Hapus + catat ulang, atau hubungi tim IT.`);
+      return;
+    }
+    // Sama kayak blokir hapus pembayaran vendor — kalau paketnya omzet &
+    // HPP-nya udah "Diakui" (masuk P&L final), HPP-nya udah dibekukan ke
+    // Jurnal Umum pas momen itu. Koreksi invoice SETELAH itu nggak akan
+    // kebawa balik ke angka yang udah dibekukan, malah bisa bikin akun
+    // Biaya Dibayar Dimuka minus (karena udah kepindah abis ke HPP duluan).
+    // Jadi diblok dulu, sama kayak alur "Batalkan Pengakuan" sebelum hapus.
+    const recognizedPkg = findPackageForVendor(vp);
+    if (recognizedPkg && recognizedPkg.revenueRecognized) {
+      alert(`Invoice vendor ini tidak dapat dikoreksi karena paket "${recognizedPkg.name}" omzet & HPP-nya sudah "Diakui" dan sudah masuk Laporan P&L.\n\nBatalkan dulu pengakuan pendapatan paket ini lewat tombol "Batalkan Pengakuan" di Laporan Keuangan, baru invoice ini bisa dikoreksi.`);
+      return;
+    }
+    setCorrectingPayment(vp);
+    setInvoiceCorrectionForm({ newAmount: '', notes: `Koreksi invoice - ${vp.category} (${vp.packageName || '-'})` });
+    setShowInvoiceCorrectionModal(true);
+  };
+
+  const handleInvoiceCorrectionSubmit = async (e) => {
+    e.preventDefault();
+    const originalAmount = Number(correctingPayment?.amount || 0);
+    const newAmountVal = Number(invoiceCorrectionForm.newAmount || 0);
+    if (newAmountVal <= 0) {
+      alert("Isi nominal invoice yang sudah dikoreksi (lebih dari 0).");
+      return;
+    }
+    if (newAmountVal >= originalAmount) {
+      alert(`Nominal invoice baru (Rp ${newAmountVal.toLocaleString('id-ID')}) harus LEBIH KECIL dari nominal yang sudah dibayar (Rp ${originalAmount.toLocaleString('id-ID')}) — kalau nggak ada selisih, nggak perlu dikoreksi lewat sini.`);
+      return;
+    }
+    const correctionAmount = originalAmount - newAmountVal;
+    const matchedVendor = vendorsList.find(v => v.name === correctingPayment.vendorName || v.id === correctingPayment.vendorId);
+    if (!matchedVendor) {
+      alert("Vendor untuk transaksi ini nggak ketemu di Data Master Vendor — nggak bisa nentuin ke mana saldo depositnya harus masuk.");
+      return;
+    }
+    setSavingInvoiceCorrection(true);
+    try {
+      const nowIso = new Date().toISOString();
+      // CATATAN: sama kayak Konversi DP Batal, ini SENGAJA nggak nyentuh
+      // saldo Kas/Bank — uangnya emang udah beneran keluar full (nominal
+      // asli) pas dibayar dulu. Koreksi ini cuma mindahin STATUS sebagian
+      // dari nominal itu: dari "nempel ke paket ini" jadi "kredit ke vendor
+      // buat dipakai lagi". Nominal yang TETEP nempel ke paket (newAmountVal)
+      // TIDAK disentuh sama sekali di sini — dia tetep ngalir normal lewat
+      // "Akui Pendapatan" nanti.
+      await adjustVendorDepositBalance(
+        matchedVendor.id, matchedVendor.name, correctionAmount,
+        'invoice_correction', invoiceCorrectionForm.notes,
+        correctingPayment?.packageName || correctingPayment?.category || '', nowIso
+      );
+      await postVendorInvoiceCorrection({
+        paymentId: correctingPayment.id, vendorName: correctingPayment?.vendorName,
+        packageName: correctingPayment?.packageName, correctionAmount, date: nowIso,
+        createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => {
+        console.error('Gagal posting jurnal koreksi invoice vendor:', err);
+        alert(`Koreksi invoice berhasil & Saldo Deposit Vendor udah nambah, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance, atau tambahkan Jurnal Manual di Laporan Keuangan → Jurnal Umum.`);
+      });
+      await updateDoc(doc(db, 'payments_vendor', correctingPayment.id), {
+        invoiceCorrected: true,
+        originalAmountBeforeCorrection: originalAmount,
+        correctedAmount: newAmountVal,
+        invoiceCorrectionAmount: correctionAmount,
+        invoiceCorrectionNotes: invoiceCorrectionForm.notes,
+        invoiceCorrectedToVendorId: matchedVendor.id,
+        invoiceCorrectedAt: nowIso
+      });
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'update',
+        module: 'Pembayaran Vendor',
+        targetLabel: correctingPayment.vendorName || correctingPayment.category,
+        details: `Koreksi invoice vendor "${correctingPayment.vendorName || '-'}" (${correctingPayment.packageName || '-'}) dari Rp ${originalAmount.toLocaleString('id-ID')} jadi Rp ${newAmountVal.toLocaleString('id-ID')} — selisih Rp ${correctionAmount.toLocaleString('id-ID')} masuk Saldo Deposit Vendor "${matchedVendor.name}"`
+      });
+      setShowInvoiceCorrectionModal(false);
+      setCorrectingPayment(null);
+      setInvoiceCorrectionForm({ newAmount: '', notes: '' });
+      fetchData();
+    } catch (err) {
+      alert("Gagal menyimpan koreksi invoice vendor: " + err.message);
+    } finally {
+      setSavingInvoiceCorrection(false);
+    }
+  };
+
   const handleOpenVendorDepositAdjust = (v) => {
     setAdjustingVendor(v);
     setVendorAdjustForm({ amount: '', notes: 'Saldo awal (migrasi data lama)' });
@@ -1092,6 +1238,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     }
     if (vp.convertedToDeposit) {
       if (!confirm(`PERHATIAN: transaksi ini udah pernah dikonversi jadi Saldo Deposit Vendor (Rp ${Number(vp.convertedAmount || 0).toLocaleString('id-ID')}${vp.convertedSelisihAmount > 0 ? `, selisih Rp ${Number(vp.convertedSelisihAmount).toLocaleString('id-ID')} udah keakui sebagai beban` : ''}). Jurnal konversinya bakal ikut dihapus otomatis, TAPI saldo deposit vendor yang udah kebentuk (Rp ${Number(vp.convertedAmount || 0).toLocaleString('id-ID')}) TIDAK otomatis ditarik balik. Kalau emang mau dikoreksi, sesuaikan juga saldo deposit vendornya secara manual. Tetap lanjut hapus?`)) return;
+    } else if (vp.invoiceCorrected) {
+      if (!confirm(`PERHATIAN: transaksi ini udah pernah "Dikoreksi Invoice" (selisih Rp ${Number(vp.invoiceCorrectionAmount || 0).toLocaleString('id-ID')} udah masuk Saldo Deposit Vendor). Jurnal koreksinya bakal ikut dihapus otomatis, TAPI saldo deposit vendor yang udah kebentuk (Rp ${Number(vp.invoiceCorrectionAmount || 0).toLocaleString('id-ID')}) TIDAK otomatis ditarik balik. Kalau emang mau dikoreksi, sesuaikan juga saldo deposit vendornya secara manual. Tetap lanjut hapus?`)) return;
     } else {
       if (!confirm("Apakah Anda yakin ingin menghapus catatan pengeluaran vendor ini?")) return;
     }
@@ -1123,6 +1271,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         // deposit vendor yang udah kebentuk TETAP nggak otomatis ditarik
         // balik (sama kayak sebelumnya), staf perlu koreksi manual sendiri.
         await deleteJournalEntriesBySource('vendor_deposit_conversion', vp.id);
+      }
+      if (vp.invoiceCorrected) {
+        // Sama pola-nya kayak konversi DP batal di atas — ikut hapus jurnal
+        // koreksi invoice-nya (lihat postVendorInvoiceCorrection di
+        // journal.js), saldo deposit vendor yang udah kebentuk TETAP nggak
+        // otomatis ditarik balik.
+        await deleteJournalEntriesBySource('vendor_invoice_correction', vp.id);
       }
       logActivity({
         userId: currentUser?.uid,
@@ -2293,9 +2448,17 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                         {vp.convertedToDeposit && (
                           <span className="inline-block mt-1 ml-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 px-2 py-0.5 rounded-full text-[10px] font-medium">✓ Dikonversi ke Deposit</span>
                         )}
+                        {vp.invoiceCorrected && (
+                          <span className="inline-block mt-1 ml-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-0.5 rounded-full text-[10px] font-medium">
+                            ✓ Invoice Dikoreksi jadi Rp {Number(vp.correctedAmount || 0).toLocaleString('id-ID')}
+                          </span>
+                        )}
                       </td>
                       <td className="p-4 text-right font-bold text-rose-500">
                         - Rp {Number(vp.amount).toLocaleString('id-ID')}
+                        {vp.invoiceCorrected && (
+                          <span className="block text-[10px] font-normal text-amber-500">terkoreksi jadi Rp {Number(vp.correctedAmount || 0).toLocaleString('id-ID')}</span>
+                        )}
                       </td>
                       <td className="p-4 text-center">
                         <div className="flex items-center justify-center gap-2">
@@ -2306,6 +2469,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                               title="Konversi ke Saldo Deposit (DP batal, nggak hangus)"
                             >
                               <RotateCcw className="w-4 h-4" />
+                            </button>
+                          )}
+                          {!vp.convertedToDeposit && !vp.invoiceCorrected && vp.payMethod !== 'Saldo Deposit Vendor' && (
+                            <button
+                              onClick={() => handleOpenInvoiceCorrectionModal(vp)}
+                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-amber-500 rounded-lg transition-colors`}
+                              title="Koreksi Invoice Vendor (kelebihan bayar jadi Saldo Deposit, paket tetap jalan)"
+                            >
+                              <FileEdit className="w-4 h-4" />
                             </button>
                           )}
                           <button
@@ -2360,11 +2532,19 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                       {vp.convertedToDeposit && (
                         <span className="inline-block mt-1 ml-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 px-2 py-0.5 rounded-full text-[10px] font-medium">✓ Dikonversi ke Deposit</span>
                       )}
+                      {vp.invoiceCorrected && (
+                        <span className="inline-block mt-1 ml-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-0.5 rounded-full text-[10px] font-medium">
+                          ✓ Invoice Dikoreksi jadi Rp {Number(vp.correctedAmount || 0).toLocaleString('id-ID')}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div>
                     <span className="text-[10px] opacity-60 uppercase">Nominal Dibayar</span>
                     <div className="font-bold text-rose-500">- Rp {Number(vp.amount).toLocaleString('id-ID')}</div>
+                    {vp.invoiceCorrected && (
+                      <div className="text-[10px] text-amber-500">terkoreksi jadi Rp {Number(vp.correctedAmount || 0).toLocaleString('id-ID')}</div>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-2 pt-1">
                     {!vp.convertedToDeposit && vp.payMethod !== 'Saldo Deposit Vendor' && (
@@ -2374,6 +2554,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                         title="Konversi ke Saldo Deposit (DP batal, nggak hangus)"
                       >
                         <RotateCcw className="w-4 h-4" />
+                      </button>
+                    )}
+                    {!vp.convertedToDeposit && !vp.invoiceCorrected && vp.payMethod !== 'Saldo Deposit Vendor' && (
+                      <button
+                        onClick={() => handleOpenInvoiceCorrectionModal(vp)}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-amber-500 rounded-lg transition-colors`}
+                        title="Koreksi Invoice Vendor (kelebihan bayar jadi Saldo Deposit, paket tetap jalan)"
+                      >
+                        <FileEdit className="w-4 h-4" />
                       </button>
                     )}
                     <button
@@ -2672,6 +2861,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                         <td className="p-4 text-center">
                           <div className="flex items-center justify-center gap-2">
                             <button
+                              onClick={() => handleOpenVendorLedger(v)}
+                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                              title="Riwayat Mutasi Saldo Deposit"
+                            >
+                              <History className="w-4 h-4" />
+                            </button>
+                            <button
                               onClick={() => handleOpenVendorDepositAdjust(v)}
                               className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
                               title="Tambah/Koreksi Saldo Deposit"
@@ -2722,6 +2918,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2 pt-1">
+                      <button
+                        onClick={() => handleOpenVendorLedger(v)}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                        title="Riwayat Mutasi Saldo Deposit"
+                      >
+                        <History className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={() => handleOpenVendorDepositAdjust(v)}
                         className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
@@ -3252,6 +3455,56 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         </div>
       )}
 
+      {showVendorLedgerModal && ledgerVendor && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowVendorLedgerModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-2 flex items-center gap-2`}>
+              <History className="w-5 h-5 text-blue-500" /> Riwayat Mutasi Saldo Deposit
+            </h3>
+            <p className={`text-[10.5px] ${styles.textSub} mb-4`}>
+              Vendor: <strong className={styles.textTitle}>{ledgerVendor.name}</strong> · Saldo sekarang: Rp {Number(ledgerVendor.depositBalance || 0).toLocaleString('id-ID')}
+            </p>
+            {loadingVendorLedger ? (
+              <p className={`text-xs ${styles.textSub} text-center py-8`}>Memuat riwayat...</p>
+            ) : vendorLedgerEntries.length === 0 ? (
+              <p className={`text-xs ${styles.textSub} text-center py-8`}>Belum ada riwayat mutasi buat vendor ini.</p>
+            ) : (
+              <div className="space-y-2">
+                {vendorLedgerEntries.map(entry => {
+                  const typeInfo = VENDOR_LEDGER_TYPE_LABEL[entry.type] || { label: entry.type || '-', color: styles.textSub };
+                  const amt = Number(entry.amount || 0);
+                  return (
+                    <div key={entry.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs flex items-start justify-between gap-3`}>
+                      <div className="min-w-0">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium border ${typeInfo.color} border-current/20`}>
+                          {typeInfo.label}
+                        </span>
+                        <p className={`mt-1 ${styles.textTitle} break-words`}>{entry.notes || '-'}</p>
+                        {entry.reference && (
+                          <p className={`text-[10px] ${styles.textSub}`}>Ref: {entry.reference}</p>
+                        )}
+                        <p className="text-[10px] text-slate-400 mt-0.5">{formatDateDDMMYYYY(entry.createdAt)}</p>
+                      </div>
+                      <div className={`font-bold whitespace-nowrap ${amt >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                        {amt >= 0 ? '+' : ''}Rp {amt.toLocaleString('id-ID')}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className={`pt-4 mt-4 flex justify-end border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <button type="button" onClick={() => setShowVendorLedgerModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg text-xs font-medium`}>
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showVendorDepositAdjustModal && adjustingVendor && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
@@ -3375,6 +3628,68 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 </button>
                 <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
                   Konversi ke Deposit
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showInvoiceCorrectionModal && correctingPayment && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowInvoiceCorrectionModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-2 flex items-center gap-2`}>
+              <FileEdit className="w-5 h-5 text-amber-500" /> Koreksi Invoice Vendor
+            </h3>
+            <p className={`text-[10.5px] ${styles.textSub} mb-4`}>
+              Buat paket yang MASIH JALAN (bukan batal), tapi invoice vendornya dikoreksi turun — misal ada tiket CNB/infant yang bikin harga per-pax berubah. Nominal asli yang dibayar (Rp {Number(correctingPayment.amount || 0).toLocaleString('id-ID')} ke {correctingPayment.vendorName}) tetap tercatat apa adanya sebagai jejak audit. Yang berubah: selisihnya jadi Saldo Deposit Vendor (bisa dipakai lagi), sisanya TETAP nempel ke paket ini sebagai Biaya Dibayar Dimuka normal — baru jadi HPP pas paketnya "Akui Pendapatan", bukan langsung sekarang. Nggak nyentuh saldo Kas/Bank sama sekali.
+            </p>
+            <form onSubmit={handleInvoiceCorrectionSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div>
+                <label className="block mb-1 font-medium">Nominal Invoice Setelah Dikoreksi (Rp)</label>
+                <input
+                  type="number" required
+                  max={Math.max(0, Number(correctingPayment.amount || 0) - 1)}
+                  placeholder={`Kurang dari ${Number(correctingPayment.amount || 0).toLocaleString('id-ID')}`}
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={invoiceCorrectionForm.newAmount}
+                  onChange={e => setInvoiceCorrectionForm({ ...invoiceCorrectionForm, newAmount: e.target.value })}
+                />
+                <p className="text-[10px] mt-1 opacity-70">Harus lebih kecil dari nominal yang udah dibayar (Rp {Number(correctingPayment.amount || 0).toLocaleString('id-ID')}) — ini nominal invoice FINAL/beneran dari vendor.</p>
+              </div>
+              {(() => {
+                const correctionPreview = Math.max(0, Number(correctingPayment.amount || 0) - Number(invoiceCorrectionForm.newAmount || 0));
+                if (correctionPreview <= 0) return null;
+                const matchedVendor = vendorsList.find(v => v.name === correctingPayment.vendorName || v.id === correctingPayment.vendorId);
+                return (
+                  <div className={`${styles.innerBg} p-3 rounded-lg border`}>
+                    <p className="text-[11px] font-semibold text-amber-500">
+                      Rp {correctionPreview.toLocaleString('id-ID')} bakal masuk Saldo Deposit Vendor{matchedVendor ? ` "${matchedVendor.name}"` : ''} (sekarang: Rp {Number(matchedVendor?.depositBalance || 0).toLocaleString('id-ID')} → jadi Rp {(Number(matchedVendor?.depositBalance || 0) + correctionPreview).toLocaleString('id-ID')}).
+                    </p>
+                    <p className="text-[10.5px] mt-1 opacity-80">
+                      Rp {Number(invoiceCorrectionForm.newAmount || 0).toLocaleString('id-ID')} tetap jadi HPP paket "{correctingPayment.packageName || correctingPayment.category || '-'}" seperti biasa.
+                    </p>
+                  </div>
+                );
+              })()}
+              <div>
+                <label className="block mb-1 font-medium">Catatan</label>
+                <input
+                  type="text"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={invoiceCorrectionForm.notes}
+                  onChange={e => setInvoiceCorrectionForm({ ...invoiceCorrectionForm, notes: e.target.value })}
+                />
+              </div>
+              <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowInvoiceCorrectionModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" disabled={savingInvoiceCorrection} className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium disabled:opacity-60">
+                  {savingInvoiceCorrection ? 'Menyimpan...' : 'Simpan Koreksi'}
                 </button>
               </div>
             </form>
