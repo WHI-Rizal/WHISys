@@ -4210,6 +4210,13 @@ Terimakasih🙏`;
         // perlu dibagi rata splitFlatAmount — itu cuma buat registrasi rombongan baru).
         const editedTotalAmount = addPPN(price + chargesTotalInput - discountsTotalInput).total; // + PPN 1,1%
 
+        // Dihitung duluan (bukan inline di updateDoc) karena nilainya juga
+        // dipakai buat nyamain tanggal jurnal `booking_created` di bawah —
+        // lihat penjelasan di situ soal kenapa ini perlu.
+        const correctedCreatedAt = canManageBookings
+          ? resolveCorrectedCreatedAt(formData.transactionDate, currentBooking?.createdAt)
+          : null;
+
         await updateDoc(doc(db, 'bookings', editingBookingId), {
           packageId: selectedPkg.id,
           packageName: selectedPkg.name,
@@ -4229,9 +4236,35 @@ Terimakasih🙏`;
           closingSourceId: formData.closingSourceId || '',
           closingSourceName: formData.closingSourceName || '',
           leadSource: resolveLeadSource(formData),
-          ...(canManageBookings ? { createdAt: resolveCorrectedCreatedAt(formData.transactionDate, currentBooking?.createdAt) } : {}),
+          ...(correctedCreatedAt ? { createdAt: correctedCreatedAt } : {}),
           updatedAt: new Date().toISOString()
         });
+
+        // "Koreksi Tanggal Transaksi" di atas cuma nggeser createdAt di
+        // dokumen booking-nya — jurnal `booking_created` yang udah keposting
+        // dari SEBELUM tanggalnya dikoreksi itu TETAP nyimpen tanggal
+        // lama-nya sendiri (nggak otomatis ikut geser), soalnya keduanya
+        // dokumen yang beda & terpisah. Akibatnya "Waktu Transaksi" di
+        // tampilan booking bisa keliatan benar (udah dikoreksi), TAPI baris
+        // "Booking baru ..." di Buku Besar/Jurnal Umum masih nunjuk ke
+        // tanggal lama yang salah (kasus GRP-570533, 16 Sep 2026 — tanggal
+        // jurnalnya kebaca 15/12/2026 padahal Waktu Transaksi udah dikoreksi
+        // ke 12/09/2026). Begitu tanggalnya beneran digeser, jurnal
+        // `booking_created` booking ini disamain juga tanggalnya di sini,
+        // biar Buku Besar & tampilan booking konsisten.
+        if (correctedCreatedAt && correctedCreatedAt !== currentBooking?.createdAt) {
+          try {
+            const bookingCreatedJournalSnap = await getDocs(query(
+              collection(db, 'journal_entries'),
+              where('source', '==', 'booking_created'),
+              where('sourceDocId', '==', editingBookingId)
+            ));
+            await Promise.all(bookingCreatedJournalSnap.docs.map(d => updateDoc(d.ref, { date: correctedCreatedAt })));
+          } catch (syncDateErr) {
+            console.error('Gagal menyinkronkan tanggal jurnal booking_created:', syncDateErr);
+            alert(`Tanggal Transaksi booking tersimpan, TAPI tanggal jurnal "Booking baru" di Buku Besar GAGAL disinkronkan (${syncDateErr.message}). Jurnalnya masih nunjuk tanggal lama — lapor ke tim IT/Finance kalau perlu dibenerin manual.`);
+          }
+        }
 
         // Kalau totalAmount berubah gara-gara edit biaya/diskon, sesuaikan
         // Piutang Jamaah & Pendapatan Diterima Dimuka selisihnya (bisa naik
