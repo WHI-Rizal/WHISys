@@ -110,7 +110,7 @@ export default function KatalogPublikPage() {
           </p>
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Katalog Paket Keberangkatan</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Pilih paket Umroh, Haji, atau Wisata Halal Internasional yang sesuai jadwal dan tujuan Anda.
+            Pilih paket keberangkatan Wisata Halal Internasional yang sesuai jadwal dan tujuan Anda.
           </p>
         </div>
       </header>
