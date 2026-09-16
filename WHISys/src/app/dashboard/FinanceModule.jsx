@@ -3701,8 +3701,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                   value={vendorForm.payMethod}
                   onChange={e => setVendorForm({ ...vendorForm, payMethod: e.target.value })}
                 >
-                  <option value="Kas/Bank">Kas/Bank (uang keluar beneran)</option>
-                  <option value="Saldo Deposit Vendor">Saldo Deposit Vendor (pakai kredit yang udah ada)</option>
+                  <option value="Kas/Bank">Kas/Bank</option>
+                  <option value="Saldo Deposit Vendor">Saldo Deposit Vendor</option>
                 </select>
               </div>
 
