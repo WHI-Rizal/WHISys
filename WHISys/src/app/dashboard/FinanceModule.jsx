@@ -464,6 +464,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   const [leadSourcePeriod, setLeadSourcePeriod] = useState(() => getPeriodKey(todayISODate()));
   const [leadSourceMetric, setLeadSourceMetric] = useState('purchase');
 
+  // Sub-laporan "Saldo Deposit Jamaah" — daftar semua jamaah yang MASIH
+  // punya saldo deposit (nggak nol), biar Finance gampang liat total
+  // kewajiban "Utang Deposit Jamaah" ke siapa aja tanpa buka satu-satu
+  // dropdown di modal Tambah/Pengembalian Deposit. depositReportSearch buat
+  // nyaring nama/kode customer di daftar panjang.
+  const [depositReportSearch, setDepositReportSearch] = useState('');
+
   const [incomeForm, setIncomeForm] = useState({
     groupCode: '',
     amount: '',
@@ -2273,6 +2280,61 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   };
   // ================ /Laporan > Closing TC & Komisi ================
 
+  // ================= Laporan > Saldo Deposit Jamaah =================
+  // Daftar semua jamaah yang MASIH punya saldo deposit (positif ATAU minus
+  // — minus seharusnya nggak kejadian dalam alur normal, tapi tetap
+  // ditampilin biar ketauan kalau ada yang aneh/butuh dikoreksi), diurutin
+  // dari saldo terbesar biar yang paling material keliatan duluan.
+  // depositReportSearch nyaring berdasarkan nama ATAU kode customer.
+  const depositCustomersReport = (() => {
+    const q = depositReportSearch.trim().toLowerCase();
+    return jamaahList
+      .filter(j => Number(j.depositBalance || 0) !== 0)
+      .filter(j => {
+        if (!q) return true;
+        const haystack = `${j.fullName || ''} ${j.customerCode || ''}`.toLowerCase();
+        return haystack.includes(q);
+      })
+      .map(j => ({
+        id: j.id,
+        fullName: j.fullName || '-',
+        customerCode: j.customerCode || '-',
+        phone: j.phone || '-',
+        depositBalance: Number(j.depositBalance || 0),
+      }))
+      .sort((a, b) => b.depositBalance - a.depositBalance);
+  })();
+
+  const depositReportTotal = depositCustomersReport.reduce((acc, c) => acc + c.depositBalance, 0);
+
+  const handleDownloadDepositReportCSV = () => {
+    const rows = [['Nama Jamaah', 'Kode Customer', 'No. HP', 'Saldo Deposit']];
+    depositCustomersReport.forEach(c => {
+      rows.push([c.fullName, c.customerCode, c.phone, c.depositBalance]);
+    });
+    rows.push(['TOTAL', '', '', depositReportTotal]);
+
+    const csvContent = '﻿' + rows.map(row => row.map(csvEscapeField).join(',')).join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Laporan-Saldo-Deposit-Jamaah-${todayISODate()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Shortcut buka modal "Pengembalian Saldo Deposit" langsung dari baris
+  // laporan ini, dengan customer-nya udah otomatis terpilih — biar Finance
+  // nggak perlu cari nama itu lagi dari awal di modal.
+  const handleQuickWithdrawFromReport = (customerId) => {
+    setWithdrawDepositForm(prev => ({ ...prev, customerId }));
+    setShowWithdrawDepositModal(true);
+  };
+  // ================ /Laporan > Saldo Deposit Jamaah ================
+
   return (
     <div className="space-y-6">
       <div className={`flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${styles.cardBg} p-6 rounded-xl border`}>
@@ -2294,12 +2356,6 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
           >
             <Wallet className="w-4 h-4" /> + Tambah Deposit
-          </button>
-          <button
-            onClick={() => setShowWithdrawDepositModal(true)}
-            className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
-          >
-            <RotateCcw className="w-4 h-4" /> Pengembalian Deposit
           </button>
           <button
             onClick={() => setShowVendorModal(true)}
@@ -3087,6 +3143,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             >
               Sumber Lead
             </button>
+            <button
+              onClick={() => setReportsSubTab('deposit_jamaah')}
+              className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${
+                reportsSubTab === 'deposit_jamaah' ? `${styles.tabActive} text-indigo-500 border` : `${styles.textSub} hover:${styles.textTitle}`
+              }`}
+            >
+              Saldo Deposit Jamaah
+            </button>
             {/* — sub-tab laporan berikutnya nyusul di sini — */}
           </div>
 
@@ -3358,6 +3422,131 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                       ))}
                     </div>
                   </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {reportsSubTab === 'deposit_jamaah' && (
+            <div className="space-y-4">
+              <div className={`${styles.cardBg} border rounded-xl p-4`}>
+                <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-3 mb-4">
+                  <div>
+                    <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2`}>
+                      <Wallet className="w-4 h-4 text-blue-500" /> Saldo Deposit Jamaah
+                    </h4>
+                    <p className={`text-xs ${styles.textSub} mt-1`}>
+                      Semua jamaah yang MASIH punya saldo deposit (dari Titip Deposit manual atau konversi refund booking batal) — ini kewajiban WHI (Utang Deposit Jamaah) yang belum dipakai/dicairkan.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWithdrawDepositForm(prev => ({ ...prev, customerId: '' }));
+                        setShowWithdrawDepositModal(true);
+                      }}
+                      className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white px-3 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" /> + Pengembalian Deposit
+                    </button>
+                    <input
+                      type="text"
+                      placeholder="Cari nama / kode jamaah..."
+                      className={`${styles.inputBg} rounded-lg p-2 text-xs border w-full sm:w-56`}
+                      value={depositReportSearch}
+                      onChange={e => setDepositReportSearch(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleDownloadDepositReportCSV}
+                      disabled={depositCustomersReport.length === 0}
+                      className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap disabled:opacity-50"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Download CSV
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                  <div className={`${styles.innerBg} border p-4 rounded-xl`}>
+                    <p className={`text-xs ${styles.textSub} mb-1`}>Jumlah Jamaah dengan Saldo Deposit</p>
+                    <h3 className={`text-xl font-bold ${styles.textTitle}`}>{depositCustomersReport.length.toLocaleString('id-ID')}</h3>
+                  </div>
+                  <div className={`${styles.innerBg} border p-4 rounded-xl`}>
+                    <p className={`text-xs ${styles.textSub} mb-1`}>Total Saldo Deposit (Utang Deposit Jamaah)</p>
+                    <h3 className="text-xl font-bold text-blue-500">Rp {depositReportTotal.toLocaleString('id-ID')}</h3>
+                  </div>
+                </div>
+
+                {depositCustomersReport.length === 0 ? (
+                  <div className={`p-10 text-center text-xs ${styles.textSub}`}>
+                    {depositReportSearch ? 'Nggak ada jamaah yang cocok dengan pencarian ini.' : 'Belum ada jamaah yang punya saldo deposit saat ini.'}
+                  </div>
+                ) : (
+                  <>
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className={`${styles.tableHeaderBg} uppercase`}>
+                          <tr>
+                            <th className="p-3">Nama Jamaah</th>
+                            <th className="p-3">Kode Customer</th>
+                            <th className="p-3">No. HP</th>
+                            <th className="p-3 text-right">Saldo Deposit</th>
+                            <th className="p-3 text-right">Aksi</th>
+                          </tr>
+                        </thead>
+                        <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                          {depositCustomersReport.map(c => (
+                            <tr key={c.id}>
+                              <td className={`p-3 font-medium ${styles.textTitle}`}>{c.fullName}</td>
+                              <td className="p-3">{c.customerCode}</td>
+                              <td className="p-3">{c.phone}</td>
+                              <td className={`p-3 text-right font-semibold ${c.depositBalance < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                                Rp {c.depositBalance.toLocaleString('id-ID')}
+                              </td>
+                              <td className="p-3 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickWithdrawFromReport(c.id)}
+                                  className="text-amber-500 hover:underline text-[11px] font-medium"
+                                >
+                                  Kembalikan
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className={`font-bold border-t-2 ${isDark ? 'border-slate-700' : 'border-slate-300'}`}>
+                            <td className="p-3" colSpan={3}>TOTAL</td>
+                            <td className={`p-3 text-right ${styles.textTitle}`}>Rp {depositReportTotal.toLocaleString('id-ID')}</td>
+                            <td className="p-3"></td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                    <div className="md:hidden space-y-3">
+                      {depositCustomersReport.map(c => (
+                        <div key={c.id} className={`${styles.innerBg} border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg p-3 text-xs`}>
+                          <p className={`font-bold ${styles.textTitle}`}>{c.fullName}</p>
+                          <p className={styles.textSub}>{c.customerCode} &bull; {c.phone}</p>
+                          <div className="flex items-center justify-between mt-2">
+                            <span className={`font-semibold ${c.depositBalance < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                              Rp {c.depositBalance.toLocaleString('id-ID')}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickWithdrawFromReport(c.id)}
+                              className="text-amber-500 hover:underline text-[11px] font-medium"
+                            >
+                              Kembalikan
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             </div>
