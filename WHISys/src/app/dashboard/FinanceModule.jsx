@@ -11,7 +11,7 @@ import SearchableSelect from '@/components/SearchableSelect';
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN } from '../../lib/ppn';
 import {
-  postIncomePayment, postDepositTopup, postVendorBillCreated, postVendorPayment,
+  postIncomePayment, postDepositTopup, postDepositWithdrawal, postVendorBillCreated, postVendorPayment,
   postOperationalExpense, postVendorDepositConversion, postVendorInvoiceCorrection,
   deleteJournalEntriesBySource
 } from '../../lib/journal';
@@ -417,6 +417,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   const [showVendorModal, setShowVendorModal] = useState(false);
   const [showOperationalModal, setShowOperationalModal] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
+  // Modal "Pengembalian Saldo Deposit" — kebalikan dari "+ Tambah Deposit",
+  // dipakai pas customer yang punya saldo deposit (misal dari refund booking
+  // batal yang dulu dipilih jadi saldo dulu) akhirnya beneran minta
+  // ditransfer balik, bukan dipakai buat booking lain.
+  const [showWithdrawDepositModal, setShowWithdrawDepositModal] = useState(false);
 
   // Guard double-submit (tombol di-disable selagi proses async jalan) buat
   // form-form Finance — sebelumnya nggak ada, jadi double-klik/koneksi
@@ -424,6 +429,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // dobel. Lihat juga audit "Kualitas Kode & Bug" §HIGH.
   const [savingIncome, setSavingIncome] = useState(false);
   const [savingDeposit, setSavingDeposit] = useState(false);
+  const [savingWithdrawDeposit, setSavingWithdrawDeposit] = useState(false);
   const [savingVendor, setSavingVendor] = useState(false);
   const [savingVendorBill, setSavingVendorBill] = useState(false);
   const [savingOperational, setSavingOperational] = useState(false);
@@ -475,6 +481,17 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     amount: '',
     accountId: '',
     notes: 'Titip Deposit (belum ada booking)',
+    date: todayISODate()
+  });
+
+  // Modal "Pengembalian Saldo Deposit" — nominal DIKELUARIN dari saldo
+  // deposit customer DAN dari akun Kas/Bank yang beneran dipakai transfer,
+  // kebalikan persis dari depositForm di atas.
+  const [withdrawDepositForm, setWithdrawDepositForm] = useState({
+    customerId: '',
+    amount: '',
+    accountId: '',
+    notes: 'Pengembalian saldo deposit (transfer balik ke jamaah)',
     date: todayISODate()
   });
 
@@ -1225,6 +1242,92 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       alert("Gagal mencatat deposit: " + err.message);
     } finally {
       setSavingDeposit(false);
+    }
+  };
+
+  // Modal "Pengembalian Saldo Deposit" — KEBALIKAN dari handleDepositSubmit
+  // di atas. Dipakai pas saldo deposit jamaah (misal hasil konversi refund
+  // booking batal yang tadinya dipilih "jadi saldo deposit dulu", lihat
+  // handleCancelSubmit/handleGroupCancelSubmit di BookingsModule.jsx) akhirnya
+  // beneran mau ditransfer balik ke customer, bukan dipakai buat booking lain.
+  // Nominalnya DIKURANGI dari saldo deposit jamaah DAN dari akun Kas/Bank
+  // yang beneran dipakai transfer (uang KELUAR beneran, beda dari "dipakai
+  // buat bayar setoran" yang cuma mindahin saldo tanpa nyentuh Kas/Bank).
+  const handleWithdrawDepositSubmit = async (e) => {
+    e.preventDefault();
+    const customer = jamaahList.find(j => j.id === withdrawDepositForm.customerId);
+    if (!customer) {
+      alert("Pilih Pemesan/Customer dulu.");
+      return;
+    }
+    const amountVal = Number(withdrawDepositForm.amount || 0);
+    if (amountVal <= 0) {
+      alert("Isi nominal pengembalian yang valid (lebih dari 0).");
+      return;
+    }
+    const currentBalance = Number(customer.depositBalance || 0);
+    if (amountVal > currentBalance) {
+      alert(`Nominal pengembalian (Rp ${amountVal.toLocaleString('id-ID')}) nggak boleh lebih besar dari saldo deposit "${customer.fullName}" saat ini (Rp ${currentBalance.toLocaleString('id-ID')}).`);
+      return;
+    }
+    if (!withdrawDepositForm.accountId) {
+      alert("Pilih akun Kas/Bank yang dipakai buat transfer balik ini dulu.");
+      return;
+    }
+    if (savingWithdrawDeposit) return; // cegah double-submit (double-klik/koneksi lambat)
+    setSavingWithdrawDeposit(true);
+    try {
+      const account = financialAccounts.find(a => a.id === withdrawDepositForm.accountId);
+      const sourceDocId = `deposit_withdraw_${customer.id}_${Date.now()}`;
+      // Saldo deposit jamaah berkurang (delta negatif) — riwayatnya kecatet
+      // ke 'deposit_ledger' dengan type 'withdrawal' biar kebeda jelas dari
+      // 'usage' (dipakai bayar booking) di riwayat yang sama.
+      await adjustDepositBalance(
+        customer.id,
+        customer.fullName,
+        -amountVal,
+        'withdrawal',
+        `${withdrawDepositForm.notes}${account ? ` (${account.name})` : ''}`,
+        '',
+        resolvePaymentCreatedAt(withdrawDepositForm.date)
+      );
+      // Uang BENERAN keluar dari akun Kas/Bank yang dipilih (beda dari
+      // pemakaian saldo deposit buat bayar setoran, yang SENGAJA nggak
+      // nyentuh Kas/Bank sama sekali — lihat catatan di adjustAccountBalance).
+      await adjustAccountBalance(withdrawDepositForm.accountId, -amountVal, {
+        description: `Pengembalian Saldo Deposit - ${customer.fullName || '-'}${withdrawDepositForm.notes ? ` (${withdrawDepositForm.notes})` : ''}`,
+        reference: customer.customerCode || customer.fullName || '',
+        source: 'deposit_withdrawal',
+        date: resolvePaymentCreatedAt(withdrawDepositForm.date)
+      });
+      // Jurnal otomatis: debit Utang Deposit Jamaah (liability berkurang),
+      // kredit Kas/Bank (kas keluar beneran) — kebalikan persis dari
+      // postDepositTopup.
+      await postDepositWithdrawal({
+        sourceDocId, jamaahName: customer.fullName, amount: amountVal,
+        accountId: withdrawDepositForm.accountId, accountName: account?.name || '',
+        date: resolvePaymentCreatedAt(withdrawDepositForm.date),
+        createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => {
+        console.error('Gagal posting jurnal pengembalian saldo deposit:', err);
+        alert(`Saldo deposit & saldo Kas/Bank sudah dikurangi, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+      });
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'create',
+        module: 'Keuangan',
+        targetLabel: customer.fullName,
+        details: `Pengembalian saldo deposit "${customer.fullName}" sebesar Rp ${amountVal.toLocaleString('id-ID')} ditransfer via ${account?.name || '-'} (${withdrawDepositForm.notes || '-'})`
+      });
+      setShowWithdrawDepositModal(false);
+      setWithdrawDepositForm({ customerId: '', amount: '', accountId: '', notes: 'Pengembalian saldo deposit (transfer balik ke jamaah)', date: todayISODate() });
+      fetchData();
+    } catch (err) {
+      alert("Gagal mencatat pengembalian saldo deposit: " + err.message);
+    } finally {
+      setSavingWithdrawDeposit(false);
     }
   };
 
@@ -2191,6 +2294,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
           >
             <Wallet className="w-4 h-4" /> + Tambah Deposit
+          </button>
+          <button
+            onClick={() => setShowWithdrawDepositModal(true)}
+            className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
+          >
+            <RotateCcw className="w-4 h-4" /> Pengembalian Deposit
           </button>
           <button
             onClick={() => setShowVendorModal(true)}
@@ -3906,6 +4015,110 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 </button>
                 <button type="submit" disabled={savingDeposit} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium disabled:opacity-60">
                   {savingDeposit ? 'Menyimpan...' : 'Simpan Deposit'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showWithdrawDepositModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowWithdrawDepositModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <RotateCcw className="w-5 h-5 text-amber-500" /> Pengembalian Saldo Deposit
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>
+              Buat saldo deposit jamaah (misal hasil refund booking batal yang tadinya dipilih "jadi saldo deposit dulu") yang akhirnya beneran mau ditransfer balik ke customer — BUKAN dipakai buat bayar booking lain. Saldo deposit & saldo akun Kas/Bank yang dipakai transfer sama-sama berkurang, dan jurnalnya otomatis keposting.
+            </p>
+
+            <form onSubmit={handleWithdrawDepositSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div>
+                <label className="block mb-1 font-medium">Pemesan / Customer</label>
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="-- Pilih Data Master Jamaah --"
+                  value={withdrawDepositForm.customerId}
+                  onChange={(val) => setWithdrawDepositForm({ ...withdrawDepositForm, customerId: val })}
+                  options={jamaahList
+                    .filter(j => Number(j.depositBalance || 0) !== 0)
+                    .map(j => ({
+                      value: j.id,
+                      label: `${j.fullName} - ${j.customerCode || 'CST'}`,
+                      sublabel: `Saldo saat ini: Rp ${Number(j.depositBalance || 0).toLocaleString('id-ID')}`,
+                    }))}
+                />
+                {jamaahList.filter(j => Number(j.depositBalance || 0) !== 0).length === 0 && (
+                  <p className="text-[10px] mt-1 text-amber-500">Nggak ada jamaah yang punya saldo deposit saat ini.</p>
+                )}
+              </div>
+
+              {withdrawDepositForm.customerId && (() => {
+                const c = jamaahList.find(j => j.id === withdrawDepositForm.customerId);
+                if (!c) return null;
+                return (
+                  <p className={`${styles.innerBg} border rounded-lg p-2.5`}>
+                    Saldo Deposit <strong className={styles.textTitle}>{c.fullName}</strong> saat ini: <strong className="text-emerald-500">Rp {Number(c.depositBalance || 0).toLocaleString('id-ID')}</strong>
+                  </p>
+                );
+              })()}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1 font-medium">Nominal Dikembalikan (Rp)</label>
+                  <input
+                    type="number" required min="1" placeholder="9000000"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={withdrawDepositForm.amount}
+                    onChange={e => setWithdrawDepositForm({ ...withdrawDepositForm, amount: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Tanggal Transfer</label>
+                  <DateFieldID
+                    required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={withdrawDepositForm.date}
+                    onChange={(val) => setWithdrawDepositForm({ ...withdrawDepositForm, date: val })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Keluar dari Akun Kas/Bank</label>
+                <select
+                  required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={withdrawDepositForm.accountId}
+                  onChange={e => setWithdrawDepositForm({ ...withdrawDepositForm, accountId: e.target.value })}
+                >
+                  <option value="">-- Pilih Akun --</option>
+                  {financialAccounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.name} (Saldo: Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Keterangan</label>
+                <input
+                  type="text" placeholder="Pengembalian saldo deposit (transfer balik ke jamaah)"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={withdrawDepositForm.notes}
+                  onChange={e => setWithdrawDepositForm({ ...withdrawDepositForm, notes: e.target.value })}
+                />
+              </div>
+
+              <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowWithdrawDepositModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" disabled={savingWithdrawDeposit} className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium disabled:opacity-60">
+                  {savingWithdrawDeposit ? 'Menyimpan...' : 'Simpan Pengembalian'}
                 </button>
               </div>
             </form>
