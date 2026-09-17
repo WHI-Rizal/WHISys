@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
+import SearchableSelect from '@/components/SearchableSelect';
 import {
   collection, addDoc, getDocs, doc, updateDoc, deleteDoc, setDoc,
   query, where, increment
@@ -446,18 +447,20 @@ export default function EquipmentModule({ theme = 'dark' }) {
           <div className="space-y-4">
             <div>
               <label className={`block mb-1 text-xs font-medium ${styles.textSub}`}>Pilih Keberangkatan</label>
-              <select
-                className={`w-full sm:w-96 ${styles.inputBg} rounded-lg p-2.5 text-xs`}
-                value={selectedPackageId}
-                onChange={e => setSelectedPackageId(e.target.value)}
-              >
-                <option value="">-- Pilih Paket Travel & Tanggal Keberangkatan --</option>
-                {packagesList.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.code}) - {formatDateDDMMYYYY(p.departureDate)}
-                  </option>
-                ))}
-              </select>
+              <div className="w-full sm:w-96">
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5 text-xs`}
+                  placeholder="-- Pilih Paket Travel & Tanggal Keberangkatan --"
+                  value={selectedPackageId}
+                  onChange={(val) => setSelectedPackageId(val)}
+                  options={packagesList.map(p => ({
+                    value: p.id,
+                    label: `${p.name} (${p.code})`,
+                    sublabel: formatDateDDMMYYYY(p.departureDate),
+                  }))}
+                />
+              </div>
             </div>
 
             {!selectedPackageId ? (
