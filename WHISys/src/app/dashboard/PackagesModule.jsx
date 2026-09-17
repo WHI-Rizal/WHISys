@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
-import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings, List, LayoutGrid, CalendarRange, Eye, EyeOff } from 'lucide-react';
+import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings, List, LayoutGrid, CalendarRange, Eye, EyeOff, ExternalLink } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 import { logActivity } from '../../lib/activityLog';
 import { postJournalEntry, ACC } from '../../lib/journal';
@@ -1425,14 +1425,33 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
           </h3>
           <p className={`text-xs ${styles.textSub} mt-1`}>Kelola program keberangkatan, akomodasi, dan harga paket secara adaptif.</p>
         </div>
-        {canManagePackages && (
-          <button
-            onClick={handleOpenAdd}
-            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg shadow-emerald-900/10"
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Tombol kecil buka Katalog Publik (/katalog) di tab baru — biar staf
+              gampang cek langsung tampilan katalog yang keliatan calon customer,
+              tanpa perlu ngetik URL manual. Link ini nggak butuh login khusus
+              karena /katalog memang halaman publik (lihat src/app/katalog/page.js). */}
+          <a
+            href="/katalog"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-all ${
+              isDark
+                ? 'border-slate-700 text-slate-300 hover:bg-slate-800'
+                : 'border-slate-200 text-slate-600 hover:bg-slate-100'
+            }`}
+            title="Buka halaman Katalog Publik di tab baru"
           >
-            <Plus className="w-4 h-4" /> Buat Paket Baru
-          </button>
-        )}
+            <ExternalLink className="w-4 h-4" /> Lihat Katalog Publik
+          </a>
+          {canManagePackages && (
+            <button
+              onClick={handleOpenAdd}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg shadow-emerald-900/10"
+            >
+              <Plus className="w-4 h-4" /> Buat Paket Baru
+            </button>
+          )}
+        </div>
       </div>
 
       {/* FILTER BAR */}
