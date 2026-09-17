@@ -7,7 +7,7 @@ import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, Hi
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN, addPPN } from '../../lib/ppn';
 import { getNextCustomerCode } from '../../lib/customerCode';
-import { postBookingCreated, postIncomePayment, postBookingCancelRefund, postJournalEntry, deleteJournalEntriesBySource, deleteAllJournalEntriesForBooking, ACC } from '../../lib/journal';
+import { postBookingCreated, postIncomePayment, postBookingCancelRefund, postJournalEntry, deleteJournalEntriesBySource, deleteAllJournalEntriesForBooking, resyncBookingCreatedJournalDate, ACC } from '../../lib/journal';
 import SearchableSelect from '@/components/SearchableSelect';
 
 // Firestore where(..., 'in', [...]) cuma dukung maks 30 nilai sekaligus —
@@ -4255,12 +4255,17 @@ Terimakasih🙏`;
         // biar Buku Besar & tampilan booking konsisten.
         if (correctedCreatedAt && correctedCreatedAt !== currentBooking?.createdAt) {
           try {
-            const bookingCreatedJournalSnap = await getDocs(query(
-              collection(db, 'journal_entries'),
-              where('source', '==', 'booking_created'),
-              where('sourceDocId', '==', editingBookingId)
-            ));
-            await Promise.all(bookingCreatedJournalSnap.docs.map(d => updateDoc(d.ref, { date: correctedCreatedAt })));
+            // Perbaikan 17 Sep 2026: dulu updateDoc langsung ke journal_entries
+            // di sini (SELALU gagal "Missing or insufficient permissions" di
+            // production karena rules cuma izinin create/delete, bukan update
+            // — lihat catatan lengkap di resyncBookingCreatedJournalDate).
+            // Sekarang hapus + posting ulang jurnalnya dengan tanggal baru.
+            await resyncBookingCreatedJournalDate({
+              bookingId: editingBookingId,
+              newDate: correctedCreatedAt,
+              createdByUid: currentUser?.uid,
+              createdByName: currentUser?.fullName || currentUser?.email,
+            });
           } catch (syncDateErr) {
             console.error('Gagal menyinkronkan tanggal jurnal booking_created:', syncDateErr);
             alert(`Tanggal Transaksi booking tersimpan, TAPI tanggal jurnal "Booking baru" di Buku Besar GAGAL disinkronkan (${syncDateErr.message}). Jurnalnya masih nunjuk tanggal lama — lapor ke tim IT/Finance kalau perlu dibenerin manual.`);
