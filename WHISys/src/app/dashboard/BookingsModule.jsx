@@ -8,6 +8,7 @@ import { logActivity } from '../../lib/activityLog';
 import { calculatePPN, addPPN } from '../../lib/ppn';
 import { getNextCustomerCode } from '../../lib/customerCode';
 import { postBookingCreated, postIncomePayment, postBookingCancelRefund, postJournalEntry, deleteJournalEntriesBySource, deleteAllJournalEntriesForBooking, ACC } from '../../lib/journal';
+import SearchableSelect from '@/components/SearchableSelect';
 
 // Firestore where(..., 'in', [...]) cuma dukung maks 30 nilai sekaligus —
 // buat query yang array-nya bisa aja lebih dari itu (grup rombongan gede),
@@ -5573,20 +5574,19 @@ Terimakasih🙏`;
             <form onSubmit={handleSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
                 <label className="block mb-1 font-medium">Pilih Paket Travel</label>
-                <select
-                  required
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5 ${editingBookingId ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  placeholder="-- Pilih Program Keberangkatan --"
                   disabled={!!editingBookingId}
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5 ${editingBookingId ? 'opacity-60 cursor-not-allowed' : ''}`}
                   value={formData.packageId}
-                  onChange={e => setFormData({ ...formData, packageId: e.target.value })}
-                >
-                  <option value="">-- Pilih Program Keberangkatan --</option>
-                  {packagesList.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.code}) - Sisa Seat: {p.quotaRemaining ?? p.quotaTotal}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setFormData({ ...formData, packageId: val })}
+                  options={packagesList.map(p => ({
+                    value: p.id,
+                    label: `${p.name} (${p.code})`,
+                    sublabel: `Sisa Seat: ${p.quotaRemaining ?? p.quotaTotal}`,
+                  }))}
+                />
                 {editingBookingId && (
                   <p className="text-[10px] mt-1 text-amber-500">
                     Paket nggak bisa diganti lewat Edit Booking (biar kuota paket lama/baru selalu ke-update bener). Kalau jamaah ini mau pindah ke paket keberangkatan lain, pakai tombol "Reschedule" (Finance/Super Admin).
@@ -5599,20 +5599,19 @@ Terimakasih🙏`;
                   dengan Daftar Peserta di bawah: pilih existing atau Tambah Baru. */}
               <div>
                 <label className="block mb-1 font-medium">Pemesan (Yang Melakukan Pemesanan)</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="-- Pilih Data Master Jamaah --"
                   value={formData.ordererId}
-                  onChange={e => setFormData({ ...formData, ordererId: e.target.value })}
-                >
-                  <option value="">-- Pilih Data Master Jamaah --</option>
-                  <option value="__new__">➕ Tambah Pemesan Baru (Belum Terdaftar)</option>
-                  {jamaahList.map(j => (
-                    <option key={j.id} value={j.id}>
-                      {j.fullName} - {j.customerCode || 'CST'} - Paspor: {j.passportNumber || 'Belum Ada'}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setFormData({ ...formData, ordererId: val })}
+                  pinnedOptions={[{ value: '__new__', label: '➕ Tambah Pemesan Baru (Belum Terdaftar)' }]}
+                  options={jamaahList.map(j => ({
+                    value: j.id,
+                    label: j.fullName,
+                    sublabel: `${j.customerCode || 'CST'} - Paspor: ${j.passportNumber || 'Belum Ada'}`,
+                  }))}
+                />
                 <p className="text-[10px] mt-1 opacity-70">
                   Pemesan bukan otomatis peserta. Kalau Pemesan juga ikut berangkat, pilih/ketik lagi namanya di bagian Peserta di bawah.
                 </p>
@@ -5699,23 +5698,22 @@ Terimakasih🙏`;
                     <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">
                       Peserta {idx + 1}{idx === 0 && formData.pesertaList.length > 1 ? ' (Penanggung Jawab Rombongan)' : ''}
                     </p>
-                    <select
-                      required
-                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    <SearchableSelect
+                      isDark={isDark}
+                      inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                      placeholder="-- Pilih Data Master Jamaah --"
                       value={entry.jamaahId}
-                      onChange={e => handlePesertaJamaahIdChange(idx, e.target.value)}
-                    >
-                      <option value="">-- Pilih Data Master Jamaah --</option>
-                      {idx === 0 && (
-                        <option value="__same_as_orderer__">🔁 Sama dengan Pemesan</option>
-                      )}
-                      <option value="__new__">➕ Tambah Jamaah Baru (Belum Terdaftar)</option>
-                      {jamaahList.map(j => (
-                        <option key={j.id} value={j.id}>
-                          {j.fullName} - {j.customerCode || 'CST'} - Paspor: {j.passportNumber || 'Belum Ada'}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(val) => handlePesertaJamaahIdChange(idx, val)}
+                      pinnedOptions={[
+                        ...(idx === 0 ? [{ value: '__same_as_orderer__', label: '🔁 Sama dengan Pemesan' }] : []),
+                        { value: '__new__', label: '➕ Tambah Jamaah Baru (Belum Terdaftar)' },
+                      ]}
+                      options={jamaahList.map(j => ({
+                        value: j.id,
+                        label: j.fullName,
+                        sublabel: `${j.customerCode || 'CST'} - Paspor: ${j.passportNumber || 'Belum Ada'}`,
+                      }))}
+                    />
 
                     {entry.jamaahId === '__new__' && (
                       <div className="space-y-2.5">
@@ -6587,19 +6585,20 @@ Terimakasih🙏`;
                 </div>
                 <div>
                   <label className="block mb-1 font-medium">Paket / Keberangkatan Tujuan</label>
-                  <select
-                    required
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  <SearchableSelect
+                    isDark={isDark}
+                    inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                    placeholder="-- Pilih Program Keberangkatan Baru --"
                     value={rescheduleForm.newPackageId}
-                    onChange={e => setRescheduleForm({ ...rescheduleForm, newPackageId: e.target.value })}
-                  >
-                    <option value="">-- Pilih Program Keberangkatan Baru --</option>
-                    {packagesList.filter(p => p.id !== selectedBookingForAction.packageId).map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.code}) - Sisa Seat: {p.quotaRemaining ?? p.quotaTotal}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => setRescheduleForm({ ...rescheduleForm, newPackageId: val })}
+                    options={packagesList
+                      .filter(p => p.id !== selectedBookingForAction.packageId)
+                      .map(p => ({
+                        value: p.id,
+                        label: `${p.name} (${p.code})`,
+                        sublabel: `Sisa Seat: ${p.quotaRemaining ?? p.quotaTotal}`,
+                      }))}
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -7047,19 +7046,19 @@ Terimakasih🙏`;
               <p className={`text-[11px] font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1.5`}>
                 <UserPlus className="w-3.5 h-3.5" /> Tambah Peserta Baru (Nyusul)
               </p>
-              <select
-                className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+              <SearchableSelect
+                isDark={isDark}
+                inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                placeholder="-- Pilih Data Master Jamaah --"
                 value={addPaxForm.jamaahId}
-                onChange={e => setAddPaxForm({ ...addPaxForm, jamaahId: e.target.value })}
-              >
-                <option value="">-- Pilih Data Master Jamaah --</option>
-                <option value="__new__">➕ Tambah Jamaah Baru (Belum Terdaftar)</option>
-                {jamaahList.map(j => (
-                  <option key={j.id} value={j.id}>
-                    {j.fullName} - {j.customerCode || 'CST'} - Paspor: {j.passportNumber || 'Belum Ada'}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setAddPaxForm({ ...addPaxForm, jamaahId: val })}
+                pinnedOptions={[{ value: '__new__', label: '➕ Tambah Jamaah Baru (Belum Terdaftar)' }]}
+                options={jamaahList.map(j => ({
+                  value: j.id,
+                  label: j.fullName,
+                  sublabel: `${j.customerCode || 'CST'} - Paspor: ${j.passportNumber || 'Belum Ada'}`,
+                }))}
+              />
 
               {addPaxForm.jamaahId === '__new__' && (
                 <div className="space-y-2.5">
@@ -7150,20 +7149,19 @@ Terimakasih🙏`;
             <form onSubmit={handleGroupEditSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
                 <label className="block mb-1 font-medium">Pilih Paket Travel</label>
-                <select
-                  required
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5 opacity-60 cursor-not-allowed`}
+                  placeholder="-- Pilih Program Keberangkatan --"
                   disabled
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5 opacity-60 cursor-not-allowed`}
                   value={groupEditForm.packageId}
-                  onChange={e => setGroupEditForm({ ...groupEditForm, packageId: e.target.value })}
-                >
-                  <option value="">-- Pilih Program Keberangkatan --</option>
-                  {packagesList.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.code}) - Sisa Seat: {p.quotaRemaining ?? p.quotaTotal}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setGroupEditForm({ ...groupEditForm, packageId: val })}
+                  options={packagesList.map(p => ({
+                    value: p.id,
+                    label: `${p.name} (${p.code})`,
+                    sublabel: `Sisa Seat: ${p.quotaRemaining ?? p.quotaTotal}`,
+                  }))}
+                />
                 <p className="text-[10px] mt-1 text-amber-500">
                   Paket nggak bisa diganti lewat Edit Grup (biar kuota paket lama/baru selalu ke-update bener & tetap dijaga cuma Finance/Super Admin). Kalau grup ini mau pindah ke paket keberangkatan lain, pakai tombol "Reschedule Grup" (Finance/Super Admin).
                 </p>
@@ -7171,20 +7169,19 @@ Terimakasih🙏`;
 
               <div>
                 <label className="block mb-1 font-medium">Pemesan (Yang Melakukan Pemesanan)</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="-- Pilih Data Master Jamaah --"
                   value={groupEditForm.ordererId}
-                  onChange={e => setGroupEditForm({ ...groupEditForm, ordererId: e.target.value })}
-                >
-                  <option value="">-- Pilih Data Master Jamaah --</option>
-                  <option value="__new__">➕ Tambah Pemesan Baru (Belum Terdaftar)</option>
-                  {jamaahList.map(j => (
-                    <option key={j.id} value={j.id}>
-                      {j.fullName} - {j.customerCode || 'CST'} - Paspor: {j.passportNumber || 'Belum Ada'}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setGroupEditForm({ ...groupEditForm, ordererId: val })}
+                  pinnedOptions={[{ value: '__new__', label: '➕ Tambah Pemesan Baru (Belum Terdaftar)' }]}
+                  options={jamaahList.map(j => ({
+                    value: j.id,
+                    label: j.fullName,
+                    sublabel: `${j.customerCode || 'CST'} - Paspor: ${j.passportNumber || 'Belum Ada'}`,
+                  }))}
+                />
               </div>
 
               {groupEditForm.ordererId === '__new__' && (
@@ -7566,19 +7563,20 @@ Terimakasih🙏`;
               </div>
               <div>
                 <label className="block mb-1 font-medium">Paket / Keberangkatan Tujuan</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="-- Pilih Program Keberangkatan Baru --"
                   value={groupRescheduleForm.newPackageId}
-                  onChange={e => setGroupRescheduleForm({ ...groupRescheduleForm, newPackageId: e.target.value })}
-                >
-                  <option value="">-- Pilih Program Keberangkatan Baru --</option>
-                  {packagesList.filter(p => p.id !== groupRescheduleTarget.primary?.packageId).map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.code}) - Sisa Seat: {p.quotaRemaining ?? p.quotaTotal}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setGroupRescheduleForm({ ...groupRescheduleForm, newPackageId: val })}
+                  options={packagesList
+                    .filter(p => p.id !== groupRescheduleTarget.primary?.packageId)
+                    .map(p => ({
+                      value: p.id,
+                      label: `${p.name} (${p.code})`,
+                      sublabel: `Sisa Seat: ${p.quotaRemaining ?? p.quotaTotal}`,
+                    }))}
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -7715,16 +7713,14 @@ Terimakasih🙏`;
 
             <div className="mb-4">
               <label className="block mb-1 text-xs font-medium">Pilih Program Keberangkatan</label>
-              <select
-                className={`w-full ${styles.inputBg} rounded-lg p-2.5 text-xs`}
+              <SearchableSelect
+                isDark={isDark}
+                inputClassName={`${styles.inputBg} rounded-lg p-2.5 text-xs`}
+                placeholder="-- Pilih Paket --"
                 value={roomingPackageId}
-                onChange={e => setRoomingPackageId(e.target.value)}
-              >
-                <option value="">-- Pilih Paket --</option>
-                {packagesList.map(p => (
-                  <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
-                ))}
-              </select>
+                onChange={(val) => setRoomingPackageId(val)}
+                options={packagesList.map(p => ({ value: p.id, label: `${p.name} (${p.code})` }))}
+              />
             </div>
 
             {roomingPackageId && (
@@ -7833,16 +7829,14 @@ Terimakasih🙏`;
 
             <div className="mb-4">
               <label className="block mb-1 text-xs font-medium">Pilih Program Keberangkatan</label>
-              <select
-                className={`w-full ${styles.inputBg} rounded-lg p-2.5 text-xs`}
+              <SearchableSelect
+                isDark={isDark}
+                inputClassName={`${styles.inputBg} rounded-lg p-2.5 text-xs`}
+                placeholder="-- Pilih Paket --"
                 value={bulkFeedbackPackageId}
-                onChange={e => { setBulkFeedbackPackageId(e.target.value); setSentFeedbackIds([]); }}
-              >
-                <option value="">-- Pilih Paket --</option>
-                {packagesList.map(p => (
-                  <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
-                ))}
-              </select>
+                onChange={(val) => { setBulkFeedbackPackageId(val); setSentFeedbackIds([]); }}
+                options={packagesList.map(p => ({ value: p.id, label: `${p.name} (${p.code})` }))}
+              />
             </div>
 
             {bulkFeedbackPackageId && (
