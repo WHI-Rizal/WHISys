@@ -27,6 +27,11 @@ import { ChevronDown, Search, X } from 'lucide-react';
 // - emptyOptionLabel: kalau diisi, muncul sebagai opsi paling atas buat
 //   "kosongkan pilihan" (dikirim onChange('')) — dipakai buat field yang
 //   opsional (misal "Nggak Terkait Paket Tertentu").
+// - pinnedOptions: array { value, label } opsional — opsi "spesial" yang
+//   SELALU muncul di atas daftar, TIDAK ikut kefilter walau lagi ngetik
+//   pencarian (misal "➕ Tambah Jamaah Baru (Belum Terdaftar)" atau
+//   "🔁 Sama dengan Pemesan" — harus tetap kepilih walau user lagi ngetik
+//   nama buat nyari jamaah existing).
 // - isDark, inputClassName: buat nyesuain warna/gaya ke tema dashboard yang
 //   lagi aktif (dark/light) — hasilnya berat sebelah kalau ini nggak
 //   dioper dari komponen pemanggil.
@@ -39,6 +44,7 @@ export default function SearchableSelect({
   onChange,
   placeholder = '-- Pilih --',
   emptyOptionLabel,
+  pinnedOptions,
   isDark = false,
   inputClassName = '',
   disabled = false,
@@ -49,8 +55,11 @@ export default function SearchableSelect({
   const inputRef = useRef(null);
 
   const selected = useMemo(
-    () => options.find((o) => o.value === value) || null,
-    [options, value]
+    () =>
+      options.find((o) => o.value === value) ||
+      (pinnedOptions || []).find((o) => o.value === value) ||
+      null,
+    [options, pinnedOptions, value]
   );
 
   useEffect(() => {
@@ -124,6 +133,25 @@ export default function SearchableSelect({
           </div>
 
           <div className="max-h-56 overflow-y-auto">
+            {(pinnedOptions || []).map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => {
+                  onChange(o.value);
+                  setOpen(false);
+                }}
+                className={`w-full text-left px-3 py-2 text-xs font-medium border-b ${
+                  isDark ? 'border-slate-800' : 'border-slate-100'
+                } ${
+                  o.value === value
+                    ? isDark ? 'bg-emerald-900/40 text-emerald-300' : 'bg-emerald-50 text-emerald-700'
+                    : isDark ? 'text-emerald-400 hover:bg-slate-800' : 'text-emerald-700 hover:bg-slate-50'
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
             {emptyOptionLabel && (
               <button
                 type="button"
