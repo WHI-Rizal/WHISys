@@ -208,6 +208,17 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
   const [itineraryDays, setItineraryDays] = useState([]);
   const [savingItinerary, setSavingItinerary] = useState(false);
 
+  // Perbaikan 17 Sep 2026 (temuan audit CRITICAL) — guard anti double-submit
+  // buat form Edit/Tambah Paket. Tanpa ini, double-klik "Simpan Perubahan"
+  // (atau koneksi lambat) bisa bikin handleSubmit kepanggil 2x paralel, dan
+  // karena bagian "Sinkron Revisi Harga Paket ke Booking Existing" di bawah
+  // posting jurnal booking_edit_adjustment secara ADITIF (bukan hapus-lalu-
+  // posting-ulang), tiap booking aktif yang tersentuh bisa dapet 2 baris
+  // jurnal dengan delta identik — dobel catat Piutang Jamaah & Pendapatan
+  // Diterima Dimuka di Neraca. Sama polanya kayak isSavingGroupEdit di
+  // BookingsModule.jsx (kasus GRP-606826).
+  const [savingPackage, setSavingPackage] = useState(false);
+
   // Kop surat (nama PT, alamat, telepon, email) buat dokumen "Detail Paket
   // Wisata" — sumbernya sama persis kayak Invoice di BookingsModule.jsx
   // (settings/company_profile, diatur dari menu Pengaturan > Identitas PT),
@@ -1140,6 +1151,8 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       alert("Cuma Super Admin & Operational yang boleh menyimpan data paket.");
       return;
     }
+    if (savingPackage) return; // guard anti double-submit — lihat catatan di state savingPackage
+    setSavingPackage(true);
     try {
       const cleanedFixedCostItems = (formData.budgetFixedCostItems || [])
         .filter(it => (it.label && it.label.trim()) || Number(it.amount) > 0)
@@ -1302,6 +1315,8 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       fetchData();
     } catch (err) {
       alert("Gagal menyimpan paket: " + err.message);
+    } finally {
+      setSavingPackage(false);
     }
   };
 
@@ -2474,8 +2489,8 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                 <button type="button" onClick={() => setShowModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
-                <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
-                  {editingPackageId ? 'Simpan Perubahan' : 'Terbitkan Paket'}
+                <button type="submit" disabled={savingPackage} className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium disabled:opacity-60 disabled:cursor-not-allowed">
+                  {savingPackage ? 'Menyimpan...' : (editingPackageId ? 'Simpan Perubahan' : 'Terbitkan Paket')}
                 </button>
               </div>
             </form>
