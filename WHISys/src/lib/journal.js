@@ -251,6 +251,26 @@ export const postDepositTopup = async ({ sourceDocId, jamaahName, amount, accoun
   });
 };
 
+// 3b. Pengembalian/pencairan Saldo Deposit jamaah — KEBALIKAN dari
+//     postDepositTopup di atas. Dipakai kalau customer punya saldo deposit
+//     (misal dari refund booking batal yang tadinya dipilih "jadi saldo
+//     deposit" dulu, bukan langsung transfer) dan BENERAN mau ditransfer
+//     balik/dicairkan, bukan dipakai buat booking lain. Utang Deposit
+//     Jamaah (liability) berkurang, Kas/Bank BENERAN keluar.
+export const postDepositWithdrawal = async ({ sourceDocId, jamaahName, amount, accountId, accountName, date, createdByUid, createdByName }) => {
+  const amt = Number(amount) || 0;
+  if (amt <= 0) return null;
+  return postJournalEntry({
+    date, description: `Pengembalian Saldo Deposit - ${jamaahName || '-'}`,
+    source: 'deposit_withdrawal', sourceDocId, reference: jamaahName || '',
+    lines: [
+      glLine(ACC.UTANG_DEPOSIT_JAMAAH, amt, 0),
+      glLine(ACC.KAS_BANK, 0, amt, { accountId, accountName }),
+    ],
+    createdByUid, createdByName
+  });
+};
+
 // 4. Tagihan Vendor baru diterima (BELUM dibayar) — fitur baru. Ini yang
 //    bikin Hutang Vendor beneran ke-catat SEBELUM uang keluar, bukan cuma
 //    keliatan pas dibayar kayak sebelumnya.
