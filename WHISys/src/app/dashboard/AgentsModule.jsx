@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
+import SearchableSelect from '@/components/SearchableSelect';
 import {
   collection, addDoc, getDocs, doc, updateDoc, deleteDoc,
   query, where, increment
@@ -719,16 +720,17 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
         {activeTab === 'bookings' && (
           <div>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3">
-              <select
-                className={`w-full sm:w-72 ${styles.inputBg} rounded-lg p-2.5 text-xs`}
-                value={filterPartnerId}
-                onChange={e => setFilterPartnerId(e.target.value)}
-              >
-                <option value="">Semua Mitra/Agen</option>
-                {partnersList.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
+              <div className="w-full sm:w-72">
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5 text-xs`}
+                  placeholder="Semua Mitra/Agen"
+                  emptyOptionLabel="Semua Mitra/Agen"
+                  value={filterPartnerId}
+                  onChange={(val) => setFilterPartnerId(val)}
+                  options={partnersList.map(p => ({ value: p.id, label: p.name }))}
+                />
+              </div>
               {canManagePartners && (
                 <button
                   onClick={handleOpenLinkModal}
@@ -1098,33 +1100,33 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
             <form onSubmit={handleLinkSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
                 <label className="block mb-1 font-medium">Mitra/Agen</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="-- Pilih Mitra/Agen --"
                   value={linkForm.partnerId}
-                  onChange={e => handlePartnerChangeInLink(e.target.value)}
-                >
-                  <option value="">-- Pilih Mitra/Agen --</option>
-                  {partnersList.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.type}) - {formatCommission(p.commissionType, p.commissionValue)}</option>
-                  ))}
-                </select>
+                  onChange={(val) => handlePartnerChangeInLink(val)}
+                  options={partnersList.map(p => ({
+                    value: p.id,
+                    label: `${p.name} (${p.type})`,
+                    sublabel: formatCommission(p.commissionType, p.commissionValue),
+                  }))}
+                />
               </div>
               <div>
                 <label className="block mb-1 font-medium">Pemesanan</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="-- Pilih Kode Booking / Jamaah --"
                   value={linkForm.groupCode}
-                  onChange={e => setLinkForm({ ...linkForm, groupCode: e.target.value })}
-                >
-                  <option value="">-- Pilih Kode Booking / Jamaah --</option>
-                  {availableGroups.map(g => (
-                    <option key={g.code} value={g.code}>
-                      {g.code} - {g.primary.jamaahName}{g.paxCount > 1 ? ` dkk (${g.paxCount} pax)` : ''} - {g.primary.packageName} - Rp {g.totalAmount.toLocaleString('id-ID')}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setLinkForm({ ...linkForm, groupCode: val })}
+                  options={availableGroups.map(g => ({
+                    value: g.code,
+                    label: `${g.code} - ${g.primary.jamaahName}${g.paxCount > 1 ? ` dkk (${g.paxCount} pax)` : ''}`,
+                    sublabel: `${g.primary.packageName} - Rp ${g.totalAmount.toLocaleString('id-ID')}`,
+                  }))}
+                />
                 <p className="text-[10.5px] mt-1">
                   Kalau pemesanan ini rombongan, semua pax di kode booking yang sama ikut terhubung sekaligus — komisi dihitung dari total keseluruhan pemesanan, bukan per pax.
                 </p>
@@ -1183,20 +1185,17 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
             <form onSubmit={handlePaySubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
                 <label className="block mb-1 font-medium">Mitra/Agen</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="-- Pilih Mitra/Agen --"
                   value={payForm.partnerId}
-                  onChange={e => setPayForm({ ...payForm, partnerId: e.target.value })}
-                >
-                  <option value="">-- Pilih Mitra/Agen --</option>
-                  {partnersList.map(p => {
+                  onChange={(val) => setPayForm({ ...payForm, partnerId: val })}
+                  options={partnersList.map(p => {
                     const { outstanding } = getPartnerSummary(p.id);
-                    return (
-                      <option key={p.id} value={p.id}>{p.name} - Sisa: Rp {outstanding.toLocaleString('id-ID')}</option>
-                    );
+                    return { value: p.id, label: p.name, sublabel: `Sisa: Rp ${outstanding.toLocaleString('id-ID')}` };
                   })}
-                </select>
+                />
               </div>
               <div>
                 <label className="block mb-1 font-medium">Nominal Pembayaran (Rp)</label>
