@@ -493,6 +493,42 @@ export const deleteJournalEntriesBySource = async (source, sourceDocId) => {
   }
 };
 
+// Perbaikan 17 Sep 2026 (kasus GRP-570533 lanjutan) — Rules Firestore
+// collection `journal_entries` cuma izinin CREATE & DELETE, BUKAN UPDATE
+// (biar Buku Besar immutable/nggak bisa diam-diam diubah field-nya tanpa
+// jejak hapus-buat-baru). BookingsModule.jsx tadinya coba `updateDoc(d.ref,
+// {date:...})` langsung buat nyamain tanggal jurnal `booking_created` pas
+// staf koreksi "Tanggal Transaksi" booking — itu SELALU gagal "Missing or
+// insufficient permissions" di production (baru ketauan 17 Sep 2026 lewat
+// laporan user, walau fiturnya sendiri ditambahin 16 Sep). Perbaikannya:
+// HAPUS jurnal lama + POSTING ULANG persis isi lines/description/
+// reference-nya tapi dengan tanggal baru — konsisten sama pola
+// "immutable ledger, koreksi = delete+recreate" yang dipakai di semua
+// tempat lain di file ini, bukan mutate langsung dokumen jurnal yang
+// sudah ada.
+export const resyncBookingCreatedJournalDate = async ({ bookingId, newDate, createdByUid, createdByName }) => {
+  if (!bookingId || !newDate) return;
+  const snap = await getDocs(query(
+    collection(db, 'journal_entries'),
+    where('source', '==', 'booking_created'),
+    where('sourceDocId', '==', bookingId)
+  ));
+  for (const d of snap.docs) {
+    const old = d.data();
+    await deleteDoc(d.ref);
+    await postJournalEntry({
+      date: newDate,
+      description: old.description,
+      source: old.source,
+      sourceDocId: old.sourceDocId,
+      reference: old.reference,
+      lines: old.lines,
+      createdByUid: createdByUid || old.createdByUid,
+      createdByName: createdByName || old.createdByName,
+    });
+  }
+};
+
 // Hapus SEMUA jurnal yang nempel ke 1 booking spesifik yang mau
 // dihapus/DIHAPUS PERMANEN (bukan cuma dibatalkan) — WAJIB dipanggil di
 // SETIAP titik `deleteDoc(doc(db, 'bookings', id))` di BookingsModule.jsx
