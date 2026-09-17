@@ -7,6 +7,7 @@ import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import DateFieldID from '@/components/DateFieldID';
+import SearchableSelect from '@/components/SearchableSelect';
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN } from '../../lib/ppn';
 import {
@@ -3925,17 +3926,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             <form onSubmit={handleVendorSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
                 <label className="block mb-1 font-medium">Paket Keberangkatan Terkait</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="-- Pilih Paket --"
                   value={vendorForm.packageId}
-                  onChange={e => setVendorForm({ ...vendorForm, packageId: e.target.value })}
-                >
-                  <option value="">-- Pilih Paket --</option>
-                  {packagesList.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
-                  ))}
-                </select>
+                  onChange={(val) => setVendorForm({ ...vendorForm, packageId: val })}
+                  options={packagesList.map(p => ({ value: p.id, label: p.name, sublabel: p.code }))}
+                />
                 <p className={`text-[10.5px] ${styles.textSub} mt-1`}>
                   Biaya kantor yang bukan buat trip tertentu (sewa, gaji, listrik, dll) dicatat lewat tombol <strong>"+ Biaya Operasional Kantor"</strong>, bukan di sini.
                 </p>
@@ -4138,16 +4136,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
               <div>
                 <label className="block mb-1 font-medium">Paket Keberangkatan Terkait <span className="font-normal text-[10px]">(opsional)</span></label>
-                <select
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="-- Nggak Terkait Paket Tertentu --"
+                  emptyOptionLabel="-- Nggak Terkait Paket Tertentu --"
                   value={vendorBillForm.packageId}
-                  onChange={e => setVendorBillForm({ ...vendorBillForm, packageId: e.target.value })}
-                >
-                  <option value="">-- Nggak Terkait Paket Tertentu --</option>
-                  {packagesList.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
-                  ))}
-                </select>
+                  onChange={(val) => setVendorBillForm({ ...vendorBillForm, packageId: val })}
+                  options={packagesList.map(p => ({ value: p.id, label: p.name, sublabel: p.code }))}
+                />
               </div>
 
               <div>
