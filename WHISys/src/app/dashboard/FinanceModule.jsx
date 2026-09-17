@@ -3566,17 +3566,18 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             <form onSubmit={handleConvertSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
                 <label className="block mb-1 font-medium">Vendor Tujuan Saldo Deposit</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="-- Pilih Vendor --"
                   value={convertForm.vendorId}
-                  onChange={e => setConvertForm({ ...convertForm, vendorId: e.target.value })}
-                >
-                  <option value="">-- Pilih Vendor --</option>
-                  {vendorsList.map(v => (
-                    <option key={v.id} value={v.id}>{v.name} (Saldo sekarang: Rp {Number(v.depositBalance || 0).toLocaleString('id-ID')})</option>
-                  ))}
-                </select>
+                  onChange={(val) => setConvertForm({ ...convertForm, vendorId: val })}
+                  options={vendorsList.map(v => ({
+                    value: v.id,
+                    label: v.name,
+                    sublabel: `Saldo sekarang: Rp ${Number(v.depositBalance || 0).toLocaleString('id-ID')}`,
+                  }))}
+                />
                 {vendorsList.length === 0 && (
                   <p className="text-[10px] mt-1 text-amber-500">Belum ada vendor di Data Master. Tambahkan dulu lewat tab "Data Vendor".</p>
                 )}
@@ -3711,19 +3712,18 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             <form onSubmit={handleIncomeSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
                 <label className="block mb-1 font-medium">Pilih Kode Booking</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="-- Pilih Kode Booking --"
                   value={incomeForm.groupCode}
-                  onChange={e => setIncomeForm({ ...incomeForm, groupCode: e.target.value })}
-                >
-                  <option value="">-- Pilih Kode Booking --</option>
-                  {groupedBookingOptions.map(g => (
-                    <option key={g.code} value={g.code}>
-                      {g.code} - {g.paxCount > 1 ? `${g.paxCount} Peserta` : g.primary.jamaahName}{g.primary.ordererName ? ` a.n. ${g.primary.ordererName}` : ''} ({g.primary.packageName})
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setIncomeForm({ ...incomeForm, groupCode: val })}
+                  options={groupedBookingOptions.map(g => ({
+                    value: g.code,
+                    label: `${g.code} - ${g.paxCount > 1 ? `${g.paxCount} Peserta` : g.primary.jamaahName}${g.primary.ordererName ? ` a.n. ${g.primary.ordererName}` : ''}`,
+                    sublabel: g.primary.packageName,
+                  }))}
+                />
                 <p className={`text-[10.5px] ${styles.textSub} mt-1`}>
                   Untuk booking rombongan, nominal setoran otomatis dibagi rata ke semua peserta dalam kode booking ini.
                 </p>
@@ -3941,20 +3941,21 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
               <div>
                 <label className="block mb-1 font-medium">Vendor / Perusahaan</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="-- Pilih Vendor --"
                   value={vendorForm.vendorId}
-                  onChange={e => {
-                    const v = vendorsList.find(x => x.id === e.target.value);
-                    setVendorForm({ ...vendorForm, vendorId: e.target.value, category: v?.category || vendorForm.category, billId: '' });
+                  onChange={(val) => {
+                    const v = vendorsList.find(x => x.id === val);
+                    setVendorForm({ ...vendorForm, vendorId: val, category: v?.category || vendorForm.category, billId: '' });
                   }}
-                >
-                  <option value="">-- Pilih Vendor --</option>
-                  {vendorsList.map(v => (
-                    <option key={v.id} value={v.id}>{v.name}{Number(v.depositBalance || 0) > 0 ? ` (Saldo Deposit: Rp ${Number(v.depositBalance).toLocaleString('id-ID')})` : ''}</option>
-                  ))}
-                </select>
+                  options={vendorsList.map(v => ({
+                    value: v.id,
+                    label: v.name,
+                    sublabel: Number(v.depositBalance || 0) > 0 ? `Saldo Deposit: Rp ${Number(v.depositBalance).toLocaleString('id-ID')}` : undefined,
+                  }))}
+                />
                 {vendorsList.length === 0 && (
                   <p className="text-[10px] mt-1 text-amber-500">Belum ada vendor. Tambahkan dulu lewat tab "Data Vendor".</p>
                 )}
@@ -4115,20 +4116,17 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             <form onSubmit={handleVendorBillSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
                 <label className="block mb-1 font-medium">Vendor / Perusahaan</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="-- Pilih Vendor --"
                   value={vendorBillForm.vendorId}
-                  onChange={e => {
-                    const v = vendorsList.find(x => x.id === e.target.value);
-                    setVendorBillForm({ ...vendorBillForm, vendorId: e.target.value, category: v?.category || vendorBillForm.category });
+                  onChange={(val) => {
+                    const v = vendorsList.find(x => x.id === val);
+                    setVendorBillForm({ ...vendorBillForm, vendorId: val, category: v?.category || vendorBillForm.category });
                   }}
-                >
-                  <option value="">-- Pilih Vendor --</option>
-                  {vendorsList.map(v => (
-                    <option key={v.id} value={v.id}>{v.name}</option>
-                  ))}
-                </select>
+                  options={vendorsList.map(v => ({ value: v.id, label: v.name }))}
+                />
                 {vendorsList.length === 0 && (
                   <p className="text-[10px] mt-1 text-amber-500">Belum ada vendor. Tambahkan dulu lewat tab "Data Vendor".</p>
                 )}
