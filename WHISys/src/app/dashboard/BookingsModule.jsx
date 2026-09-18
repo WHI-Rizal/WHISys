@@ -3579,7 +3579,30 @@ Terimakasih🙏`;
           </tbody>
         </table>
 
-        <table class="summary-table">
+        <div class="summary-footer-grid">
+          <div class="summary-footer-left">
+            <div class="bank-info">
+              <h5>Informasi Pembayaran / Transfer:</h5>
+              <div>Silakan lakukan pembayaran melalui rekening resmi perusahaan:</div>
+              <div class="bank-details" style="margin-top: 6px;">
+                ${bankAccountsHtml}
+              </div>
+            </div>
+            <div class="signature-box">
+              <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
+              <div class="signature-space">
+                ${isLunas ? `
+                <div class="paid-stamp">
+                  <div class="stamp-title">LUNAS</div>
+                  <div class="stamp-sub">PAID IN FULL</div>
+                </div>` : ''}
+              </div>
+              <p><strong>( ${compName} )</strong></p>
+              <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
+            </div>
+          </div>
+
+          <table class="summary-table">
           <tr class="summary-header-row">
             <td>Harga Paket:</td>
             <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${basePackagePrice.toLocaleString('id-ID')}</td>
@@ -3616,28 +3639,7 @@ Terimakasih🙏`;
               Rp ${sisaTagihan.toLocaleString('id-ID')}
             </td>
           </tr>
-        </table>
-
-        <div class="footer-section">
-          <div class="bank-info">
-            <h5>Informasi Pembayaran / Transfer:</h5>
-            <div>Silakan lakukan pembayaran melalui rekening resmi perusahaan:</div>
-            <div class="bank-details" style="margin-top: 6px;">
-              ${bankAccountsHtml}
-            </div>
-          </div>
-          <div class="signature-box">
-            <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
-            <div class="signature-space">
-              ${isLunas ? `
-              <div class="paid-stamp">
-                <div class="stamp-title">LUNAS</div>
-                <div class="stamp-sub">PAID IN FULL</div>
-              </div>` : ''}
-            </div>
-            <p><strong>( ${compName} )</strong></p>
-            <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
-          </div>
+          </table>
         </div>
 
         <div class="footer-note">
@@ -3673,14 +3675,15 @@ Terimakasih🙏`;
             table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
             th { background-color: #f1f5f9; text-align: left; padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #475569; border-bottom: 2px solid #cbd5e1; }
             td { padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; }
-            .summary-table { width: 100%; max-width: 500px; margin-left: auto; margin-bottom: 30px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+            .summary-table { width: 100%; margin: 0; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
             .summary-table td { padding: 8px 12px; }
             .summary-header-row { background-color: #f1f5f9; font-weight: bold; }
             .summary-table .total-row { font-size: 14px; font-weight: bold; color: #0f172a; background-color: #f8fafc; border-top: 2px solid #cbd5e1; }
-            .footer-section { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 20px; border-top: 1px solid #e2e8f0; padding-top: 20px; margin-top: 10px; }
+            .summary-footer-grid { display: grid; grid-template-columns: 1fr 500px; gap: 20px; align-items: start; margin-bottom: 20px; }
+            .summary-footer-left { display: flex; flex-direction: column; gap: 14px; }
             .bank-info { background-color: #f0fdf4; border: 1px dashed #a7f3d0; padding: 12px 15px; border-radius: 8px; font-size: 11px; color: #065f46; }
             .bank-info h5 { margin: 0 0 6px 0; font-size: 12px; color: #047857; text-transform: uppercase; letter-spacing: 0.5px; }
-            .signature-box { text-align: center; font-size: 11px; color: #64748b; }
+            .signature-box { text-align: center; font-size: 11px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 14px; }
             .signature-space { height: 50px; position: relative; }
             .footer-note { text-align: center; font-size: 10px; color: #94a3b8; margin-top: 25px; border-top: 1px solid #f1f5f9; padding-top: 10px; }
             @media print { body { padding: 0; } .invoice-box { border: none; padding: 0; } }
@@ -3932,7 +3935,30 @@ Terimakasih🙏`;
           </tbody>
         </table>
 
-        <table class="summary-table">
+        <div class="summary-footer-grid">
+          <div class="summary-footer-left">
+            <div class="bank-info">
+              <h5>Informasi Pembayaran / Transfer:</h5>
+              <div>Silakan lakukan pembayaran melalui rekening resmi perusahaan:</div>
+              <div class="bank-details" style="margin-top: 6px;">
+                ${bankAccountsHtml}
+              </div>
+            </div>
+            <div class="signature-box">
+              <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
+              <div class="signature-space">
+                ${isLunas ? `
+                <div class="paid-stamp">
+                  <div class="stamp-title">LUNAS</div>
+                  <div class="stamp-sub">PAID IN FULL</div>
+                </div>` : ''}
+              </div>
+              <p><strong>( ${compName} )</strong></p>
+              <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
+            </div>
+          </div>
+
+          <table class="summary-table">
           ${packagePriceRowsHtml}
           ${chargeRowsHtml}
           ${discountRowsHtml}
@@ -3966,28 +3992,7 @@ Terimakasih🙏`;
               Rp ${sisaTagihan.toLocaleString('id-ID')}
             </td>
           </tr>
-        </table>
-
-        <div class="footer-section">
-          <div class="bank-info">
-            <h5>Informasi Pembayaran / Transfer:</h5>
-            <div>Silakan lakukan pembayaran melalui rekening resmi perusahaan:</div>
-            <div class="bank-details" style="margin-top: 6px;">
-              ${bankAccountsHtml}
-            </div>
-          </div>
-          <div class="signature-box">
-            <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
-            <div class="signature-space">
-              ${isLunas ? `
-              <div class="paid-stamp">
-                <div class="stamp-title">LUNAS</div>
-                <div class="stamp-sub">PAID IN FULL</div>
-              </div>` : ''}
-            </div>
-            <p><strong>( ${compName} )</strong></p>
-            <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
-          </div>
+          </table>
         </div>
 
         <div class="footer-note">
