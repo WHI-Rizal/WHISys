@@ -3528,11 +3528,6 @@ Terimakasih🙏`;
 
     return `
       <div class="invoice-box">
-        ${isLunas ? `
-        <div class="paid-stamp">
-          <div class="stamp-title">LUNAS</div>
-          <div class="stamp-sub">PAID IN FULL</div>
-        </div>` : ''}
         <div class="kop-header">
           <div>
             <h1 class="company-logo-title">${compName}</h1>
@@ -3633,7 +3628,13 @@ Terimakasih🙏`;
           </div>
           <div class="signature-box">
             <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
-            <div class="signature-space"></div>
+            <div class="signature-space">
+              ${isLunas ? `
+              <div class="paid-stamp">
+                <div class="stamp-title">LUNAS</div>
+                <div class="stamp-sub">PAID IN FULL</div>
+              </div>` : ''}
+            </div>
             <p><strong>( ${compName} )</strong></p>
             <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
           </div>
@@ -3655,9 +3656,9 @@ Terimakasih🙏`;
           <style>
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; margin: 0; padding: 40px; background-color: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             .invoice-box { position: relative; max-width: 800px; margin: auto; border: 1px solid #e2e8f0; padding: 35px; border-radius: 12px; overflow: hidden; }
-            .paid-stamp { position: absolute; top: 118px; right: 45px; width: 150px; text-align: center; border: 3px solid #059669; border-radius: 8px; box-shadow: inset 0 0 0 3px rgba(5,150,105,0.35); padding: 8px 2px; transform: rotate(-13deg); opacity: 0.85; pointer-events: none; }
-            .paid-stamp .stamp-title { font-size: 20px; font-weight: 900; color: #059669; letter-spacing: 2px; font-family: 'Courier New', Courier, monospace; line-height: 1.15; }
-            .paid-stamp .stamp-sub { font-size: 8px; font-weight: 700; color: #059669; letter-spacing: 1.5px; margin-top: 3px; font-family: 'Courier New', Courier, monospace; }
+            .paid-stamp { position: absolute; top: -6px; left: 50%; width: 110px; text-align: center; border: 3px solid #059669; border-radius: 8px; box-shadow: inset 0 0 0 3px rgba(5,150,105,0.35); padding: 6px 2px; transform: translateX(-50%) rotate(-13deg); opacity: 0.85; pointer-events: none; }
+            .paid-stamp .stamp-title { font-size: 15px; font-weight: 900; color: #059669; letter-spacing: 1.5px; font-family: 'Courier New', Courier, monospace; line-height: 1.15; }
+            .paid-stamp .stamp-sub { font-size: 6px; font-weight: 700; color: #059669; letter-spacing: 1px; margin-top: 2px; font-family: 'Courier New', Courier, monospace; }
             .validity-note { font-size: 9px; color: #94a3b8; font-style: italic; margin-top: 6px; }
             .kop-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px double #059669; padding-bottom: 20px; margin-bottom: 25px; }
             .company-logo-title { font-size: 22px; font-weight: 800; color: #065f46; letter-spacing: -0.5px; margin: 0; }
@@ -3680,7 +3681,7 @@ Terimakasih🙏`;
             .bank-info { background-color: #f0fdf4; border: 1px dashed #a7f3d0; padding: 12px 15px; border-radius: 8px; font-size: 11px; color: #065f46; }
             .bank-info h5 { margin: 0 0 6px 0; font-size: 12px; color: #047857; text-transform: uppercase; letter-spacing: 0.5px; }
             .signature-box { text-align: center; font-size: 11px; color: #64748b; }
-            .signature-space { height: 50px; }
+            .signature-space { height: 50px; position: relative; }
             .footer-note { text-align: center; font-size: 10px; color: #94a3b8; margin-top: 25px; border-top: 1px solid #f1f5f9; padding-top: 10px; }
             @media print { body { padding: 0; } .invoice-box { border: none; padding: 0; } }
           </style>
@@ -3864,11 +3865,6 @@ Terimakasih🙏`;
 
     return `
       <div class="invoice-box">
-        ${isLunas ? `
-        <div class="paid-stamp">
-          <div class="stamp-title">LUNAS</div>
-          <div class="stamp-sub">PAID IN FULL</div>
-        </div>` : ''}
         <div class="kop-header">
           <div>
             <h1 class="company-logo-title">${compName}</h1>
@@ -3982,7 +3978,13 @@ Terimakasih🙏`;
           </div>
           <div class="signature-box">
             <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
-            <div class="signature-space"></div>
+            <div class="signature-space">
+              ${isLunas ? `
+              <div class="paid-stamp">
+                <div class="stamp-title">LUNAS</div>
+                <div class="stamp-sub">PAID IN FULL</div>
+              </div>` : ''}
+            </div>
             <p><strong>( ${compName} )</strong></p>
             <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
           </div>
