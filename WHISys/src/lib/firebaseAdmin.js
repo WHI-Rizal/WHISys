@@ -41,12 +41,12 @@
 
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
 
 let cachedDb = null;
+let cachedAuth = null;
 
-export const getAdminDb = () => {
-  if (cachedDb) return cachedDb;
-
+const initAdminApp = () => {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
   if (!raw) {
     throw new Error(
@@ -62,7 +62,22 @@ export const getAdminDb = () => {
     throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY isinya bukan JSON yang valid — pastikan yang di-paste seluruh isi file kunci Service Account tanpa diubah.');
   }
 
-  const app = getApps().length > 0 ? getApps()[0] : initializeApp({ credential: cert(serviceAccount) });
-  cachedDb = getFirestore(app);
+  return getApps().length > 0 ? getApps()[0] : initializeApp({ credential: cert(serviceAccount) });
+};
+
+export const getAdminDb = () => {
+  if (cachedDb) return cachedDb;
+  cachedDb = getFirestore(initAdminApp());
   return cachedDb;
+};
+
+// Ditambahin 18 Sep 2026 (temuan audit MEDIUM — endpoint /api/ai-chat
+// nggak ada cek login sama sekali) — dipakai buat verifyIdToken() Firebase
+// Auth staf yang lagi login di dashboard, BUKAN buat Portal Customer
+// (portal pakai portalSession.js sendiri, login-nya cuma Kode Jamaah +
+// Tanggal Lahir, nggak punya akun Firebase Auth beneran).
+export const getAdminAuth = () => {
+  if (cachedAuth) return cachedAuth;
+  cachedAuth = getAuth(initAdminApp());
+  return cachedAuth;
 };
