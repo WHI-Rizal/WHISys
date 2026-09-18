@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, getDoc, setDoc, deleteDoc, doc, updateDoc, query, where, increment, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, getDocs, getDoc, setDoc, deleteDoc, doc, updateDoc, query, where, increment, writeBatch, runTransaction } from 'firebase/firestore';
 import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock, Download, Pencil, Plus, Settings, FileBarChart, ChevronDown, ChevronRight, FileEdit, History } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -656,6 +656,50 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     });
   };
 
+  // Perbaikan 18 Sep 2026 (temuan audit MEDIUM) — versi KHUSUS buat
+  // Pengembalian Saldo Deposit (withdrawal), pakai Firestore transaction
+  // (bukan blind increment() kayak adjustDepositBalance di atas). Kenapa
+  // perlu beda: withdrawal itu NGURANGIN saldo berdasarkan nominal yang
+  // divalidasi dari data React state yang udah difetch sebelumnya (bisa
+  // basi kalau ada perubahan lain di antara fetch & submit) — 2 device
+  // yang narik saldo bersamaan buat jamaah yang sama bisa lolos validasi
+  // client dua-duanya (masing-masing lihat saldo lama yang sama-sama masih
+  // cukup) terus dua-duanya increment(-amount), hasil akhirnya saldo bisa
+  // jadi MINUS tanpa ada error yang kedeteksi. Top up (delta positif) nggak
+  // punya risiko ini (nambah saldo nggak bisa "kurang" dari apapun), jadi
+  // tetap pakai adjustDepositBalance biasa di atas.
+  // Transaction ini BACA saldo TERKINI dari Firestore (bukan dari state
+  // React yang mungkin udah basi), tolak (throw, otomatis di-retry Firestore
+  // SDK kalau ada write bentrok) kalau ternyata saldo real-time-nya udah
+  // nggak cukup, dan baru nulis balance + deposit_ledger sekaligus atomik
+  // kalau aman.
+  const withdrawDepositBalanceTransactional = async (customerId, customerName, amount, notes, createdAtOverride) => {
+    const amt = Number(amount) || 0;
+    if (!customerId || amt <= 0) return;
+    const customerRef = doc(db, 'jamaah', customerId);
+    const ledgerRef = doc(collection(db, 'deposit_ledger'));
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(customerRef);
+      if (!snap.exists()) {
+        throw new Error('Data jamaah nggak ketemu — mungkin baru aja dihapus.');
+      }
+      const currentBalance = Number(snap.data().depositBalance || 0);
+      if (amt > currentBalance) {
+        throw new Error(`Saldo deposit "${customerName || '-'}" saat ini cuma Rp ${currentBalance.toLocaleString('id-ID')} — nggak cukup buat pengembalian Rp ${amt.toLocaleString('id-ID')} ini. Kemungkinan ada transaksi lain (setoran/pengembalian dari device/tab lain) yang baru aja ngurangin saldonya — refresh halaman ini dan cek ulang saldo terbaru sebelum coba lagi.`);
+      }
+      tx.update(customerRef, { depositBalance: currentBalance - amt });
+      tx.set(ledgerRef, {
+        customerId,
+        customerName: customerName || '-',
+        type: 'withdrawal',
+        amount: -amt,
+        notes: notes || '',
+        bookingCode: '',
+        createdAt: createdAtOverride || new Date().toISOString()
+      });
+    });
+  };
+
   // Saldo Deposit VENDOR (collection 'vendors', field depositBalance) —
   // nampung DP block seat/dll yang batal (trip cancel) tapi nggak hangus,
   // jadi kredit yang bisa dipakai lagi buat booking baru ke vendor yang
@@ -1286,16 +1330,17 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     try {
       const account = financialAccounts.find(a => a.id === withdrawDepositForm.accountId);
       const sourceDocId = `deposit_withdraw_${customer.id}_${Date.now()}`;
-      // Saldo deposit jamaah berkurang (delta negatif) — riwayatnya kecatet
-      // ke 'deposit_ledger' dengan type 'withdrawal' biar kebeda jelas dari
-      // 'usage' (dipakai bayar booking) di riwayat yang sama.
-      await adjustDepositBalance(
+      // Saldo deposit jamaah berkurang — pakai transaction (bukan
+      // adjustDepositBalance biasa) biar saldo tervalidasi ULANG dari data
+      // Firestore TERKINI di dalam transaction, bukan cuma dari state React
+      // yang udah difetch sebelumnya. Cegah saldo jadi minus kalau ada 2
+      // device/tab narik saldo jamaah yang sama nyaris bersamaan — lihat
+      // catatan lengkap di withdrawDepositBalanceTransactional.
+      await withdrawDepositBalanceTransactional(
         customer.id,
         customer.fullName,
-        -amountVal,
-        'withdrawal',
+        amountVal,
         `${withdrawDepositForm.notes}${account ? ` (${account.name})` : ''}`,
-        '',
         resolvePaymentCreatedAt(withdrawDepositForm.date)
       );
       // Uang BENERAN keluar dari akun Kas/Bank yang dipilih (beda dari
