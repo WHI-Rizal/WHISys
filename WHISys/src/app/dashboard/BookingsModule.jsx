@@ -3587,18 +3587,6 @@ Terimakasih🙏`;
                 ${bankAccountsHtml}
               </div>
             </div>
-            <div class="signature-box">
-              <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
-              <div class="signature-space">
-                ${isLunas ? `
-                <div class="paid-stamp">
-                  <div class="stamp-title">LUNAS</div>
-                  <div class="stamp-sub">PAID IN FULL</div>
-                </div>` : ''}
-              </div>
-              <p><strong>( ${compName} )</strong></p>
-              <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
-            </div>
           </div>
 
           <table class="summary-table">
@@ -3639,6 +3627,19 @@ Terimakasih🙏`;
             </td>
           </tr>
           </table>
+        </div>
+
+        <div class="signature-box">
+          <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
+          <div class="signature-space">
+            ${isLunas ? `
+            <div class="paid-stamp">
+              <div class="stamp-title">LUNAS</div>
+              <div class="stamp-sub">PAID IN FULL</div>
+            </div>` : ''}
+          </div>
+          <p><strong>( ${compName} )</strong></p>
+          <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
         </div>
 
         <div class="footer-note">
@@ -3684,7 +3685,7 @@ Terimakasih🙏`;
             .bank-info h5 { margin: 0 0 4px 0; font-size: 11px; color: #047857; text-transform: uppercase; letter-spacing: 0.5px; }
             .bank-info .bank-row { margin-top: 3px; padding-top: 3px; border-top: 1px dashed #bbf7d0; }
             .bank-info .bank-row:first-of-type { margin-top: 4px; padding-top: 0; border-top: none; }
-            .signature-box { text-align: center; font-size: 10.5px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+            .signature-box { max-width: 260px; text-align: center; font-size: 10.5px; color: #64748b; border-top: 1px solid #e2e8f0; margin-top: 6px; padding-top: 14px; }
             .signature-space { height: 44px; position: relative; }
             .footer-note { text-align: center; font-size: 10px; color: #94a3b8; margin-top: 25px; border-top: 1px solid #f1f5f9; padding-top: 10px; }
             @media print { body { padding: 0; } .invoice-box { border: none; padding: 0; } }
@@ -3944,18 +3945,6 @@ Terimakasih🙏`;
                 ${bankAccountsHtml}
               </div>
             </div>
-            <div class="signature-box">
-              <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
-              <div class="signature-space">
-                ${isLunas ? `
-                <div class="paid-stamp">
-                  <div class="stamp-title">LUNAS</div>
-                  <div class="stamp-sub">PAID IN FULL</div>
-                </div>` : ''}
-              </div>
-              <p><strong>( ${compName} )</strong></p>
-              <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
-            </div>
           </div>
 
           <table class="summary-table">
@@ -3993,6 +3982,19 @@ Terimakasih🙏`;
             </td>
           </tr>
           </table>
+        </div>
+
+        <div class="signature-box">
+          <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
+          <div class="signature-space">
+            ${isLunas ? `
+            <div class="paid-stamp">
+              <div class="stamp-title">LUNAS</div>
+              <div class="stamp-sub">PAID IN FULL</div>
+            </div>` : ''}
+          </div>
+          <p><strong>( ${compName} )</strong></p>
+          <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
         </div>
 
         <div class="footer-note">
