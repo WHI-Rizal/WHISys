@@ -302,6 +302,28 @@ const getDefaultPayrollCutoffRange = () => {
 export default function FinanceModule({ onSelectBooking, theme = 'dark', currentUser = null }) {
   const isDark = theme === 'dark';
 
+  // Perbaikan 18 Sep 2026 (temuan audit MEDIUM) — dulu SEMUA handler tulis
+  // di modul ini (withdraw deposit, bayar vendor, opex, koreksi invoice,
+  // dst) langsung updateDoc/addDoc ke Firestore tanpa cek role sama sekali
+  // di level kode JS — `currentUser?.role` cuma dipakai buat isi field
+  // log aktivitas, bukan buat nolak aksinya. Keamanannya 100% nunut ke
+  // Firestore Rules yang nggak kelihatan dari repo ini. Guard ini nambah
+  // lapisan defense-in-depth di sisi kode: kalaupun ada cara nge-trigger
+  // handler ini di luar alur UI normal (misal lewat React DevTools/console
+  // browser oleh user yang nyasar login tapi bukan Finance), operasinya
+  // tetap ditolak duluan di sini. Logika SAMA PERSIS kayak `canAccessFinance`
+  // di dashboard/page.js (yang nge-gate tab Keuangan ini muncul apa nggak) —
+  // biar dua-duanya konsisten. Firestore Rules tetap harus jadi penegak
+  // utamanya (guard ini gampang dilewatin siapapun yang ngerti cara ubah
+  // JS bundle di browser), jadi jangan dianggap ini pengganti rules yang benar.
+  const financeUserRole = (currentUser?.role || '').toLowerCase();
+  const isFinanceRole = financeUserRole.includes('super') || financeUserRole === 'admin' || financeUserRole === 'finance';
+  const blockIfNotFinanceRole = () => {
+    if (isFinanceRole) return false;
+    alert('Cuma Finance & Super Admin yang boleh melakukan aksi ini.');
+    return true;
+  };
+
   const styles = {
     cardBg: isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm',
     innerBg: isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200',
@@ -772,6 +794,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const handleVendorMasterSubmit = async (e) => {
     e.preventDefault();
+    if (blockIfNotFinanceRole()) return;
     if (!vendorMasterForm.name.trim()) {
       alert("Isi nama vendornya dulu.");
       return;
@@ -824,6 +847,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   };
 
   const handleDeleteVendorMaster = async (v) => {
+    if (blockIfNotFinanceRole()) return;
     // Jaga-jaga pertama: vendor yang masih ada saldo depositnya jangan bisa
     // kehapus gitu aja, biar jejak kreditnya nggak ilang.
     if (Number(v.depositBalance || 0) !== 0) {
@@ -1033,6 +1057,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const handleConvertSubmit = async (e) => {
     e.preventDefault();
+    if (blockIfNotFinanceRole()) return;
     if (!convertForm.vendorId) {
       alert("Pilih vendor tujuan saldo depositnya dulu.");
       return;
@@ -1125,6 +1150,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const handleInvoiceCorrectionSubmit = async (e) => {
     e.preventDefault();
+    if (blockIfNotFinanceRole()) return;
     const originalAmount = Number(correctingPayment?.amount || 0);
     const newAmountVal = Number(invoiceCorrectionForm.newAmount || 0);
     if (newAmountVal <= 0) {
@@ -1205,6 +1231,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // turun (misal salah input kelebihan sebelumnya).
   const handleVendorDepositAdjustSubmit = async (e) => {
     e.preventDefault();
+    if (blockIfNotFinanceRole()) return;
     const deltaVal = Number(vendorAdjustForm.amount || 0);
     if (deltaVal === 0) {
       alert("Isi nominal yang valid (bukan 0). Isi negatif kalau mau mengoreksi turun.");
@@ -1244,6 +1271,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const handleDepositSubmit = async (e) => {
     e.preventDefault();
+    if (blockIfNotFinanceRole()) return;
     const customer = jamaahList.find(j => j.id === depositForm.customerId);
     if (!customer) {
       alert("Pilih Pemesan/Customer dulu.");
@@ -1306,6 +1334,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // buat bayar setoran" yang cuma mindahin saldo tanpa nyentuh Kas/Bank).
   const handleWithdrawDepositSubmit = async (e) => {
     e.preventDefault();
+    if (blockIfNotFinanceRole()) return;
     const customer = jamaahList.find(j => j.id === withdrawDepositForm.customerId);
     if (!customer) {
       alert("Pilih Pemesan/Customer dulu.");
@@ -1384,6 +1413,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   };
 
   const handleDeleteVendorPayment = async (vp) => {
+    if (blockIfNotFinanceRole()) return;
     // Sama kayak hapus setoran jamaah — kalau paket terkait pembayaran vendor
     // ini omzet/HPP-nya udah "diakui" (masuk Laporan P&L), hapus DIBLOK dulu
     // biar angka yang udah dilaporkan nggak berubah diam-diam.
@@ -1451,6 +1481,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   };
 
   const handleDeleteOperationalExpense = async (op) => {
+    if (blockIfNotFinanceRole()) return;
     if (!confirm("Apakah Anda yakin ingin menghapus catatan biaya operasional ini?")) return;
     try {
       await deleteDoc(doc(db, 'expenses_operational', op.id));
@@ -1473,6 +1504,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const handleIncomeSubmit = async (e) => {
     e.preventDefault();
+    if (blockIfNotFinanceRole()) return;
     if (savingIncome) return; // cegah double-submit (double-klik/koneksi lambat)
     setSavingIncome(true);
     try {
@@ -1612,6 +1644,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   };
 
   const handleDeleteIncomeRow = async (row) => {
+    if (blockIfNotFinanceRole()) return;
     // Kalau paket terkait setoran ini omzetnya udah "diakui" (masuk Laporan
     // P&L periode tertentu), hapus setoran ini DIBLOK dulu — kalau nggak,
     // angka omset yang udah dilaporkan ke owner bisa berubah diam-diam tanpa
@@ -1681,6 +1714,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // nggak nunggu sampai duitnya keluar.
   const handleVendorBillSubmit = async (e) => {
     e.preventDefault();
+    if (blockIfNotFinanceRole()) return;
     if (savingVendorBill) return; // cegah double-submit
     setSavingVendorBill(true);
     try {
@@ -1752,6 +1786,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // tagihannya — biar nggak ninggalin payments_vendor yang nunjuk ke
   // tagihan yang udah nggak ada.
   const handleDeleteVendorBill = async (bill) => {
+    if (blockIfNotFinanceRole()) return;
     if (Number(bill.amountPaid) > 0) {
       alert(`Tagihan ini udah ada pembayaran senilai Rp ${Number(bill.amountPaid).toLocaleString('id-ID')} yang nempel. Nggak bisa dihapus langsung — hapus dulu pembayaran vendor yang terkait tagihan ini di tab "Riwayat Bayar Vendor".`);
       return;
@@ -1777,6 +1812,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const handleVendorSubmit = async (e) => {
     e.preventDefault();
+    if (blockIfNotFinanceRole()) return;
     if (savingVendor) return; // cegah double-submit
     setSavingVendor(true);
     try {
@@ -1957,6 +1993,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const handleOperationalSubmit = async (e) => {
     e.preventDefault();
+    if (blockIfNotFinanceRole()) return;
     if (savingOperational) return; // cegah double-submit
     setSavingOperational(true);
     try {
