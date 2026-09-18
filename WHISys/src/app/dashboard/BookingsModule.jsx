@@ -3685,7 +3685,7 @@ Terimakasih🙏`;
             .bank-info h5 { margin: 0 0 4px 0; font-size: 11px; color: #047857; text-transform: uppercase; letter-spacing: 0.5px; }
             .bank-info .bank-row { margin-top: 3px; padding-top: 3px; border-top: 1px dashed #bbf7d0; }
             .bank-info .bank-row:first-of-type { margin-top: 4px; padding-top: 0; border-top: none; }
-            .signature-box { max-width: 260px; text-align: center; font-size: 10.5px; color: #64748b; border-top: 1px solid #e2e8f0; margin-top: 6px; padding-top: 14px; }
+            .signature-box { max-width: 260px; margin-left: auto; text-align: center; font-size: 10.5px; color: #64748b; border-top: 1px solid #e2e8f0; margin-top: 6px; padding-top: 14px; }
             .signature-space { height: 44px; position: relative; }
             .footer-note { text-align: center; font-size: 10px; color: #94a3b8; margin-top: 25px; border-top: 1px solid #f1f5f9; padding-top: 10px; }
             @media print { body { padding: 0; } .invoice-box { border: none; padding: 0; } }
