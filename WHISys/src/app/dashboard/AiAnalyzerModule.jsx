@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { db } from '@/lib/firebase';
+import { db, auth } from '@/lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import { Sparkles, TrendingUp, AlertTriangle, Lightbulb, Wallet, Plane, RefreshCw, MessageSquare, Send, Maximize2, Minimize2, X, Trash2 } from 'lucide-react';
 
@@ -280,11 +280,19 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
     const fullPrompt = `${systemInstructionText}\n\nPertanyaan User: ${currentQuery}`;
 
     try {
+      // Perbaikan 18 Sep 2026: /api/ai-chat sekarang wajib Firebase ID
+      // Token staf yang lagi login (server-nya nolak kalau nggak ada/nggak
+      // valid — lihat catatan lengkap di src/app/api/ai-chat/route.js).
+      if (!auth.currentUser) {
+        throw new Error('Sesi login sudah habis — refresh halaman & login ulang dulu.');
+      }
+      const idToken = await auth.currentUser.getIdToken();
+
       // Panggil API route server-side (/api/ai-chat) — API key Gemini aman
       // tersimpan di server, tidak pernah terkirim/terekspos ke browser.
       const response = await fetch('/api/ai-chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
         body: JSON.stringify({ promptText: fullPrompt })
       });
 
