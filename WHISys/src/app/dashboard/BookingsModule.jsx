@@ -3528,6 +3528,11 @@ Terimakasih🙏`;
 
     return `
       <div class="invoice-box">
+        ${isLunas ? `
+        <div class="paid-stamp">
+          <div class="stamp-title">LUNAS</div>
+          <div class="stamp-sub">PAID IN FULL</div>
+        </div>` : ''}
         <div class="kop-header">
           <div>
             <h1 class="company-logo-title">${compName}</h1>
@@ -3630,11 +3635,12 @@ Terimakasih🙏`;
             <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
             <div class="signature-space"></div>
             <p><strong>( ${compName} )</strong></p>
+            <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
           </div>
         </div>
 
         <div class="footer-note">
-          <p>Terima kasih atas kepercayaan Anda. Dokumen ini sah dan diterbitkan secara otomatis oleh sistem ERP WHISys.</p>
+          <p>Terima kasih atas kepercayaan Anda. Dokumen ini sah dan diterbitkan secara otomatis oleh sistem ERP WHISys — tanpa memerlukan tanda tangan basah maupun stempel perusahaan.</p>
         </div>
       </div>
     `;
@@ -3647,8 +3653,12 @@ Terimakasih🙏`;
         <head>
           <title>${title}</title>
           <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; margin: 0; padding: 40px; background-color: #fff; }
-            .invoice-box { max-width: 800px; margin: auto; border: 1px solid #e2e8f0; padding: 35px; border-radius: 12px; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; margin: 0; padding: 40px; background-color: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .invoice-box { position: relative; max-width: 800px; margin: auto; border: 1px solid #e2e8f0; padding: 35px; border-radius: 12px; overflow: hidden; }
+            .paid-stamp { position: absolute; top: 118px; right: 45px; width: 150px; text-align: center; border: 3px solid #059669; border-radius: 8px; box-shadow: inset 0 0 0 3px rgba(5,150,105,0.35); padding: 8px 2px; transform: rotate(-13deg); opacity: 0.85; pointer-events: none; }
+            .paid-stamp .stamp-title { font-size: 20px; font-weight: 900; color: #059669; letter-spacing: 2px; font-family: 'Courier New', Courier, monospace; line-height: 1.15; }
+            .paid-stamp .stamp-sub { font-size: 8px; font-weight: 700; color: #059669; letter-spacing: 1.5px; margin-top: 3px; font-family: 'Courier New', Courier, monospace; }
+            .validity-note { font-size: 9px; color: #94a3b8; font-style: italic; margin-top: 6px; }
             .kop-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px double #059669; padding-bottom: 20px; margin-bottom: 25px; }
             .company-logo-title { font-size: 22px; font-weight: 800; color: #065f46; letter-spacing: -0.5px; margin: 0; }
             .company-sub { font-size: 11px; color: #047857; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin: 2px 0 8px 0; }
@@ -3854,6 +3864,11 @@ Terimakasih🙏`;
 
     return `
       <div class="invoice-box">
+        ${isLunas ? `
+        <div class="paid-stamp">
+          <div class="stamp-title">LUNAS</div>
+          <div class="stamp-sub">PAID IN FULL</div>
+        </div>` : ''}
         <div class="kop-header">
           <div>
             <h1 class="company-logo-title">${compName}</h1>
@@ -3969,11 +3984,12 @@ Terimakasih🙏`;
             <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
             <div class="signature-space"></div>
             <p><strong>( ${compName} )</strong></p>
+            <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
           </div>
         </div>
 
         <div class="footer-note">
-          <p>Terima kasih atas kepercayaan Anda. Dokumen ini sah dan diterbitkan secara otomatis oleh sistem ERP WHISys.</p>
+          <p>Terima kasih atas kepercayaan Anda. Dokumen ini sah dan diterbitkan secara otomatis oleh sistem ERP WHISys — tanpa memerlukan tanda tangan basah maupun stempel perusahaan.</p>
         </div>
       </div>
     `;
