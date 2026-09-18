@@ -3434,7 +3434,7 @@ Terimakasih🙏`;
     // Rekening & A.N), biar nggak makan tempat walau rekeningnya lebih dari
     // satu.
     const bankAccountsHtml = bankAccountsList.map(acc => `
-              <div style="margin-top: 2px;">Bank <strong>${acc.bankName}</strong> — No. Rek: <strong>${acc.bankAccount}</strong></div>`
+              <div class="bank-row"><strong>${acc.bankName}</strong><br>No. Rek: <strong>${acc.bankAccount}</strong></div>`
     ).join('');
 
     return {
@@ -3583,8 +3583,7 @@ Terimakasih🙏`;
           <div class="summary-footer-left">
             <div class="bank-info">
               <h5>Informasi Pembayaran / Transfer:</h5>
-              <div>Silakan lakukan pembayaran melalui rekening resmi perusahaan:</div>
-              <div class="bank-details" style="margin-top: 6px;">
+              <div class="bank-details">
                 ${bankAccountsHtml}
               </div>
             </div>
@@ -3679,12 +3678,14 @@ Terimakasih🙏`;
             .summary-table td { padding: 8px 12px; }
             .summary-header-row { background-color: #f1f5f9; font-weight: bold; }
             .summary-table .total-row { font-size: 14px; font-weight: bold; color: #0f172a; background-color: #f8fafc; border-top: 2px solid #cbd5e1; }
-            .summary-footer-grid { display: grid; grid-template-columns: 1fr 500px; gap: 20px; align-items: start; margin-bottom: 20px; }
-            .summary-footer-left { display: flex; flex-direction: column; gap: 14px; }
-            .bank-info { background-color: #f0fdf4; border: 1px dashed #a7f3d0; padding: 12px 15px; border-radius: 8px; font-size: 11px; color: #065f46; }
-            .bank-info h5 { margin: 0 0 6px 0; font-size: 12px; color: #047857; text-transform: uppercase; letter-spacing: 0.5px; }
-            .signature-box { text-align: center; font-size: 11px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 14px; }
-            .signature-space { height: 50px; position: relative; }
+            .summary-footer-grid { display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: start; margin-bottom: 20px; }
+            .summary-footer-left { display: flex; flex-direction: column; gap: 10px; }
+            .bank-info { background-color: #f0fdf4; border: 1px dashed #a7f3d0; padding: 10px 12px; border-radius: 8px; font-size: 10.5px; color: #065f46; line-height: 1.5; }
+            .bank-info h5 { margin: 0 0 4px 0; font-size: 11px; color: #047857; text-transform: uppercase; letter-spacing: 0.5px; }
+            .bank-info .bank-row { margin-top: 3px; padding-top: 3px; border-top: 1px dashed #bbf7d0; }
+            .bank-info .bank-row:first-of-type { margin-top: 4px; padding-top: 0; border-top: none; }
+            .signature-box { text-align: center; font-size: 10.5px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+            .signature-space { height: 44px; position: relative; }
             .footer-note { text-align: center; font-size: 10px; color: #94a3b8; margin-top: 25px; border-top: 1px solid #f1f5f9; padding-top: 10px; }
             @media print { body { padding: 0; } .invoice-box { border: none; padding: 0; } }
           </style>
@@ -3939,8 +3940,7 @@ Terimakasih🙏`;
           <div class="summary-footer-left">
             <div class="bank-info">
               <h5>Informasi Pembayaran / Transfer:</h5>
-              <div>Silakan lakukan pembayaran melalui rekening resmi perusahaan:</div>
-              <div class="bank-details" style="margin-top: 6px;">
+              <div class="bank-details">
                 ${bankAccountsHtml}
               </div>
             </div>
