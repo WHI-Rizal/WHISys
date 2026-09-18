@@ -3629,21 +3629,23 @@ Terimakasih🙏`;
           </table>
         </div>
 
-        <div class="signature-box">
-          <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
-          <div class="signature-space">
-            ${isLunas ? `
-            <div class="paid-stamp">
-              <div class="stamp-title">LUNAS</div>
-              <div class="stamp-sub">PAID IN FULL</div>
-            </div>` : ''}
+        <div class="final-footer-grid">
+          <div class="signature-box">
+            <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
+            <div class="signature-space">
+              ${isLunas ? `
+              <div class="paid-stamp">
+                <div class="stamp-title">LUNAS</div>
+                <div class="stamp-sub">PAID IN FULL</div>
+              </div>` : ''}
+            </div>
+            <p><strong>( ${compName} )</strong></p>
+            <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
           </div>
-          <p><strong>( ${compName} )</strong></p>
-          <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
-        </div>
 
-        <div class="footer-note">
-          <p>Terima kasih atas kepercayaan Anda. Dokumen ini sah dan diterbitkan secara otomatis oleh sistem ERP WHISys — tanpa memerlukan tanda tangan basah maupun stempel perusahaan.</p>
+          <div class="footer-note">
+            <p>Terima kasih atas kepercayaan Anda. Dokumen ini sah dan diterbitkan secara otomatis oleh sistem ERP WHISys — tanpa memerlukan tanda tangan basah maupun stempel perusahaan.</p>
+          </div>
         </div>
       </div>
     `;
@@ -3679,15 +3681,16 @@ Terimakasih🙏`;
             .summary-table td { padding: 8px 12px; }
             .summary-header-row { background-color: #f1f5f9; font-weight: bold; }
             .summary-table .total-row { font-size: 14px; font-weight: bold; color: #0f172a; background-color: #f8fafc; border-top: 2px solid #cbd5e1; }
-            .summary-footer-grid { display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: start; margin-bottom: 20px; }
+            .summary-footer-grid { display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: stretch; margin-bottom: 20px; }
             .summary-footer-left { display: flex; flex-direction: column; gap: 10px; }
-            .bank-info { background-color: #f0fdf4; border: 1px dashed #a7f3d0; padding: 10px 12px; border-radius: 8px; font-size: 10.5px; color: #065f46; line-height: 1.5; }
+            .bank-info { background-color: #f0fdf4; border: 1px dashed #a7f3d0; padding: 10px 12px; border-radius: 8px; font-size: 10.5px; color: #065f46; line-height: 1.5; box-sizing: border-box; flex: 1; }
             .bank-info h5 { margin: 0 0 4px 0; font-size: 11px; color: #047857; text-transform: uppercase; letter-spacing: 0.5px; }
             .bank-info .bank-row { margin-top: 3px; padding-top: 3px; border-top: 1px dashed #bbf7d0; }
             .bank-info .bank-row:first-of-type { margin-top: 4px; padding-top: 0; border-top: none; }
-            .signature-box { max-width: 260px; margin-left: auto; text-align: center; font-size: 10.5px; color: #64748b; border-top: 1px solid #e2e8f0; margin-top: 6px; padding-top: 14px; }
+            .final-footer-grid { display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: center; margin-top: 6px; border-top: 1px solid #e2e8f0; padding-top: 14px; }
+            .signature-box { text-align: center; font-size: 10.5px; color: #64748b; }
             .signature-space { height: 44px; position: relative; }
-            .footer-note { text-align: center; font-size: 10px; color: #94a3b8; margin-top: 25px; border-top: 1px solid #f1f5f9; padding-top: 10px; }
+            .footer-note { text-align: left; font-size: 10px; color: #94a3b8; }
             @media print { body { padding: 0; } .invoice-box { border: none; padding: 0; } }
           </style>
         </head>
@@ -3984,21 +3987,23 @@ Terimakasih🙏`;
           </table>
         </div>
 
-        <div class="signature-box">
-          <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
-          <div class="signature-space">
-            ${isLunas ? `
-            <div class="paid-stamp">
-              <div class="stamp-title">LUNAS</div>
-              <div class="stamp-sub">PAID IN FULL</div>
-            </div>` : ''}
+        <div class="final-footer-grid">
+          <div class="signature-box">
+            <p>Jakarta, ${new Date().toLocaleDateString('id-ID')}<br>Finance & Billing Dept.</p>
+            <div class="signature-space">
+              ${isLunas ? `
+              <div class="paid-stamp">
+                <div class="stamp-title">LUNAS</div>
+                <div class="stamp-sub">PAID IN FULL</div>
+              </div>` : ''}
+            </div>
+            <p><strong>( ${compName} )</strong></p>
+            <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
           </div>
-          <p><strong>( ${compName} )</strong></p>
-          <p class="validity-note">Sah tanpa tanda tangan &amp; stempel basah</p>
-        </div>
 
-        <div class="footer-note">
-          <p>Terima kasih atas kepercayaan Anda. Dokumen ini sah dan diterbitkan secara otomatis oleh sistem ERP WHISys — tanpa memerlukan tanda tangan basah maupun stempel perusahaan.</p>
+          <div class="footer-note">
+            <p>Terima kasih atas kepercayaan Anda. Dokumen ini sah dan diterbitkan secara otomatis oleh sistem ERP WHISys — tanpa memerlukan tanda tangan basah maupun stempel perusahaan.</p>
+          </div>
         </div>
       </div>
     `;
