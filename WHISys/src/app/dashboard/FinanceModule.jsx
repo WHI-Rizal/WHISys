@@ -2385,6 +2385,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       'Nama TC',
       'Tanggal Transaksi',
       'Kode Booking',
+      'Total Pax',
       'Pemesan',
       'Kategori Destinasi',
       'Nama Paket',
@@ -2424,7 +2425,6 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       });
       return Object.values(byGroup).map(g => ({
         ...g,
-        pemesanLabel: `${g.pax} pax ${g.ordererName}`,
         amount: includeAmount ? g.amount : '',
       }));
     };
@@ -2442,7 +2442,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         r.tcName,
         r.txDateRaw ? formatDateDDMMYYYY(r.txDateRaw) : '-',
         r.bookingCode,
-        r.pemesanLabel,
+        r.pax,
+        r.ordererName,
         r.destCategory,
         r.packageName,
         r.departureDate,
@@ -2451,8 +2452,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       ]);
     });
 
-    rows.push(['TOTAL', '', '', '', '', '', '', '', closingTcGrandTotal.totalClosing]);
-    rows.push(['JUMLAH PAX', '', '', '', '', '', '', '', closingTcGrandTotal.totalPax]);
+    rows.push(['TOTAL', '', '', '', '', '', '', '', '', closingTcGrandTotal.totalClosing]);
+    rows.push(['JUMLAH PAX', '', '', closingTcGrandTotal.totalPax, '', '', '', '', '', '']);
 
     // BOM di depan biar Excel baca UTF-8 dengan benar (nama TC/destinasi
     // yang pakai karakter non-ASCII nggak jadi karakter aneh pas dibuka).
