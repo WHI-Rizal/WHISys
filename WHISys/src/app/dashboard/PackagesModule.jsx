@@ -124,8 +124,8 @@ const DEFAULT_PRICE_INCLUDES = [
   'Private Bus AC',
   'Tiket Wisata sesuai program',
   'Makan sesuai program',
-  'Tour Leader dari Jakarta',
-  'Guide Lokal Muslim'
+  'Tour Leader Muslim',
+  'Lokal Guide'
 ];
 
 // Item default "Harga Tidak Termasuk" — beda dari Harga Termasuk, tiap baris
