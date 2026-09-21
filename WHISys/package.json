@@ -9,7 +9,6 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@google/genai": "^2.16.0",
     "autoprefixer": "^10.4.19",
     "firebase": "^10.0.0",
     "firebase-admin": "^14.3.0",
