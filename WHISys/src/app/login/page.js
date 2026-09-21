@@ -120,8 +120,8 @@ export default function LoginPage() {
             <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-amber-400 border-2 border-slate-900"></span>
             <span className="absolute -bottom-1 -left-2 w-3 h-3 rounded-full bg-rose-400 border-2 border-slate-900"></span>
           </div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Selamat Datang</h1>
-          <p className="text-xs text-slate-400 mt-2">Masuk ke WHISys ERP untuk lanjut kelola operasional Umrah, Haji & Wisata Halal.</p>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Hallo, Teman!</h1>
+          <p className="text-xs text-slate-400 mt-2">Masuk ke WHISys ERP untuk lanjut kelola operasional Wisata Halal Internasional yuk!.</p>
         </div>
 
         {error && (
