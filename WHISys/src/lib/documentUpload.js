@@ -47,6 +47,17 @@ export const DOC_KEYS = Object.keys(DOC_LABELS);
 export const MAX_UPLOAD_MB = 8;
 export const ALLOWED_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'];
 
+// Format tanggal keberangkatan buat nama folder Drive (mis. "12 Desember
+// 2026") — di-format di sini (JS biasa), BUKAN di sisi Code.gs, biar Apps
+// Script nggak perlu mikirin locale/format tanggal Indonesia sama sekali,
+// cukup terima string yang udah jadi.
+export const formatFolderDate = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+};
+
 // Ubah File jadi base64 murni (tanpa prefix "data:...;base64,") — format
 // yang dipahami Code.gs di sisi Apps Script buat di-decode balik jadi file.
 export const fileToBase64 = (file) => new Promise((resolve, reject) => {
@@ -76,7 +87,14 @@ export const validateUploadFile = (file, label) => {
 // Kirim file ke Google Apps Script Web App, balikin { url, fileName } kalau
 // sukses. Melempar Error kalau APPS_SCRIPT_URL belum di-setup atau upload
 // gagal — pemanggil (Portal/Dashboard) yang nangkep & tampilin pesannya.
-export const uploadDocumentFile = async ({ bookingId, bookingCode, docKey, file }) => {
+//
+// packageName & departureDate (opsional) dipakai Code.gs buat nyusun folder
+// Drive-nya jadi Root > "{packageName} - {tgl keberangkatan}" > "{bookingCode}
+// - {bookingId}" > file — biar dokumen jamaah kegrup per keberangkatan
+// (21 Sep 2026, permintaan user), bukan numpuk rata per-booking langsung di
+// root. Kalau kosong (data booking lama yang belum lengkap), Code.gs fallback
+// ke folder "Paket Tidak Diketahui".
+export const uploadDocumentFile = async ({ bookingId, bookingCode, packageName, departureDate, docKey, file }) => {
   if (APPS_SCRIPT_URL.startsWith('GANTI_DENGAN')) {
     throw new Error('Fitur upload belum aktif — URL Google Apps Script belum dipasang (lihat komentar di src/lib/documentUpload.js).');
   }
@@ -90,6 +108,8 @@ export const uploadDocumentFile = async ({ bookingId, bookingCode, docKey, file 
     body: JSON.stringify({
       bookingId,
       bookingCode: bookingCode || '',
+      packageName: packageName || '',
+      departureDateLabel: formatFolderDate(departureDate),
       docKey,
       fileName: file.name,
       mimeType: file.type,
