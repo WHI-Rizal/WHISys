@@ -1,6 +1,21 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenAI } from '@google/genai';
 import { getAdminAuth } from '../../../lib/firebaseAdmin';
+
+// Perbaikan 18 Sep 2026 — AI Analyzer dipindah dari Gemini API ke Claude
+// (Anthropic API), atas permintaan user. Dipanggil langsung pakai fetch()
+// ke REST API Anthropic (BUKAN pakai SDK `@anthropic-ai/sdk`) — sengaja
+// biar nggak nambah dependency npm baru sama sekali, setelah kejadian
+// bug `jose`/`jwks-rsa` (ERR_REQUIRE_ESM) yang bikin Portal Customer &
+// endpoint ini mati total gara-gara masalah kompatibilitas paket pihak
+// ketiga. fetch() ke REST API murni jauh lebih kecil resikonya.
+//
+// SETUP YANG DIBUTUHKAN: env var `ANTHROPIC_API_KEY` di Vercel (dari
+// https://console.anthropic.com -> Settings -> API Keys). Model default
+// `claude-haiku-4-5-20251001` (cepat & murah, cocok buat jawaban singkat
+// 2-3 kalimat kayak yang dipakai AI Analyzer) — bisa di-upgrade ke model
+// lain (mis. `claude-sonnet-5`) lewat env var `ANTHROPIC_MODEL` kalau
+// butuh analisis yang lebih tajam, tanpa perlu ubah kode ini.
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
 
 // Perbaikan 18 Sep 2026 (temuan audit MEDIUM, 9 Sep & 17 Sep) — endpoint
 // ini sebelumnya nerima `promptText` dan langsung manggil Gemini API tanpa
@@ -64,25 +79,43 @@ export async function POST(req) {
     const { promptText } = await req.json();
 
     // Mengambil API Key secara aman dari Server Environment
-    const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
 
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'API Key Gemini belum dipasang di Environment Variables.' },
+        { error: 'ANTHROPIC_API_KEY belum dipasang di Environment Variables server — ambil dari console.anthropic.com > Settings > API Keys, lalu tambahin di Vercel.' },
         { status: 400 }
       );
     }
 
-    const ai = new GoogleGenAI({ apiKey });
-
-    // Pakai Interactions API (pengganti resmi generateContent) & model
-    // Gemini 3 yang masih aktif untuk akun/API key baru.
-    const interaction = await ai.interactions.create({
-      model: 'gemini-3.5-flash-lite',
-      input: promptText,
+    const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: promptText }],
+      }),
     });
 
-    const aiAnswer = interaction.output_text || 'Tidak ada hasil analisis.';
+    const anthropicData = await anthropicRes.json();
+
+    if (!anthropicRes.ok) {
+      // Format error Anthropic: { type: 'error', error: { type, message } }
+      const apiErrMsg = anthropicData?.error?.message || `Anthropic API mengembalikan status ${anthropicRes.status}.`;
+      console.error('Anthropic API error:', anthropicData);
+      return NextResponse.json({ error: apiErrMsg }, { status: anthropicRes.status });
+    }
+
+    const aiAnswer = (anthropicData.content || [])
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('\n')
+      .trim() || 'Tidak ada hasil analisis.';
 
     return NextResponse.json({ text: aiAnswer });
   } catch (err) {
