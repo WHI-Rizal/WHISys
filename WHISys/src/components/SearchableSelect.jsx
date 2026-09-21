@@ -185,9 +185,15 @@ export default function SearchableSelect({
                     : isDark ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50'
                 }`}
               >
-                <div className="truncate">{o.label}</div>
+                {/* Label opsi SENGAJA nggak di-truncate/dipotong 1 baris (beda
+                    dari tombol trigger di atas) — daftar paket keberangkatan
+                    nama+tanggalnya bisa panjang, kalau dipotong di HP jadi
+                    keliatan sama antar paket beda tanggal dan staf salah
+                    pilih. Dibiarin wrap ke beberapa baris biar nama LENGKAP
+                    (termasuk tanggal keberangkatannya) selalu kebaca utuh. */}
+                <div className="whitespace-normal break-words leading-snug">{o.label}</div>
                 {o.sublabel && (
-                  <div className={`text-[10px] truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  <div className={`text-[10px] whitespace-normal break-words mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                     {o.sublabel}
                   </div>
                 )}
