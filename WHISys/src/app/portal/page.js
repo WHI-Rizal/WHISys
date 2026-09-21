@@ -5,7 +5,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
   LogIn, LogOut, Loader2, AlertTriangle, Plane, Wallet, FileCheck, CheckCircle2,
-  XCircle, Ban, RotateCcw, Clock, ShieldCheck, Download, Gauge, Upload, Eye
+  XCircle, Ban, RotateCcw, Clock, ShieldCheck, Download, Gauge, Upload, Eye, Sun, Moon
 } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 import { APPS_SCRIPT_URL, DOC_LABELS, DOC_KEYS, MAX_UPLOAD_MB, ALLOWED_UPLOAD_TYPES, validateUploadFile, uploadDocumentFile } from '@/lib/documentUpload';
@@ -52,6 +52,17 @@ import { APPS_SCRIPT_URL, DOC_LABELS, DOC_KEYS, MAX_UPLOAD_MB, ALLOWED_UPLOAD_TY
 // ============================================================================
 
 const SESSION_KEY = 'whi_portal_session';
+
+// Preferensi Mode Terang/Gelap Portal Jamaah — DIPISAH dari sesi login
+// (session pakai sessionStorage, ilang kalau tab ditutup), sengaja pakai
+// localStorage biar preferensinya NEMPEL terus walau customer logout/login
+// ulang atau buka tab baru. Ditambahin 21 Sep 2026: banyak jamaah yang pakai
+// portal ini usianya nggak muda lagi, dan dark mode (skema warna dashboard
+// staf yang tadinya ikut dipakai di sini) ternyata bikin teksnya susah
+// dibaca buat mereka. DEFAULT-nya sekarang 'light' (mode terang) kalau
+// belum pernah milih sebelumnya — beda dari Dashboard staf yang default-nya
+// 'dark' (staf lebih muda & lebih sering pegang HP/laptop lama-lama).
+const PORTAL_THEME_KEY = 'whi_portal_theme';
 
 // DOC_LABELS, DOC_KEYS, APPS_SCRIPT_URL, MAX_UPLOAD_MB, ALLOWED_UPLOAD_TYPES,
 // dan helper upload (fileToBase64 dibungkus di dalam uploadDocumentFile)
@@ -130,6 +141,28 @@ const statusBadge = (status) => {
 export default function PortalPage() {
   const [session, setSession] = useState(null);
   const [restoringSession, setRestoringSession] = useState(true);
+
+  // Mode Terang/Gelap — default 'light' (lihat catatan PORTAL_THEME_KEY di
+  // atas), dipulihin dari localStorage begitu halaman dibuka.
+  const [theme, setTheme] = useState('light');
+  const isDark = theme === 'dark';
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(PORTAL_THEME_KEY);
+      if (saved === 'light' || saved === 'dark') setTheme(saved);
+    } catch {
+      // ignore — kalau localStorage diblokir browser, tetap pakai default light
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem(PORTAL_THEME_KEY, next); } catch { /* ignore */ }
+      return next;
+    });
+  };
 
   const [loginForm, setLoginForm] = useState({ customerCode: '', birthDate: '' });
   const [loggingIn, setLoggingIn] = useState(false);
@@ -480,68 +513,96 @@ export default function PortalPage() {
 
   if (restoringSession) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className={`min-h-screen flex items-center justify-center ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
         <Loader2 className="w-6 h-6 text-emerald-500 animate-spin" />
       </div>
     );
   }
 
+  // Tombol switch Mode Terang/Gelap — dipakai bareng di halaman Login &
+  // Dashboard, sengaja komponen kecil terpisah biar konsisten posisi &
+  // gayanya, dan gampang dipindah kalau nanti layoutnya berubah.
+  const ThemeToggleButton = () => (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      title={isDark ? 'Ganti ke Mode Terang' : 'Ganti ke Mode Gelap'}
+      className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-all ${
+        isDark
+          ? 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300'
+          : 'bg-white hover:bg-slate-100 border-slate-200 text-slate-600 shadow-sm'
+      }`}
+    >
+      {isDark ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-indigo-600" />}
+      {isDark ? 'Mode Terang' : 'Mode Gelap'}
+    </button>
+  );
+
   // ================= HALAMAN LOGIN =================
   if (!session) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-xl">
-          <div className="text-center mb-6">
-            <div className="w-14 h-14 rounded-full bg-emerald-600/15 flex items-center justify-center mx-auto mb-3">
-              <Plane className="w-7 h-7 text-emerald-500" />
-            </div>
-            <h1 className="text-xl font-bold text-white">Portal Jamaah</h1>
-            <p className="text-xs text-slate-400 mt-1">Wisata Halal Indonesia</p>
+      <div className={`min-h-screen flex items-center justify-center p-4 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
+        <div className="w-full max-w-md">
+          <div className="flex justify-end mb-3">
+            <ThemeToggleButton />
           </div>
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block mb-1 text-xs font-medium text-slate-300">Kode Jamaah</label>
-              <input
-                type="text"
-                required
-                placeholder="Contoh: CST002001"
-                className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-lg p-2.5 text-sm font-mono focus:outline-none focus:border-emerald-500"
-                value={loginForm.customerCode}
-                onChange={(e) => setLoginForm({ ...loginForm, customerCode: e.target.value })}
-              />
-              <p className="text-[10px] text-slate-500 mt-1">Kode ini ada di bukti booking / dikirim tim kami lewat WhatsApp.</p>
-            </div>
-            <div>
-              <label className="block mb-1 text-xs font-medium text-slate-300">Tanggal Lahir</label>
-              <DateFieldID
-                className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-lg p-2.5 text-sm"
-                nativeClassName="[color-scheme:dark]"
-                value={loginForm.birthDate}
-                onChange={(val) => setLoginForm({ ...loginForm, birthDate: val })}
-              />
-            </div>
-
-            {loginError && (
-              <div className="flex items-start gap-2 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs rounded-lg p-3">
-                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{loginError}</span>
+          <div className={`border rounded-2xl p-8 shadow-xl ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+            <div className="text-center mb-6">
+              <div className="w-14 h-14 rounded-full bg-emerald-600/15 flex items-center justify-center mx-auto mb-3">
+                <Plane className="w-7 h-7 text-emerald-500" />
               </div>
-            )}
+              <h1 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Portal Jamaah</h1>
+              <p className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Wisata Halal Indonesia</p>
+            </div>
 
-            <button
-              type="submit"
-              disabled={loggingIn}
-              className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-lg text-sm font-medium transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {loggingIn ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
-              {loggingIn ? 'Memeriksa...' : 'Masuk'}
-            </button>
-          </form>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className={`block mb-1 text-xs font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Kode Jamaah</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: CST002001"
+                  className={`w-full rounded-lg p-2.5 text-sm font-mono border focus:outline-none focus:border-emerald-500 ${
+                    isDark ? 'bg-slate-950 text-slate-200 border-slate-800' : 'bg-white text-slate-800 border-slate-300'
+                  }`}
+                  value={loginForm.customerCode}
+                  onChange={(e) => setLoginForm({ ...loginForm, customerCode: e.target.value })}
+                />
+                <p className={`text-[10px] mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Kode ini ada di bukti booking / dikirim tim kami lewat WhatsApp.</p>
+              </div>
+              <div>
+                <label className={`block mb-1 text-xs font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Tanggal Lahir</label>
+                <DateFieldID
+                  className={`w-full rounded-lg p-2.5 text-sm border ${
+                    isDark ? 'bg-slate-950 text-slate-200 border-slate-800' : 'bg-white text-slate-800 border-slate-300'
+                  }`}
+                  nativeClassName={isDark ? '[color-scheme:dark]' : '[color-scheme:light]'}
+                  value={loginForm.birthDate}
+                  onChange={(val) => setLoginForm({ ...loginForm, birthDate: val })}
+                />
+              </div>
 
-          <div className="flex items-start gap-2 text-[10px] text-slate-500 mt-6">
-            <ShieldCheck className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-            <span>Belum pernah dapat Kode Jamaah, atau tanggal lahir belum terdaftar? Hubungi tim kami lewat WhatsApp buat dibantu.</span>
+              {loginError && (
+                <div className="flex items-start gap-2 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs rounded-lg p-3">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{loginError}</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loggingIn}
+                className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-lg text-sm font-medium transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {loggingIn ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
+                {loggingIn ? 'Memeriksa...' : 'Masuk'}
+              </button>
+            </form>
+
+            <div className={`flex items-start gap-2 text-[10px] mt-6 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              <ShieldCheck className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>Belum pernah dapat Kode Jamaah, atau tanggal lahir belum terdaftar? Hubungi tim kami lewat WhatsApp buat dibantu.</span>
+            </div>
           </div>
         </div>
       </div>
@@ -550,20 +611,25 @@ export default function PortalPage() {
 
   // ================= HALAMAN DASHBOARD (VIEW-ONLY) =================
   return (
-    <div className="min-h-screen bg-slate-950 p-4 sm:p-8">
+    <div className={`min-h-screen p-4 sm:p-8 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
       <div className="max-w-3xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <p className="text-xs text-slate-500">Selamat datang,</p>
-            <h1 className="text-lg font-bold text-white">{session.fullName || session.customerCode}</h1>
+            <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>Selamat datang,</p>
+            <h1 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{session.fullName || session.customerCode}</h1>
             <p className="text-[11px] font-mono text-emerald-500">{session.customerCode}</p>
           </div>
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 px-3 py-2 rounded-lg text-xs"
-          >
-            <LogOut className="w-3.5 h-3.5" /> Keluar
-          </button>
+          <div className="flex items-center gap-2">
+            <ThemeToggleButton />
+            <button
+              onClick={handleLogout}
+              className={`flex items-center gap-1.5 border px-3 py-2 rounded-lg text-xs ${
+                isDark ? 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300' : 'bg-white hover:bg-slate-100 border-slate-200 text-slate-600 shadow-sm'
+              }`}
+            >
+              <LogOut className="w-3.5 h-3.5" /> Keluar
+            </button>
+          </div>
         </div>
 
         {uploadError && (
@@ -578,7 +644,7 @@ export default function PortalPage() {
             <Loader2 className="w-4 h-4 animate-spin" /> Memuat data booking...
           </div>
         ) : bookings.length === 0 ? (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center text-slate-400 text-sm">
+          <div className={`border rounded-xl p-8 text-center text-sm ${isDark ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-500'}`}>
             Belum ada data booking atas nama Anda di sistem kami.
           </div>
         ) : (
@@ -594,11 +660,11 @@ export default function PortalPage() {
             const isReadyComplete = readyCount === DOC_KEYS.length;
 
             return (
-              <div key={bk.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-                <div className="p-5 border-b border-slate-800 flex flex-wrap items-start justify-between gap-3">
+              <div key={bk.id} className={`border rounded-xl overflow-hidden ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'}`}>
+                <div className={`p-5 border-b flex flex-wrap items-start justify-between gap-3 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                   <div>
-                    <p className="text-[10px] font-mono text-slate-500">{bk.bookingCode}</p>
-                    <h2 className="text-sm font-bold text-white flex items-center gap-2 mt-0.5">
+                    <p className={`text-[10px] font-mono ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{bk.bookingCode}</p>
+                    <h2 className={`text-sm font-bold flex items-center gap-2 mt-0.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>
                       <Plane className="w-4 h-4 text-emerald-500" /> {bk.packageName || '-'}
                     </h2>
                     {/* Nama peserta booking INI — penting ditampilin begitu Pemesan
@@ -606,9 +672,9 @@ export default function PortalPage() {
                         sekaligus (punya beberapa peserta), biar nggak keliru
                         booking siapa yang lagi dilihat. */}
                     {bk.jamaahName && (
-                      <p className="text-xs text-slate-300 mt-1">Peserta: <span className="font-medium text-white">{bk.jamaahName}</span></p>
+                      <p className={`text-xs mt-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Peserta: <span className={`font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>{bk.jamaahName}</span></p>
                     )}
-                    <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
+                    <p className={`text-xs mt-1 flex items-center gap-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                       <Clock className="w-3.5 h-3.5" /> Keberangkatan: {formatTanggal(bk.departureDate)}
                     </p>
                   </div>
@@ -620,34 +686,36 @@ export default function PortalPage() {
                 {/* KESIAPAN BERANGKAT — persentase kelengkapan dokumen, biar
                     jamaah langsung ngerti seberapa "siap" dia berangkat
                     tanpa harus nge-scroll & itung-itung sendiri satu-satu. */}
-                <div className="px-5 py-4 border-b border-slate-800">
+                <div className={`px-5 py-4 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                   <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
+                    <p className={`text-xs font-medium flex items-center gap-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                       <Gauge className="w-3.5 h-3.5 text-emerald-500" /> Kesiapan Berangkat
                     </p>
                     <span className={`text-xs font-bold ${isReadyComplete ? 'text-emerald-500' : 'text-amber-500'}`}>
                       {readyPercent}%
                     </span>
                   </div>
-                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                  <div className={`w-full h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>
                     <div
                       className={`h-full rounded-full transition-all ${isReadyComplete ? 'bg-emerald-500' : 'bg-amber-500'}`}
                       style={{ width: `${readyPercent}%` }}
                     />
                   </div>
-                  <p className="text-[10px] text-slate-500 mt-1.5">{readyCount} dari {DOC_KEYS.length} dokumen sudah lengkap.</p>
+                  <p className={`text-[10px] mt-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{readyCount} dari {DOC_KEYS.length} dokumen sudah lengkap.</p>
                 </div>
 
-                <div className="p-5 border-b border-slate-800">
+                <div className={`p-5 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                   <div className="flex items-center justify-between mb-3">
-                    <p className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
+                    <p className={`text-xs font-medium flex items-center gap-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                       <Wallet className="w-3.5 h-3.5 text-emerald-500" /> Status Pembayaran
                     </p>
                     <button
                       type="button"
                       onClick={() => handleDownloadReceipt(bk)}
                       disabled={generatingReceiptId === bk.id}
-                      className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all disabled:opacity-60 disabled:cursor-not-allowed ${
+                        isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                      }`}
                     >
                       {generatingReceiptId === bk.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
                       Kwitansi
@@ -655,25 +723,25 @@ export default function PortalPage() {
                   </div>
                   <div className="grid grid-cols-3 gap-3 text-center">
                     <div>
-                      <p className="text-[10px] text-slate-500">Total Paket</p>
-                      <p className="text-xs font-bold text-white">{formatRupiah(totalAmount)}</p>
+                      <p className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Total Paket</p>
+                      <p className={`text-xs font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{formatRupiah(totalAmount)}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] text-slate-500">Sudah Dibayar</p>
+                      <p className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Sudah Dibayar</p>
                       <p className="text-xs font-bold text-emerald-500">{formatRupiah(totalPaid)}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] text-slate-500">Sisa Tagihan</p>
+                      <p className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Sisa Tagihan</p>
                       <p className={`text-xs font-bold ${sisaTagihan > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>{formatRupiah(sisaTagihan)}</p>
                     </div>
                   </div>
                 </div>
 
                 <div className="p-5">
-                  <p className="text-xs font-medium text-slate-300 flex items-center gap-1.5 mb-3">
+                  <p className={`text-xs font-medium flex items-center gap-1.5 mb-3 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                     <FileCheck className="w-3.5 h-3.5 text-emerald-500" /> Kelengkapan Dokumen
                   </p>
-                  <p className="text-[10px] text-slate-500 -mt-2 mb-3">
+                  <p className={`text-[10px] -mt-2 mb-3 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                     Belum sempat kirim dokumen ke kami? Upload langsung di sini aja (foto/PDF, maks {MAX_UPLOAD_MB}MB).
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -684,7 +752,11 @@ export default function PortalPage() {
                       const stateKey = `${bk.id}-${key}`;
                       const isUploading = uploadingKey === stateKey;
                       return (
-                        <div key={key} className={`flex items-center justify-between gap-2 text-[11px] rounded-lg px-2.5 py-2 ${done ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800/60 text-slate-500'}`}>
+                        <div key={key} className={`flex items-center justify-between gap-2 text-[11px] rounded-lg px-2.5 py-2 ${
+                          done
+                            ? 'bg-emerald-500/10 text-emerald-500'
+                            : isDark ? 'bg-slate-800/60 text-slate-500' : 'bg-slate-100 text-slate-400'
+                        }`}>
                           <span className="flex items-center gap-1.5 min-w-0">
                             {done ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <XCircle className="w-3.5 h-3.5 shrink-0" />}
                             <span className="truncate">{label}</span>
@@ -696,7 +768,9 @@ export default function PortalPage() {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 title="Lihat file yang sudah diupload (Google Drive)"
-                                className="flex items-center gap-1 bg-slate-950/40 hover:bg-slate-950/70 px-1.5 py-1 rounded text-[10px] font-medium"
+                                className={`flex items-center gap-1 px-1.5 py-1 rounded text-[10px] font-medium ${
+                                  isDark ? 'bg-slate-950/40 hover:bg-slate-950/70' : 'bg-black/5 hover:bg-black/10'
+                                }`}
                               >
                                 <Eye className="w-3 h-3" /> Lihat
                               </a>
@@ -706,7 +780,9 @@ export default function PortalPage() {
                               disabled={isUploading}
                               onClick={() => fileInputRefs.current[stateKey]?.click()}
                               title={fileInfo ? 'Ganti file' : 'Upload file'}
-                              className="flex items-center gap-1 bg-slate-950/40 hover:bg-slate-950/70 px-1.5 py-1 rounded text-[10px] font-medium disabled:opacity-60"
+                              className={`flex items-center gap-1 px-1.5 py-1 rounded text-[10px] font-medium disabled:opacity-60 ${
+                                isDark ? 'bg-slate-950/40 hover:bg-slate-950/70' : 'bg-black/5 hover:bg-black/10'
+                              }`}
                             >
                               {isUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
                               {fileInfo ? 'Ganti' : 'Upload'}
