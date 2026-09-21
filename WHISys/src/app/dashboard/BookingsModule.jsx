@@ -5721,7 +5721,7 @@ Terimakasih🙏`;
                   options={packagesList.map(p => ({
                     value: p.id,
                     label: `${p.name} (${p.code})`,
-                    sublabel: `Sisa Seat: ${p.quotaRemaining ?? p.quotaTotal}`,
+                    sublabel: `Berangkat: ${formatDateDDMMYYYY(p.departureDate)} • Sisa Seat: ${p.quotaRemaining ?? p.quotaTotal}`,
                   }))}
                 />
                 {editingBookingId && (
@@ -6733,7 +6733,7 @@ Terimakasih🙏`;
                       .map(p => ({
                         value: p.id,
                         label: `${p.name} (${p.code})`,
-                        sublabel: `Sisa Seat: ${p.quotaRemaining ?? p.quotaTotal}`,
+                        sublabel: `Berangkat: ${formatDateDDMMYYYY(p.departureDate)} • Sisa Seat: ${p.quotaRemaining ?? p.quotaTotal}`,
                       }))}
                   />
                 </div>
@@ -7296,7 +7296,7 @@ Terimakasih🙏`;
                   options={packagesList.map(p => ({
                     value: p.id,
                     label: `${p.name} (${p.code})`,
-                    sublabel: `Sisa Seat: ${p.quotaRemaining ?? p.quotaTotal}`,
+                    sublabel: `Berangkat: ${formatDateDDMMYYYY(p.departureDate)} • Sisa Seat: ${p.quotaRemaining ?? p.quotaTotal}`,
                   }))}
                 />
                 <p className="text-[10px] mt-1 text-amber-500">
@@ -7711,7 +7711,7 @@ Terimakasih🙏`;
                     .map(p => ({
                       value: p.id,
                       label: `${p.name} (${p.code})`,
-                      sublabel: `Sisa Seat: ${p.quotaRemaining ?? p.quotaTotal}`,
+                      sublabel: `Berangkat: ${formatDateDDMMYYYY(p.departureDate)} • Sisa Seat: ${p.quotaRemaining ?? p.quotaTotal}`,
                     }))}
                 />
               </div>
@@ -7856,7 +7856,11 @@ Terimakasih🙏`;
                 placeholder="-- Pilih Paket --"
                 value={roomingPackageId}
                 onChange={(val) => setRoomingPackageId(val)}
-                options={packagesList.map(p => ({ value: p.id, label: `${p.name} (${p.code})` }))}
+                options={packagesList.map(p => ({
+                  value: p.id,
+                  label: `${p.name} (${p.code})`,
+                  sublabel: `Berangkat: ${formatDateDDMMYYYY(p.departureDate)}`,
+                }))}
               />
             </div>
 
@@ -7972,7 +7976,11 @@ Terimakasih🙏`;
                 placeholder="-- Pilih Paket --"
                 value={bulkFeedbackPackageId}
                 onChange={(val) => { setBulkFeedbackPackageId(val); setSentFeedbackIds([]); }}
-                options={packagesList.map(p => ({ value: p.id, label: `${p.name} (${p.code})` }))}
+                options={packagesList.map(p => ({
+                  value: p.id,
+                  label: `${p.name} (${p.code})`,
+                  sublabel: `Berangkat: ${formatDateDDMMYYYY(p.departureDate)}`,
+                }))}
               />
             </div>
 
