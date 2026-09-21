@@ -2338,14 +2338,57 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     return str;
   };
 
+  // Tarikan CSV "sales report" — 1 baris per booking (bukan lagi diringkas
+  // per TC+destinasi), biar HRD/TC bisa lihat rincian tiap transaksi:
+  // tanggal transaksi, kode booking, nama jamaah, paket, tgl keberangkatan,
+  // sampai nilai transaksinya. Diurutkan per Nama TC, lalu per tanggal
+  // transaksi (lama ke baru) biar enak ditelusuri.
   const handleDownloadClosingTcCSV = () => {
-    const rows = [['Nama TC', 'Kategori Destinasi', 'Jumlah Closingan', 'Jumlah Pax']];
-    closingTcSummary.forEach(tc => {
-      tc.byDestination.forEach(dest => {
-        rows.push([tc.tcName, dest.category, dest.closing, dest.pax]);
+    const rows = [[
+      'Nama TC',
+      'Tanggal Transaksi',
+      'Kode Booking',
+      'Nama Jamaah',
+      'Kategori Destinasi',
+      'Nama Paket',
+      'Tanggal Keberangkatan',
+      'Nilai Transaksi (Rp)',
+    ]];
+
+    const detailRows = closingTcBookingsInPeriod
+      .map(bk => {
+        const pkg = packagesList.find(p => p.id === bk.packageId);
+        return {
+          tcName: bk.closingSourceName || '(Tanpa Nama)',
+          txDateRaw: toLocalDateOnlyString(bk.createdAt) || '',
+          bookingCode: bk.bookingCode || bk.groupBookingCode || '-',
+          jamaahName: bk.jamaahName || '-',
+          destCategory: pkg?.destinationCity || 'Lainnya',
+          packageName: bk.packageName || pkg?.name || '-',
+          departureDate: bk.departureDate ? formatDateDDMMYYYY(bk.departureDate) : '-',
+          amount: Number(bk.totalAmount) || 0,
+        };
+      })
+      .sort((a, b) => {
+        if (a.tcName !== b.tcName) return a.tcName.localeCompare(b.tcName, 'id');
+        return a.txDateRaw.localeCompare(b.txDateRaw);
       });
+
+    detailRows.forEach(r => {
+      rows.push([
+        r.tcName,
+        r.txDateRaw ? formatDateDDMMYYYY(r.txDateRaw) : '-',
+        r.bookingCode,
+        r.jamaahName,
+        r.destCategory,
+        r.packageName,
+        r.departureDate,
+        r.amount,
+      ]);
     });
-    rows.push(['TOTAL', '', closingTcGrandTotal.totalClosing, closingTcGrandTotal.totalPax]);
+
+    rows.push(['TOTAL', '', '', '', '', '', '', closingTcGrandTotal.totalClosing]);
+    rows.push(['JUMLAH PAX', '', '', '', '', '', '', closingTcGrandTotal.totalPax]);
 
     // BOM di depan biar Excel baca UTF-8 dengan benar (nama TC/destinasi
     // yang pakai karakter non-ASCII nggak jadi karakter aneh pas dibuka).
@@ -3246,7 +3289,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                         <FileBarChart className="w-4 h-4 text-indigo-500" /> Laporan Closing TC & Komisi
                       </h4>
                       <p className={`text-xs ${styles.textSub} mt-1`}>
-                        Rekap jumlah closingan (omset) dan jumlah pax per Travel Consultant, dipecah per kategori destinasi.
+                        Rekap jumlah closingan (omset) dan jumlah pax per Travel Consultant, dipecah per kategori destinasi. Download CSV berisi rincian lengkap per booking (tanggal transaksi, kode booking, nama jamaah, dsb).
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
