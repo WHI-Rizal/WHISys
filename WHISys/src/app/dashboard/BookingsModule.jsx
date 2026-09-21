@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where, increment, runTransaction, writeBatch } from 'firebase/firestore';
-import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus, Eye, Link2 } from 'lucide-react';
+import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus, Eye, Link2, Upload, Loader2 } from 'lucide-react';
+import { validateUploadFile, uploadDocumentFile, ALLOWED_UPLOAD_TYPES } from '@/lib/documentUpload';
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN, addPPN } from '../../lib/ppn';
 import { getNextCustomerCode } from '../../lib/customerCode';
@@ -387,6 +388,66 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     visa: false,
     ticket: false
   });
+  // Upload dokumen LANGSUNG dari staf (OP) — buat kasus jamaah lansia/nggak
+  // paham buka Portal Jamaah sendiri. Staf pegang file fisik/foto dari
+  // jamaah (lewat WA/dikasih langsung), lalu upload dari sini. Pakai jalur
+  // upload yang SAMA persis kayak Portal (Google Apps Script -> Drive, lihat
+  // src/lib/documentUpload.js), tapi begitu dapet link-nya, disimpen
+  // langsung pakai updateDoc client SDK (staf sudah login Firebase Auth &
+  // Firestore Rules udah izinin staf nulis ke 'bookings') — TIDAK lewat
+  // endpoint /api/portal/documents (itu khusus sesi Portal Customer, staf
+  // nggak punya & nggak butuh token portal). Jadi TIDAK ada perubahan apapun
+  // ke celah akses Portal Jamaah yang udah ditutup — staf tetap wajib login
+  // dashboard staf seperti biasa, cuma nambah 1 tombol upload di modal yang
+  // sudah ada.
+  const [docUploadingKey, setDocUploadingKey] = useState(null);
+  const [docUploadError, setDocUploadError] = useState('');
+
+  const handleStaffUploadDocument = async (docKey, file) => {
+    if (!file || !selectedBookingForDoc) return;
+    setDocUploadError('');
+
+    const label = REQUIRED_DOCUMENTS.find((d) => d.key === docKey)?.label || docKey;
+    const validationErr = validateUploadFile(file, label);
+    if (validationErr) {
+      setDocUploadError(validationErr);
+      return;
+    }
+
+    setDocUploadingKey(docKey);
+    try {
+      const { url, fileName } = await uploadDocumentFile({
+        bookingId: selectedBookingForDoc.id,
+        bookingCode: selectedBookingForDoc.bookingCode || '',
+        docKey,
+        file,
+      });
+
+      const nextChecklist = { ...docChecklist, [docKey]: true };
+      await updateDoc(doc(db, 'bookings', selectedBookingForDoc.id), {
+        documents: nextChecklist,
+        [`documentFiles.${docKey}`]: {
+          url,
+          fileName,
+          uploadedAt: new Date().toISOString(),
+          uploadedBy: 'staff_dashboard',
+        },
+        updatedAt: new Date().toISOString(),
+      });
+
+      setDocChecklist(nextChecklist);
+      setSelectedBookingForDoc((prev) => prev && {
+        ...prev,
+        documents: nextChecklist,
+        documentFiles: { ...(prev.documentFiles || {}), [docKey]: { url, fileName } },
+      });
+      fetchData();
+    } catch (err) {
+      console.error('Gagal upload dokumen dari dashboard staf:', err);
+      setDocUploadError(`Gagal upload "${label}": ${err.message || 'coba lagi sebentar lagi.'}`);
+    }
+    setDocUploadingKey(null);
+  };
 
   const [formData, setFormData] = useState({
     packageId: '',
@@ -936,6 +997,7 @@ Terimakasih🙏`;
       visa: item.documents?.visa || false,
       ticket: item.documents?.ticket || false
     });
+    setDocUploadError('');
     setShowDocModal(true);
   };
 
@@ -5527,53 +5589,91 @@ Terimakasih🙏`;
               Jamaah: <strong className={styles.textTitle}>{selectedBookingForDoc.jamaahName}</strong> • Kode: <span className="font-mono text-emerald-500">{selectedBookingForDoc.bookingCode}</span>
             </p>
 
+            {docUploadError && (
+              <div className="mb-3 p-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-[11px]">
+                {docUploadError}
+              </div>
+            )}
+
             <div className="space-y-2.5 mb-6">
               {REQUIRED_DOCUMENTS.map((docItem) => {
                 const isChecked = docChecklist[docItem.key] || false;
-                // Kalau jamaah upload sendiri lewat Portal Customer, link
+                // Kalau jamaah upload sendiri lewat Portal Customer ATAU
+                // di-uploadin staf dari sini (tombol Upload di bawah), link
                 // file-nya (ke Google Drive) kesimpen di
-                // documentFiles.{key} (lihat portal/page.js) — munculin
-                // link "Lihat" di sini biar staf bisa langsung buka &
-                // verifikasi filenya tanpa harus minta ulang lewat WA.
+                // documentFiles.{key} (lihat portal/page.js &
+                // handleStaffUploadDocument) — munculin link "Lihat" di sini
+                // biar staf bisa langsung buka & verifikasi filenya.
                 const uploadedFile = selectedBookingForDoc?.documentFiles?.[docItem.key];
+                const isUploadingThis = docUploadingKey === docItem.key;
                 return (
-                  <label
+                  <div
                     key={docItem.key}
-                    onClick={() => setDocChecklist({ ...docChecklist, [docItem.key]: !isChecked })}
-                    className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                    className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border transition-all ${
                       isChecked
                         ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
                         : `${styles.innerBg} text-slate-400`
                     }`}
                   >
-                    <span className="text-xs font-semibold">{docItem.label}</span>
-                    <div className="flex items-center gap-2 shrink-0">
+                    <label className="flex-1 cursor-pointer text-xs font-semibold" onClick={() => setDocChecklist({ ...docChecklist, [docItem.key]: !isChecked })}>
+                      {docItem.label}
+                    </label>
+                    <div className="flex items-center gap-1.5 shrink-0">
                       {uploadedFile?.url && (
                         <a
                           href={uploadedFile.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          title={`Diupload jamaah lewat Portal (Google Drive) • ${uploadedFile.fileName || ''}`}
+                          title={`${uploadedFile.uploadedBy === 'staff_dashboard' ? 'Di-upload staf dari Dashboard' : 'Diupload jamaah lewat Portal'} (Google Drive) • ${uploadedFile.fileName || ''}`}
                           className="flex items-center gap-1 bg-slate-950/30 hover:bg-slate-950/60 text-emerald-400 px-1.5 py-1 rounded text-[10px] font-medium"
                         >
                           <Eye className="w-3 h-3" /> Lihat
                         </a>
                       )}
-                      <div className={`w-5 h-5 rounded-md flex items-center justify-center border transition-all ${
-                        isChecked ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-500'
-                      }`}>
+                      {/* Upload dari staf — buat bantu jamaah lansia/yang nggak
+                          paham buka Portal Jamaah sendiri. Staf pegang file
+                          (foto/PDF dikirim jamaah lewat WA, atau hasil scan
+                          dokumen fisik) lalu upload langsung dari sini. */}
+                      <label
+                        className={`flex items-center gap-1 px-1.5 py-1 rounded text-[10px] font-medium cursor-pointer ${
+                          isUploadingThis
+                            ? 'bg-slate-950/30 text-slate-500 cursor-wait'
+                            : 'bg-slate-950/30 hover:bg-slate-950/60 text-sky-400'
+                        }`}
+                        title="Upload dokumen ini atas nama jamaah (bantu jamaah lansia/yang nggak paham Portal)"
+                      >
+                        {isUploadingThis ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                        {isUploadingThis ? 'Upload...' : (uploadedFile?.url ? 'Ganti' : 'Upload')}
+                        <input
+                          type="file"
+                          accept={ALLOWED_UPLOAD_TYPES.join(',')}
+                          className="hidden"
+                          disabled={isUploadingThis}
+                          onClick={(e) => { e.stopPropagation(); }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            e.target.value = '';
+                            if (file) handleStaffUploadDocument(docItem.key, file);
+                          }}
+                        />
+                      </label>
+                      <div
+                        onClick={() => setDocChecklist({ ...docChecklist, [docItem.key]: !isChecked })}
+                        className={`w-5 h-5 rounded-md flex items-center justify-center border transition-all cursor-pointer ${
+                          isChecked ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-500'
+                        }`}
+                      >
                         {isChecked && <Check className="w-3.5 h-3.5 stroke-[3]" />}
                       </div>
                     </div>
-                  </label>
+                  </div>
                 );
               })}
             </div>
 
             <div className={`pt-4 flex justify-between items-center border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <span className="text-[11px] text-slate-400 flex items-center gap-1">
-                <AlertCircle className="w-3.5 h-3.5 text-amber-500" /> Centang berkas yang telah diserahkan
+                <AlertCircle className="w-3.5 h-3.5 text-amber-500" /> Upload otomatis centang & simpan. Centang manual masih perlu tombol Simpan.
               </span>
               <div className="flex gap-2">
                 <button
