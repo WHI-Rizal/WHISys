@@ -248,7 +248,8 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
         hargaDouble: p.priceDouble
       })),
       // Data minimization: NIK, nomor paspor, dan nomor HP sengaja TIDAK
-      // dikirim ke Gemini API (pihak ketiga) — nomor identitas & kontak
+      // dikirim ke API AI (pihak ketiga, saat ini Claude/Anthropic) — nomor
+      // identitas & kontak
       // itu nggak dibutuhkan buat jawab pertanyaan bisnis (omset, margin,
       // occupancy, dsb) dan termasuk data pribadi sensitif menurut UU PDP.
       // Tanggal expired paspor tetap dikirim (bukan nomornya) karena masih
@@ -288,8 +289,8 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
       }
       const idToken = await auth.currentUser.getIdToken();
 
-      // Panggil API route server-side (/api/ai-chat) — API key Gemini aman
-      // tersimpan di server, tidak pernah terkirim/terekspos ke browser.
+      // Panggil API route server-side (/api/ai-chat) — API key Anthropic
+      // aman tersimpan di server, tidak pernah terkirim/terekspos ke browser.
       const response = await fetch('/api/ai-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
@@ -308,7 +309,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
       }
 
     } catch (err) {
-      console.error("Gemini API Error Detail:", err);
+      console.error("AI Analyzer API Error Detail:", err);
       let fallbackAnswer = `⚠️ [Error AI]: ${err.message}\n\nRingkasan Data Real-time:\n• Total Jamaah: ${jamaah.length} orang\n• Total Booking: ${bookings.length} transaksi\n• Total Setoran: Rp ${totalOmset.toLocaleString('id-ID')}\n• Margin Laba: Rp ${netMargin.toLocaleString('id-ID')}`;
 
       updateChatHistory([...newHistory, { sender: 'ai', text: fallbackAnswer }]);
@@ -440,7 +441,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
               ))}
               {analyzing && (
                 <div className={`p-2.5 rounded-xl ${styles.innerBg} text-emerald-400 italic text-[11px] animate-pulse`}>
-                  Gemini AI sedang membaca database & menyusun jawaban...
+                  Claude AI sedang membaca database & menyusun jawaban...
                 </div>
               )}
             </div>
@@ -535,7 +536,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
               ))}
               {analyzing && (
                 <div className={`p-3 rounded-2xl ${styles.innerBg} text-emerald-400 italic text-xs animate-pulse border border-emerald-500/20`}>
-                  Gemini AI sedang membaca seluruh database & menyusun laporan...
+                  Claude AI sedang membaca seluruh database & menyusun laporan...
                 </div>
               )}
             </div>
