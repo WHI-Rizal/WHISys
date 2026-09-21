@@ -552,7 +552,7 @@ export default function PortalPage() {
                 <Plane className="w-7 h-7 text-emerald-500" />
               </div>
               <h1 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Portal Jamaah</h1>
-              <p className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Wisata Halal Indonesia</p>
+              <p className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Wisata Halal Internasional</p>
             </div>
 
             <form onSubmit={handleLogin} className="space-y-4">
