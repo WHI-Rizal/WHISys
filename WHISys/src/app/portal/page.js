@@ -283,6 +283,8 @@ export default function PortalPage() {
       const { url, fileName } = await uploadDocumentFile({
         bookingId: booking.id,
         bookingCode: booking.bookingCode || '',
+        packageName: booking.packageName || '',
+        departureDate: booking.departureDate || '',
         docKey,
         file,
       });
