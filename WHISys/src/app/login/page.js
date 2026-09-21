@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { auth, db } from '../../lib/firebase';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { Plane, Lock, Mail, AlertCircle, X, CheckCircle2 } from 'lucide-react';
+import { Lock, Mail, AlertCircle, X, CheckCircle2 } from 'lucide-react';
 import { logActivity } from '../../lib/activityLog';
 
 export default function LoginPage() {
@@ -110,12 +110,17 @@ export default function LoginPage() {
         <div className="pointer-events-none absolute -bottom-12 -left-12 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl"></div>
 
         <div className="relative text-center mb-8">
-          <div className="relative w-14 h-14 bg-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-900/40">
-            <Plane className="w-7 h-7 text-white" />
+          {/* Ganti ikon pesawat generik jadi logo WHI beneran (21 Sep 2026,
+              permintaan user) — logo lengkap (mark + tulisan) dipajang di
+              kotak putih biar tetap kebaca jelas di atas background gelap
+              kartu login, ukuran badge & aksen 2 titik warna di sudut
+              dipertahankan sama persis kayak versi ikon pesawat sebelumnya. */}
+          <div className="relative w-14 h-14 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-black/30 p-1.5">
+            <img src="/logo.png" alt="Logo WHI" className="w-full h-full object-contain" />
             <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-amber-400 border-2 border-slate-900"></span>
             <span className="absolute -bottom-1 -left-2 w-3 h-3 rounded-full bg-rose-400 border-2 border-slate-900"></span>
           </div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Hallo, Friends!</h1>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Selamat Datang</h1>
           <p className="text-xs text-slate-400 mt-2">Masuk ke WHISys ERP untuk lanjut kelola operasional Umrah, Haji & Wisata Halal.</p>
         </div>
 
@@ -175,7 +180,7 @@ export default function LoginPage() {
         </form>
 
         <div className="relative mt-8 pt-4 border-t border-slate-800 text-center text-[11px] text-slate-500">
-          PT Wisata Halal Internasional • Secure Enterprise System
+          PT Wisata Halal Indonesia • Secure Enterprise System
         </div>
 
       </div>
