@@ -2195,8 +2195,30 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // (closingTcStartDate s/d closingTcEndDate, inklusif keduanya) yang
   // dipilih — bukan lagi per bulan kalender, biar HRD bisa atur cutoff
   // payroll-nya sendiri (mis. tanggal 22 - 21 bulan berikutnya).
+  //
+  // Booking berstatus 'cancelled' SENGAJA DIKELUARKAN dari sini (21 Sep
+  // 2026) — sebelumnya ikut kehitung, bikin "Total Closingan" beda sama
+  // "2201 - Pendapatan Diterima Dimuka" di Neraca (Neraca otomatis udah
+  // nggak ngitung booking yang batal, jadi laporan closing ini disamain).
+  // Booking batal TETAP kelihatan di CSV export (lihat closingTcCancelledInPeriod
+  // di bawah) biar tetap ketauan jejaknya, cuma nilainya dikosongin.
   const closingTcBookingsInPeriod = bookingsList.filter(bk => {
     if (bk.closingSourceType !== 'tc' || !bk.closingSourceId) return false;
+    if (bk.status === 'cancelled') return false;
+    const txDate = toLocalDateOnlyString(bk.createdAt);
+    if (!txDate) return false;
+    if (closingTcStartDate && txDate < closingTcStartDate) return false;
+    if (closingTcEndDate && txDate > closingTcEndDate) return false;
+    return true;
+  });
+
+  // Booking yang closing-nya lewat TC tapi sudah DIBATALKAN, di rentang
+  // tanggal yang sama — dipisah khusus buat ditampilkan di CSV export
+  // (bukan buat dihitung ke total/rekap), biar HRD tetap bisa lihat ada
+  // closingan yang batal tanpa itu nambah/ganggu Total Closingan.
+  const closingTcCancelledInPeriod = bookingsList.filter(bk => {
+    if (bk.closingSourceType !== 'tc' || !bk.closingSourceId) return false;
+    if (bk.status !== 'cancelled') return false;
     const txDate = toLocalDateOnlyString(bk.createdAt);
     if (!txDate) return false;
     if (closingTcStartDate && txDate < closingTcStartDate) return false;
@@ -2338,57 +2360,99 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     return str;
   };
 
-  // Tarikan CSV "sales report" — 1 baris per booking (bukan lagi diringkas
-  // per TC+destinasi), biar HRD/TC bisa lihat rincian tiap transaksi:
-  // tanggal transaksi, kode booking, nama jamaah, paket, tgl keberangkatan,
-  // sampai nilai transaksinya. Diurutkan per Nama TC, lalu per tanggal
-  // transaksi (lama ke baru) biar enak ditelusuri.
+  // Tarikan CSV "sales report" — DIGROUP PER PEMESAN (21 Sep 2026, revisi
+  // atas permintaan user: awalnya 1 baris per dokumen booking/pax, ternyata
+  // yang dibutuhin 1 baris per TRANSAKSI PEMESANAN — 1 pemesan bisa daftarin
+  // banyak pax sekaligus dalam 1 rombongan, semuanya kebagi jadi dokumen
+  // `bookings` terpisah per pax tapi berbagi `groupBookingCode` yang sama).
+  // Jadi di sini di-groupBy `groupBookingCode` (fallback `bookingCode` kalau
+  // booking-nya solo/nggak ada grup), pax-nya dijumlah, nilainya dijumlah,
+  // dan Kode Booking yang ditampilin adalah kode grupnya — persis pola
+  // "4 pax Dhia Syarafina Halim" yang diminta.
+  // Diurutkan per Nama TC, lalu per tanggal transaksi (lama ke baru).
+  //
+  // Booking yang DIBATALKAN tetap ikut ditarik ke CSV (biar jejaknya tetap
+  // kelihatan / bisa ditelusuri) sebagai baris grup terpisah, tapi kolom
+  // "Nilai Transaksi" dikosongin dan kolom "Status" ditandai "Dibatalkan" —
+  // supaya kalau kolom nilainya dijumlah, hasilnya tetap sama dengan Total
+  // Closingan di layar (yang memang sudah nggak menghitung booking batal,
+  // biar sinkron sama Neraca). Kalau dalam 1 grup ada pax yang batal
+  // sebagian aja (bukan 1 grup penuh), pax yang aktif & yang batal otomatis
+  // kepisah jadi 2 baris grup (1 "Aktif", 1 "Dibatalkan") dengan kode
+  // booking grup yang sama, biar tetap kebaca jelas.
   const handleDownloadClosingTcCSV = () => {
     const rows = [[
       'Nama TC',
       'Tanggal Transaksi',
       'Kode Booking',
-      'Nama Jamaah',
+      'Pemesan',
       'Kategori Destinasi',
       'Nama Paket',
       'Tanggal Keberangkatan',
+      'Status',
       'Nilai Transaksi (Rp)',
     ]];
 
-    const detailRows = closingTcBookingsInPeriod
-      .map(bk => {
-        const pkg = packagesList.find(p => p.id === bk.packageId);
-        return {
-          tcName: bk.closingSourceName || '(Tanpa Nama)',
-          txDateRaw: toLocalDateOnlyString(bk.createdAt) || '',
-          bookingCode: bk.bookingCode || bk.groupBookingCode || '-',
-          jamaahName: bk.jamaahName || '-',
-          destCategory: pkg?.destinationCity || 'Lainnya',
-          packageName: bk.packageName || pkg?.name || '-',
-          departureDate: bk.departureDate ? formatDateDDMMYYYY(bk.departureDate) : '-',
-          amount: Number(bk.totalAmount) || 0,
-        };
-      })
-      .sort((a, b) => {
-        if (a.tcName !== b.tcName) return a.tcName.localeCompare(b.tcName, 'id');
-        return a.txDateRaw.localeCompare(b.txDateRaw);
+    const groupBookingRows = (bookings, statusLabel, includeAmount) => {
+      const byGroup = {};
+      bookings.forEach(bk => {
+        const groupKey = `${bk.closingSourceId}|${statusLabel}|${bk.groupBookingCode || bk.bookingCode || bk.id}`;
+        const txDate = toLocalDateOnlyString(bk.createdAt) || '';
+        if (!byGroup[groupKey]) {
+          const pkg = packagesList.find(p => p.id === bk.packageId);
+          byGroup[groupKey] = {
+            tcName: bk.closingSourceName || '(Tanpa Nama)',
+            txDateRaw: txDate,
+            bookingCode: bk.groupBookingCode || bk.bookingCode || '-',
+            ordererName: bk.ordererName || bk.jamaahName || '-',
+            destCategory: pkg?.destinationCity || 'Lainnya',
+            packageName: bk.packageName || pkg?.name || '-',
+            departureDate: bk.departureDate ? formatDateDDMMYYYY(bk.departureDate) : '-',
+            status: statusLabel,
+            pax: 0,
+            amount: 0,
+          };
+        }
+        // Tanggal transaksi grup dipakai yang PALING AWAL antar pax-nya,
+        // jaga-jaga kalau ada perbedaan jam/detik createdAt antar dokumen
+        // dalam 1 grup pendaftaran yang sama.
+        if (txDate && (!byGroup[groupKey].txDateRaw || txDate < byGroup[groupKey].txDateRaw)) {
+          byGroup[groupKey].txDateRaw = txDate;
+        }
+        byGroup[groupKey].pax += 1;
+        if (includeAmount) byGroup[groupKey].amount += Number(bk.totalAmount) || 0;
       });
+      return Object.values(byGroup).map(g => ({
+        ...g,
+        pemesanLabel: `${g.pax} pax ${g.ordererName}`,
+        amount: includeAmount ? g.amount : '',
+      }));
+    };
+
+    const detailRows = [
+      ...groupBookingRows(closingTcBookingsInPeriod, 'Aktif', true),
+      ...groupBookingRows(closingTcCancelledInPeriod, 'Dibatalkan', false),
+    ].sort((a, b) => {
+      if (a.tcName !== b.tcName) return a.tcName.localeCompare(b.tcName, 'id');
+      return a.txDateRaw.localeCompare(b.txDateRaw);
+    });
 
     detailRows.forEach(r => {
       rows.push([
         r.tcName,
         r.txDateRaw ? formatDateDDMMYYYY(r.txDateRaw) : '-',
         r.bookingCode,
-        r.jamaahName,
+        r.pemesanLabel,
         r.destCategory,
         r.packageName,
         r.departureDate,
+        r.status,
         r.amount,
       ]);
     });
 
-    rows.push(['TOTAL', '', '', '', '', '', '', closingTcGrandTotal.totalClosing]);
-    rows.push(['JUMLAH PAX', '', '', '', '', '', '', closingTcGrandTotal.totalPax]);
+    rows.push(['TOTAL', '', '', '', '', '', '', '', closingTcGrandTotal.totalClosing]);
+    rows.push(['JUMLAH PAX', '', '', '', '', '', '', '', closingTcGrandTotal.totalPax]);
 
     // BOM di depan biar Excel baca UTF-8 dengan benar (nama TC/destinasi
     // yang pakai karakter non-ASCII nggak jadi karakter aneh pas dibuka).
@@ -3289,7 +3353,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                         <FileBarChart className="w-4 h-4 text-indigo-500" /> Laporan Closing TC & Komisi
                       </h4>
                       <p className={`text-xs ${styles.textSub} mt-1`}>
-                        Rekap jumlah closingan (omset) dan jumlah pax per Travel Consultant, dipecah per kategori destinasi. Download CSV berisi rincian lengkap per booking (tanggal transaksi, kode booking, nama jamaah, dsb).
+                        Rekap jumlah closingan (omset) dan jumlah pax per Travel Consultant, dipecah per kategori destinasi — booking yang dibatalkan sudah dikeluarkan dari total, biar sinkron sama Neraca. Download CSV berisi rincian lengkap per booking (tanggal transaksi, kode booking, nama jamaah, dsb), termasuk booking yang batal (nilainya dikosongin, cuma buat jejak).
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
