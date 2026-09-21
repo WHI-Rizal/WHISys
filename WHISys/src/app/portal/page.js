@@ -8,6 +8,7 @@ import {
   XCircle, Ban, RotateCcw, Clock, ShieldCheck, Download, Gauge, Upload, Eye
 } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
+import { APPS_SCRIPT_URL, DOC_LABELS, DOC_KEYS, MAX_UPLOAD_MB, ALLOWED_UPLOAD_TYPES, validateUploadFile, uploadDocumentFile } from '@/lib/documentUpload';
 
 // ============================================================================
 // PORTAL CUSTOMER — Tahap 2 (view + progress Kesiapan Berangkat + download
@@ -52,42 +53,13 @@ import DateFieldID from '@/components/DateFieldID';
 
 const SESSION_KEY = 'whi_portal_session';
 
-const DOC_LABELS = {
-  passport: 'Paspor',
-  ktp_foto: 'Foto KTP',
-  family_cert: 'Kartu Keluarga',
-  sponsor_letter: 'Surat Sponsor',
-  bank_statement: 'Rekening Koran',
-  vaccine_cert: 'Sertifikat Vaksin',
-  visa: 'Visa',
-  ticket: 'Tiket',
-};
-const DOC_KEYS = Object.keys(DOC_LABELS);
-
-// GANTI dengan URL Web App hasil deploy Code.gs (lihat instruksi di
-// komentar atas file ini / Code.gs). Selama masih placeholder di bawah
-// ini, tombol upload bakal langsung nolak dengan pesan yang jelas —
-// nggak diem-diem gagal.
-const APPS_SCRIPT_URL = 'GANTI_DENGAN_URL_WEB_APP_GOOGLE_APPS_SCRIPT';
-
-// Batas upload dokumen dari Portal Customer — jaga-jaga biar nggak ada yang
-// ngirim file gede/aneh-aneh (foto kamera HP jaman sekarang bisa belasan
-// MB). PDF & foto biasa udah lebih dari cukup di bawah batas ini.
-const MAX_UPLOAD_MB = 8;
-const ALLOWED_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'];
-
-// Ubah File jadi base64 murni (tanpa prefix "data:...;base64,") — format
-// yang dipahami Code.gs di sisi Apps Script buat di-decode balik jadi file.
-const fileToBase64 = (file) => new Promise((resolve, reject) => {
-  const reader = new FileReader();
-  reader.onload = () => {
-    const result = String(reader.result || '');
-    const base64 = result.includes(',') ? result.split(',')[1] : result;
-    resolve(base64);
-  };
-  reader.onerror = reject;
-  reader.readAsDataURL(file);
-});
+// DOC_LABELS, DOC_KEYS, APPS_SCRIPT_URL, MAX_UPLOAD_MB, ALLOWED_UPLOAD_TYPES,
+// dan helper upload (fileToBase64 dibungkus di dalam uploadDocumentFile)
+// sekarang dipindah ke src/lib/documentUpload.js (21 Sep 2026) — dipakai
+// bareng sama Dashboard staf (modul "Checklist Dokumen Jamaah" di
+// BookingsModule.jsx, buat OP bantu upload dokumen jamaah lansia yang nggak
+// paham buka Portal sendiri), biar APPS_SCRIPT_URL cuma perlu di-setting
+// SEKALI aja buat kedua fitur ini.
 
 // Kop surat buat PDF Kwitansi — pola & helper-nya sama persis kayak yang
 // dipakai FinanceModule buat Laporan Laba Rugi, sengaja diduplikat di sini
@@ -299,43 +271,21 @@ export default function PortalPage() {
     if (!file) return;
     setUploadError('');
 
-    if (APPS_SCRIPT_URL.startsWith('GANTI_DENGAN')) {
-      setUploadError('Fitur upload belum aktif — URL Google Apps Script belum dipasang di kode (lihat komentar di atas file portal/page.js).');
-      return;
-    }
-    if (!ALLOWED_UPLOAD_TYPES.includes(file.type)) {
-      setUploadError(`File "${DOC_LABELS[docKey]}" harus berupa foto (JPG/PNG/HEIC) atau PDF.`);
-      return;
-    }
-    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
-      setUploadError(`File "${DOC_LABELS[docKey]}" kebesaran (maks ${MAX_UPLOAD_MB}MB). Coba kompres/foto ulang dulu.`);
+    const validationErr = validateUploadFile(file, DOC_LABELS[docKey]);
+    if (validationErr) {
+      setUploadError(validationErr);
       return;
     }
 
     const stateKey = `${booking.id}-${docKey}`;
     setUploadingKey(stateKey);
     try {
-      const base64Data = await fileToBase64(file);
-
-      const res = await fetch(APPS_SCRIPT_URL, {
-        method: 'POST',
-        body: JSON.stringify({
-          bookingId: booking.id,
-          bookingCode: booking.bookingCode || '',
-          docKey,
-          fileName: file.name,
-          mimeType: file.type,
-          base64Data,
-        }),
+      const { url, fileName } = await uploadDocumentFile({
+        bookingId: booking.id,
+        bookingCode: booking.bookingCode || '',
+        docKey,
+        file,
       });
-
-      if (!res.ok) {
-        throw new Error(`Server upload merespons status ${res.status}.`);
-      }
-      const result = await res.json();
-      if (!result.success || !result.url) {
-        throw new Error(result.error || 'Upload gagal tanpa keterangan.');
-      }
 
       const saveRes = await fetch('/api/portal/documents', {
         method: 'POST',
@@ -344,8 +294,8 @@ export default function PortalPage() {
           token: session.token,
           bookingId: booking.id,
           docKey,
-          fileUrl: result.url,
-          fileName: file.name,
+          fileUrl: url,
+          fileName,
         }),
       });
       const saveResult = await saveRes.json();
