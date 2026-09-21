@@ -419,6 +419,8 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
       const { url, fileName } = await uploadDocumentFile({
         bookingId: selectedBookingForDoc.id,
         bookingCode: selectedBookingForDoc.bookingCode || '',
+        packageName: selectedBookingForDoc.packageName || '',
+        departureDate: selectedBookingForDoc.departureDate || '',
         docKey,
         file,
       });
