@@ -12,7 +12,7 @@ import {
   UserCheck, Plus, Edit, Trash2, X, Link2, Wallet, History,
   AlertCircle, Building2
 } from 'lucide-react';
-import { postOperationalExpense, deleteJournalEntriesBySource } from '../../lib/journal';
+import { postPartnerCommissionPayment, deleteJournalEntriesBySource } from '../../lib/journal';
 
 const formatDateDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -229,9 +229,15 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
     }
   };
 
+  // Accrued/paid sekarang dihitung dari flag `paid` per-booking (bukan
+  // lagi lump-sum dibandingkan total pembayaran), sejak Bayar Komisi
+  // diubah jadi pilih pemesanan spesifik yang dibayar — lihat handlePaySubmit.
+  // Ini juga yang bikin komisi bisa dialokasikan akurat ke HPP paket yang
+  // benar per pemesanan (bukan cuma total gelondongan per mitra).
   const getPartnerSummary = (partnerId) => {
-    const accrued = partnerBookings.filter(pb => pb.partnerId === partnerId).reduce((acc, pb) => acc + (Number(pb.commissionAmount) || 0), 0);
-    const paid = commissionPayments.filter(p => p.partnerId === partnerId).reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+    const bookings = partnerBookings.filter(pb => pb.partnerId === partnerId);
+    const accrued = bookings.reduce((acc, pb) => acc + (Number(pb.commissionAmount) || 0), 0);
+    const paid = bookings.filter(pb => pb.paid).reduce((acc, pb) => acc + (Number(pb.commissionAmount) || 0), 0);
     return { accrued, paid, outstanding: accrued - paid };
   };
 
@@ -352,11 +358,18 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
         bookingCode: group.primary.bookingCode,
         jamaahName: group.primary.jamaahName,
         paxCount: group.paxCount,
+        // packageId disimpen mulai sekarang biar komisi booking ini bisa
+        // dialokasikan ke HPP paket yang bener pas dibayar (lihat
+        // handlePaySubmit) — booking yang di-link SEBELUM field ini ada
+        // otomatis jadi '' (nggak dialokasikan ke paket manapun, komisinya
+        // tetap kecatet tapi sebagai Beban Operasional biasa).
+        packageId: group.primary.packageId || '',
         packageName: group.primary.packageName,
         totalAmount: group.totalAmount,
         commissionType,
         commissionValue,
         commissionAmount,
+        paid: false,
         createdAt: new Date().toISOString()
       });
       setShowLinkModal(false);
@@ -372,28 +385,19 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
       return;
     }
     const label = pb.paxCount > 1 ? `${pb.jamaahName} dkk (${pb.paxCount} pax)` : pb.jamaahName;
-    // Pembayaran komisi dicatat LUMP-SUM per mitra (bukan per link/booking),
-    // jadi nggak ada cara pasti tau porsi komisi booking ini spesifiknya
-    // udah kebayar atau belum. Tapi kita BISA deteksi tanda bahayanya: kalau
-    // komisi booking ini dibuang dari total accrued mitra, dan total yang
-    // udah dibayar (paid) jadi lebih besar dari sisa accrued yang baru,
-    // berarti pembayaran yang udah masuk itu kemungkinan besar sebagian
-    // mencakup komisi booking ini juga — unlink diam-diam bakal bikin
-    // outstanding mitra "minus" (keliatan lebih bayar) tanpa staff sadar
-    // kenapa. Makanya di sini kita hitung dulu & kasih peringatan eksplisit
-    // sebelum lanjut, bukan cuma confirm generik kayak sebelumnya.
-    const { paid } = getPartnerSummary(pb.partnerId);
     const commissionAmount = Number(pb.commissionAmount) || 0;
-    const otherAccrued = partnerBookings
-      .filter(x => x.partnerId === pb.partnerId && x.id !== pb.id)
-      .reduce((acc, x) => acc + (Number(x.commissionAmount) || 0), 0);
-    const outstandingAfterUnlink = otherAccrued - paid;
-
-    let message = `Putuskan hubungan pemesanan ${pb.groupBookingCode} (${label}) dari mitra "${pb.partnerName}"? Komisi Rp ${commissionAmount.toLocaleString('id-ID')} dari pemesanan ini nggak akan dihitung lagi.`;
-    if (outstandingAfterUnlink < 0) {
-      message += `\n\nPERINGATAN: Total komisi yang udah dibayar ke "${pb.partnerName}" (Rp ${paid.toLocaleString('id-ID')}) akan jadi LEBIH BESAR dari sisa komisi booking lain yang masih terhubung (Rp ${otherAccrued.toLocaleString('id-ID')}) — selisih Rp ${Math.abs(outstandingAfterUnlink).toLocaleString('id-ID')}. Ini tanda pembayaran yang udah masuk kemungkinan mencakup komisi booking ini juga. Cek dulu riwayat "Pembayaran Komisi" mitra ini sebelum lanjut — kalau memang perlu dikoreksi, catat pengurangan/refund komisi secara manual setelah unlink.`;
+    // Sejak Bayar Komisi milih pemesanan spesifik (bukan lump-sum lagi),
+    // status lunas per booking kecatet jelas lewat flag `paid` — jadi kita
+    // BISA tau pasti (bukan nebak) kalau komisi booking ini udah pernah
+    // dibayar & kejurnal. Unlink booking yang udah lunas nggak boleh
+    // dilakukan diam-diam (jurnal & pembayarannya masih ada tapi bookingnya
+    // udah putus) — staf harus hapus/koreksi pembayarannya dulu di tab
+    // "Pembayaran Komisi" baru unlink.
+    if (pb.paid) {
+      alert(`Komisi pemesanan ${pb.groupBookingCode} (${label}) sebesar Rp ${commissionAmount.toLocaleString('id-ID')} udah pernah DIBAYAR & kejurnal ke mitra "${pb.partnerName}". Nggak bisa di-unlink langsung — hapus dulu riwayat pembayaran komisi yang mencakup pemesanan ini di tab "Pembayaran Komisi", baru unlink boleh dilakukan.`);
+      return;
     }
-    if (!confirm(message)) return;
+    if (!confirm(`Putuskan hubungan pemesanan ${pb.groupBookingCode} (${label}) dari mitra "${pb.partnerName}"? Komisi Rp ${commissionAmount.toLocaleString('id-ID')} dari pemesanan ini nggak akan dihitung lagi.`)) return;
     try {
       await deleteDoc(doc(db, 'partner_bookings', pb.id));
       fetchData();
@@ -408,7 +412,13 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
   // ============ 3. PEMBAYARAN KOMISI KE MITRA ============
 
   const [showPayModal, setShowPayModal] = useState(false);
-  const [payForm, setPayForm] = useState({ partnerId: '', amount: '', accountId: '', notes: '', paymentDate: todayDateStr() });
+  // `selectedBookingIds` gantiin `amount` bebas — staf milih pemesanan mana
+  // aja yang lagi dibayar komisinya (bisa lebih dari satu), nominal total
+  // ke-hitung otomatis dari situ. Ini yang bikin tiap pembayaran bisa
+  // dialokasikan akurat ke HPP paket masing-masing (lewat packageId di
+  // partner_bookings), bukan cuma nominal gelondongan tanpa keterangan
+  // pemesanan mana aja yang tercakup.
+  const [payForm, setPayForm] = useState({ partnerId: '', accountId: '', notes: '', paymentDate: todayDateStr(), selectedBookingIds: [] });
   // Nge-guard submit/hapus pembayaran biar nggak keklik dobel — tiap aksi
   // di sini motong/ngembaliin saldo Kas/Bank beneran, jadi kalau kepencet
   // dua kali sebelum request pertama kelar, saldo bisa kepotong/kebalikin
@@ -425,8 +435,22 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
       alert('Tambah dulu data mitra/agen di tab "Data Mitra & Agen".');
       return;
     }
-    setPayForm({ partnerId: '', amount: '', accountId: '', notes: 'Pembayaran Komisi', paymentDate: todayDateStr() });
+    setPayForm({ partnerId: '', accountId: '', notes: 'Pembayaran Komisi', paymentDate: todayDateStr(), selectedBookingIds: [] });
     setShowPayModal(true);
+  };
+
+  // Pemesanan mitra yang lagi dipilih di form Bayar Komisi, dan total
+  // nominalnya — dipakai baik buat render checklist maupun buat submit.
+  const payFormUnpaidBookings = partnerBookings.filter(pb => pb.partnerId === payForm.partnerId && !pb.paid);
+  const payFormSelectedBookings = payFormUnpaidBookings.filter(pb => payForm.selectedBookingIds.includes(pb.id));
+  const payFormTotal = payFormSelectedBookings.reduce((acc, pb) => acc + (Number(pb.commissionAmount) || 0), 0);
+  const togglePayFormBooking = (bookingId) => {
+    setPayForm(prev => ({
+      ...prev,
+      selectedBookingIds: prev.selectedBookingIds.includes(bookingId)
+        ? prev.selectedBookingIds.filter(id => id !== bookingId)
+        : [...prev.selectedBookingIds, bookingId]
+    }));
   };
 
   const handlePaySubmit = async (e) => {
@@ -439,14 +463,17 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
     const partner = partnersList.find(p => p.id === payForm.partnerId);
     if (!partner) { alert('Pilih mitra/agen dulu.'); return; }
     if (!payForm.accountId) { alert('Pilih akun Kas/Bank yang dipakai bayar komisi ini.'); return; }
-    const amount = Number(payForm.amount) || 0;
-    if (amount <= 0) { alert('Isi nominal yang valid.'); return; }
-    const { outstanding } = getPartnerSummary(partner.id);
-    if (amount > outstanding) {
-      alert(`Nominal melebihi sisa komisi yang belum dibayar. Sisa komisi "${partner.name}": Rp ${outstanding.toLocaleString('id-ID')}.`);
-      return;
-    }
+    if (payFormSelectedBookings.length === 0) { alert('Pilih minimal 1 pemesanan yang mau dibayar komisinya.'); return; }
+    const amount = payFormTotal;
+    if (amount <= 0) { alert('Total komisi pemesanan yang dipilih harus lebih dari 0.'); return; }
     const account = financialAccounts.find(a => a.id === payForm.accountId);
+    // Pisah porsi yang ketaut ke paket (packageId keisi) dari yang nggak —
+    // porsi pertama dialokasikan jadi HPP paket itu, sisanya tetap Beban
+    // Operasional biasa. Lihat postPartnerCommissionPayment di journal.js.
+    const allocatedItems = payFormSelectedBookings.filter(pb => pb.packageId);
+    const unallocatedItems = payFormSelectedBookings.filter(pb => !pb.packageId);
+    const allocatedAmount = allocatedItems.reduce((acc, pb) => acc + (Number(pb.commissionAmount) || 0), 0);
+    const unallocatedAmount = unallocatedItems.reduce((acc, pb) => acc + (Number(pb.commissionAmount) || 0), 0);
     setProcessingPaymentId('new');
     try {
       const payRef = await addDoc(collection(db, 'partner_commission_payments'), {
@@ -456,24 +483,40 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
         accountId: payForm.accountId,
         accountName: account?.name || '',
         notes: payForm.notes || '',
-        createdAt: resolvePaymentCreatedAt(payForm.paymentDate)
-      });
-      // Ikut kecatat sebagai "Biaya Operasional Kantor" (expenses_operational)
-      // juga — biar Saldo Kas Bersih Operasional di dashboard Keuangan ikut
-      // kepotong dan tetap sinkron sama saldo Kas/Bank yang sebenarnya,
-      // bukan cuma kepotong di sisi mutasi bank doang.
-      const expenseRef = await addDoc(collection(db, 'expenses_operational'), {
-        category: 'Komisi Mitra/Agen',
-        amount,
-        accountId: payForm.accountId,
-        accountName: account?.name || '',
-        notes: `Komisi ${partner.name}${payForm.notes ? ' - ' + payForm.notes : ''}`,
-        expenseDate: payForm.paymentDate || todayDateStr(),
         createdAt: resolvePaymentCreatedAt(payForm.paymentDate),
-        source: 'partner_commission_payment',
-        sourcePartnerPaymentId: payRef.id
+        // bookingIds dipakai buat ngembaliin flag `paid` pas pembayaran ini
+        // dihapus. allocations dipakai LaporanKeuanganModule.jsx buat
+        // ngitung berapa komisi yang udah kealokasi ke HPP tiap paket pas
+        // paketnya "Akui Pendapatan".
+        bookingIds: payFormSelectedBookings.map(pb => pb.id),
+        allocations: payFormSelectedBookings.map(pb => ({
+          partnerBookingId: pb.id,
+          groupBookingCode: pb.groupBookingCode,
+          packageId: pb.packageId || '',
+          packageName: pb.packageName || '',
+          commissionAmount: Number(pb.commissionAmount) || 0
+        }))
       });
-      await updateDoc(doc(db, 'partner_commission_payments', payRef.id), { operationalExpenseId: expenseRef.id });
+      // Porsi yang NGGAK ketaut ke paket manapun tetap ikut kecatat sebagai
+      // "Biaya Operasional Kantor" (expenses_operational) — biar Saldo Kas
+      // Bersih Operasional di dashboard Keuangan tetap sinkron. Porsi yang
+      // ketaut ke paket SENGAJA nggak masuk sini, karena itu bukan lagi
+      // biaya operasional umum — dia jadi bagian HPP paket yang bersangkutan.
+      let expenseRef = null;
+      if (unallocatedAmount > 0) {
+        expenseRef = await addDoc(collection(db, 'expenses_operational'), {
+          category: 'Komisi Mitra/Agen',
+          amount: unallocatedAmount,
+          accountId: payForm.accountId,
+          accountName: account?.name || '',
+          notes: `Komisi ${partner.name}${payForm.notes ? ' - ' + payForm.notes : ''} (pemesanan tanpa paket terhubung)`,
+          expenseDate: payForm.paymentDate || todayDateStr(),
+          createdAt: resolvePaymentCreatedAt(payForm.paymentDate),
+          source: 'partner_commission_payment',
+          sourcePartnerPaymentId: payRef.id
+        });
+        await updateDoc(doc(db, 'partner_commission_payments', payRef.id), { operationalExpenseId: expenseRef.id });
+      }
       await adjustAccountBalance(payForm.accountId, -amount, {
         description: `Bayar Komisi Mitra - ${partner.name}`,
         reference: partner.name,
@@ -481,16 +524,9 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
         date: resolvePaymentCreatedAt(payForm.paymentDate),
         sourceDocId: payRef.id
       });
-      // Jurnal ganda-nya sempat KELEWAT nggak keposting sama sekali (cuma
-      // nulis expenses_operational + mutasi akun langsung, nggak pernah
-      // manggil postOperationalExpense) — akibatnya Jurnal Umum/Buku
-      // Besar/Neraca/Arus Kas nggak pernah "liat" pengeluaran komisi Mitra
-      // sama sekali walau saldo Kas/Bank-nya udah kepotong beneran, bikin
-      // Neraca kelebihan catat Kas & Bank + Ekuitas (Laba Berjalan) sebesar
-      // akumulasi komisi yang udah dibayar. Ditambal di sini, pola sama
-      // persis kayak Biaya Operasional biasa di FinanceModule.jsx.
-      await postOperationalExpense({
-        expenseId: expenseRef.id, category: 'Komisi Mitra/Agen', amount,
+      await postPartnerCommissionPayment({
+        paymentId: payRef.id, partnerName: partner.name,
+        allocatedAmount, unallocatedAmount,
         accountId: payForm.accountId, accountName: account?.name || '',
         date: resolvePaymentCreatedAt(payForm.paymentDate),
         createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
@@ -498,6 +534,14 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
         console.error('Gagal posting jurnal komisi mitra:', err);
         alert(`Pembayaran komisi tersimpan, TAPI jurnalnya GAGAL diposting (${err.message}). Neraca/Buku Besar untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
       });
+      // Tandain semua pemesanan yang dibayar barusan jadi lunas, biar nggak
+      // muncul lagi di checklist Bayar Komisi berikutnya & getPartnerSummary
+      // ke-update otomatis.
+      await Promise.all(payFormSelectedBookings.map(pb => updateDoc(doc(db, 'partner_bookings', pb.id), {
+        paid: true,
+        paidPaymentId: payRef.id,
+        paidAt: resolvePaymentCreatedAt(payForm.paymentDate)
+      })));
       setShowPayModal(false);
       fetchData();
     } catch (err) {
@@ -524,10 +568,25 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
         await removeAccountMutationBySource(pay.accountId, pay.id, Number(pay.amount) || 0);
       }
       // Ikut hapus catatan "Biaya Operasional Kantor" yang otomatis dibikin
-      // pas pembayaran ini dicatat, biar nggak ada jejak biaya yang ketinggalan.
+      // pas pembayaran ini dicatat (kalau ada porsi yang nggak ketaut ke
+      // paket manapun), biar nggak ada jejak biaya yang ketinggalan.
       if (pay.operationalExpenseId) {
         await deleteDoc(doc(db, 'expenses_operational', pay.operationalExpenseId));
-        await deleteJournalEntriesBySource('operational_expense', pay.operationalExpenseId);
+      }
+      // Jurnal (HPP paket + Beban Operasional, digabung 1 entry) dihapus
+      // lewat source pembayaran ini sendiri — lihat postPartnerCommissionPayment.
+      await deleteJournalEntriesBySource('partner_commission_payment', pay.id);
+      // Balikin semua pemesanan yang tercakup pembayaran ini jadi belum
+      // lunas lagi, biar komisinya bisa dibayar ulang / muncul lagi di
+      // checklist Bayar Komisi. Pembayaran lama (sebelum fitur alokasi
+      // paket) nggak punya bookingIds — dilewatin aja, nggak ada yang perlu
+      // dibalikin.
+      if (Array.isArray(pay.bookingIds) && pay.bookingIds.length > 0) {
+        await Promise.all(pay.bookingIds.map(bookingId => updateDoc(doc(db, 'partner_bookings', bookingId), {
+          paid: false,
+          paidPaymentId: null,
+          paidAt: null
+        }).catch(() => null)));
       }
       await deleteDoc(doc(db, 'partner_commission_payments', pay.id));
       fetchData();
@@ -778,12 +837,13 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
                       <th className="p-4">Mitra/Agen</th>
                       <th className="p-4 text-right">Total Pemesanan</th>
                       <th className="p-4 text-right">Komisi</th>
+                      <th className="p-4 text-center">Status</th>
                       <th className="p-4 text-center">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className={`divide-y ${styles.tableRowBorder}`}>
                     {visiblePartnerBookings.length === 0 ? (
-                      <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada pemesanan yang dihubungkan ke mitra/agen.</td></tr>
+                      <tr><td colSpan="8" className={`p-8 text-center ${styles.textSub}`}>Belum ada pemesanan yang dihubungkan ke mitra/agen.</td></tr>
                     ) : (
                       visiblePartnerBookings.map(pb => (
                         <tr key={pb.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
@@ -799,6 +859,14 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
                             <span className={`block text-[10px] font-normal ${styles.textSub}`}>
                               {pb.commissionType === 'fixed' ? 'Flat' : formatCommission('percent', pb.commissionValue)}
                             </span>
+                          </td>
+                          <td className="p-4 text-center">
+                            <span className={`px-2 py-1 rounded-full text-[10px] font-medium ${pb.paid ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'}`}>
+                              {pb.paid ? 'Lunas' : 'Belum Dibayar'}
+                            </span>
+                            {!pb.packageId && (
+                              <span className={`block text-[9.5px] mt-1 ${styles.textSub}`}>di luar HPP paket</span>
+                            )}
                           </td>
                           <td className="p-4 text-center">
                             {canManagePartners ? (
@@ -849,6 +917,17 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
                           <span className={`block text-[10px] font-normal ${styles.textSub}`}>
                             {pb.commissionType === 'fixed' ? 'Flat' : formatCommission('percent', pb.commissionValue)}
                           </span>
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-xs opacity-60">Status</span>
+                        <div>
+                          <span className={`px-2 py-1 rounded-full text-[10px] font-medium ${pb.paid ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'}`}>
+                            {pb.paid ? 'Lunas' : 'Belum Dibayar'}
+                          </span>
+                          {!pb.packageId && (
+                            <span className={`block text-[9.5px] mt-1 ${styles.textSub}`}>di luar HPP paket</span>
+                          )}
                         </div>
                       </div>
                       {canManagePartners && (
@@ -1191,22 +1270,51 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
                   inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
                   placeholder="-- Pilih Mitra/Agen --"
                   value={payForm.partnerId}
-                  onChange={(val) => setPayForm({ ...payForm, partnerId: val })}
+                  onChange={(val) => setPayForm({ ...payForm, partnerId: val, selectedBookingIds: [] })}
                   options={partnersList.map(p => {
                     const { outstanding } = getPartnerSummary(p.id);
                     return { value: p.id, label: p.name, sublabel: `Sisa: Rp ${outstanding.toLocaleString('id-ID')}` };
                   })}
                 />
               </div>
-              <div>
-                <label className="block mb-1 font-medium">Nominal Pembayaran (Rp)</label>
-                <input
-                  type="number" required min="1"
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={payForm.amount}
-                  onChange={e => setPayForm({ ...payForm, amount: e.target.value })}
-                />
-              </div>
+              {payForm.partnerId && (
+                <div>
+                  <label className="block mb-1 font-medium">Pemesanan yang Dibayar</label>
+                  {payFormUnpaidBookings.length === 0 ? (
+                    <p className={`p-3 rounded-lg border ${styles.innerBg} text-[11px] italic`}>
+                      Mitra ini nggak punya pemesanan dengan komisi yang belum dibayar.
+                    </p>
+                  ) : (
+                    <div className={`rounded-lg border ${styles.innerBg} divide-y ${styles.tableRowBorder} max-h-52 overflow-y-auto`}>
+                      {payFormUnpaidBookings.map(pb => {
+                        const checked = payForm.selectedBookingIds.includes(pb.id);
+                        const label = pb.paxCount > 1 ? `${pb.jamaahName} dkk (${pb.paxCount} pax)` : pb.jamaahName;
+                        return (
+                          <label key={pb.id} className="flex items-start gap-2.5 p-2.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5"
+                              checked={checked}
+                              onChange={() => togglePayFormBooking(pb.id)}
+                            />
+                            <span className="flex-1">
+                              <span className={`block font-medium ${styles.textTitle}`}>{pb.groupBookingCode} — {label}</span>
+                              <span className="block text-[10.5px] opacity-70">
+                                {pb.packageName || 'Tanpa paket terhubung'}{!pb.packageId && ' (di luar HPP paket)'}
+                              </span>
+                            </span>
+                            <span className={`font-medium ${styles.textTitle} whitespace-nowrap`}>Rp {Number(pb.commissionAmount || 0).toLocaleString('id-ID')}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div className={`flex justify-between items-center mt-2 p-2.5 rounded-lg border ${styles.innerBg}`}>
+                    <span className="font-medium">Total Dibayar</span>
+                    <span className={`font-bold ${styles.textTitle}`}>Rp {payFormTotal.toLocaleString('id-ID')}</span>
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="block mb-1 font-medium">Akun Kas/Bank</label>
                 <select
@@ -1240,10 +1348,10 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
               </div>
               <button
                 type="submit"
-                disabled={!!processingPaymentId}
+                disabled={!!processingPaymentId || payFormSelectedBookings.length === 0}
                 className="w-full bg-rose-600 hover:bg-rose-500 text-white font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {processingPaymentId === 'new' ? 'Memproses...' : 'Bayar Komisi'}
+                {processingPaymentId === 'new' ? 'Memproses...' : `Bayar Komisi${payFormSelectedBookings.length > 0 ? ` (Rp ${payFormTotal.toLocaleString('id-ID')})` : ''}`}
               </button>
             </form>
           </div>
