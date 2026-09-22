@@ -516,17 +516,17 @@ export default function DashboardPage() {
             hijau di footer), murni lengkungan bundar tanpa gradasi/blur.
             Disembunyiin pas mode collapse (rail ikon) biar nggak gepeng. */}
         <div className={`absolute inset-0 pointer-events-none overflow-hidden ${sidebarCollapsed ? 'md:hidden' : ''}`} aria-hidden="true">
-          <svg className="absolute top-0 left-0 w-full" style={{ height: '85px' }} viewBox="0 0 220 85" preserveAspectRatio="none">
-            <path fill="#f97316" d="M0,0 L220,0 L220,34
-              C220,57 180,75 130,71
-              C95,69 78,85 40,82
-              C18,79 0,67 0,51 Z"/>
+          <svg className="absolute top-0 left-0 w-full" style={{ height: '60px' }} viewBox="0 0 220 60" preserveAspectRatio="none">
+            <path fill="#f97316" d="M0,0 L220,0 L220,24
+              C220,40 180,53 130,50
+              C95,49 78,60 40,58
+              C18,56 0,47 0,36 Z"/>
           </svg>
-          <svg className="absolute bottom-0 left-0 w-full" style={{ height: '85px' }} viewBox="0 0 220 85" preserveAspectRatio="none">
-            <path fill="#10b981" d="M0,85 L220,85 L220,49
-              C220,27 182,9 132,13
-              C97,15 80,0 42,3
-              C20,6 0,18 0,34 Z"/>
+          <svg className="absolute bottom-0 left-0 w-full" style={{ height: '60px' }} viewBox="0 0 220 60" preserveAspectRatio="none">
+            <path fill="#10b981" d="M0,60 L220,60 L220,35
+              C220,19 182,6 132,9
+              C97,11 80,0 42,2
+              C20,4 0,13 0,24 Z"/>
           </svg>
         </div>
 
