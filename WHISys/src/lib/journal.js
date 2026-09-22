@@ -381,6 +381,34 @@ export const postVendorInvoiceCorrection = async ({ paymentId, vendorName, packa
   });
 };
 
+// 5c. Bayar Komisi Mitra/Agen (partner_commission_payments) — mirip pola
+//     Bayar Vendor tanpa billId (postVendorPayment): porsi yang KETAUTAN ke
+//     paket tertentu (`allocatedAmount`, dari partner_bookings yang punya
+//     packageId) dicatat sebagai Biaya Dibayar Dimuka (1401) dulu, BUKAN
+//     langsung Beban Operasional — biar nanti direklasifikasi jadi HPP paket
+//     itu pas paketnya "Akui Pendapatan" (lihat perhitungan vendorTotal di
+//     LaporanKeuanganModule.jsx yang ikut menjumlahkan alokasi komisi per
+//     paket dari `allocations` pembayaran ini). Porsi yang TIDAK ketaut ke
+//     paket manapun (`unallocatedAmount` — booking lama yang link-nya dibuat
+//     sebelum fitur alokasi paket ada, atau booking tanpa packageId) tetap
+//     langsung dicatat sebagai Beban Operasional seperti sebelumnya, biar
+//     nggak ada komisi yang "hilang" dari Laba Rugi.
+export const postPartnerCommissionPayment = async ({ paymentId, partnerName, allocatedAmount, unallocatedAmount, accountId, accountName, date, createdByUid, createdByName }) => {
+  const allocated = Math.max(0, Number(allocatedAmount) || 0);
+  const unallocated = Math.max(0, Number(unallocatedAmount) || 0);
+  const total = allocated + unallocated;
+  if (total <= 0) return null;
+  const lines = [];
+  if (allocated > 0) lines.push(glLine(ACC.BIAYA_DIBAYAR_DIMUKA, allocated, 0));
+  if (unallocated > 0) lines.push(glLine(ACC.OPEX, unallocated, 0, { category: 'Komisi Mitra/Agen' }));
+  lines.push(glLine(ACC.KAS_BANK, 0, total, { accountId, accountName }));
+  return postJournalEntry({
+    date, description: `Bayar Komisi Mitra - ${partnerName || '-'}`,
+    source: 'partner_commission_payment', sourceDocId: paymentId, reference: partnerName || '',
+    lines, createdByUid, createdByName
+  });
+};
+
 // 6. Biaya Operasional — selalu tunai/bank, nggak ada opsi deposit.
 export const postOperationalExpense = async ({ expenseId, category, amount, accountId, accountName, date, createdByUid, createdByName }) => {
   const amt = Number(amount) || 0;
