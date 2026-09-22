@@ -2126,6 +2126,22 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
   // Pendapatan, lihat getCommissionTotalForPackage di atas).
   const totalSelectedPkgCommissionCost = selectedPackageForDetail ? getCommissionTotalForPackage(selectedPackageForDetail.id) : 0;
   const selectedPkgProfit = totalSelectedPkgIncome - totalSelectedPkgVendorCost - totalSelectedPkgCommissionCost;
+  // Item komisi per pemesanan yang kealokasi ke paket ini — direkonstruksi
+  // dari commissionPayments.allocations (bukan koleksi tersendiri), biar
+  // tabel "Rincian Pengeluaran HPP Vendor & Komisi" nggak keliatan kosong
+  // waktu HPP paket itu murni dari komisi mitra (nggak ada biaya vendor
+  // sama sekali, kayak kasus PKG-000832).
+  const selectedPkgCommissionItems = selectedPackageForDetail
+    ? commissionPayments.flatMap(cp => (cp.allocations || [])
+        .filter(a => a.packageId === selectedPackageForDetail.id)
+        .map(a => ({
+          id: `${cp.id}-${a.partnerBookingId}`,
+          createdAt: cp.createdAt,
+          partnerName: cp.partnerName,
+          groupBookingCode: a.groupBookingCode,
+          commissionAmount: a.commissionAmount
+        })))
+    : [];
 
   const recognizedPackagesInPeriod = packagesList.filter(pkg => {
     if (!pkg.revenueRecognized) return false;
@@ -2856,7 +2872,7 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
 
               <div>
                 <h5 className="font-bold text-rose-500 mb-2 flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
-                  <ArrowUpRight className="w-4 h-4" /> Rincian Pengeluaran HPP Vendor ({selectedPkgVendorCosts.length})
+                  <ArrowUpRight className="w-4 h-4" /> Rincian Pengeluaran HPP Vendor & Komisi ({selectedPkgVendorCosts.length + selectedPkgCommissionItems.length})
                 </h5>
                 <div className={`hidden md:block overflow-x-auto border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg`}>
                   <table className="w-full text-left">
@@ -2869,48 +2885,83 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
                       </tr>
                     </thead>
                     <tbody className={`divide-y ${styles.tableRowBorder}`}>
-                      {selectedPkgVendorCosts.length === 0 ? (
-                        <tr><td colSpan="4" className={`p-4 text-center ${styles.textSub}`}>Belum ada biaya vendor untuk paket ini.</td></tr>
+                      {selectedPkgVendorCosts.length === 0 && selectedPkgCommissionItems.length === 0 ? (
+                        <tr><td colSpan="4" className={`p-4 text-center ${styles.textSub}`}>Belum ada biaya vendor atau komisi untuk paket ini.</td></tr>
                       ) : (
-                        selectedPkgVendorCosts.map((vp) => (
-                          <tr key={vp.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
-                            <td className={`p-2.5 ${styles.textSub}`}>{formatDateDDMMYYYY(vp.createdAt)}</td>
-                            <td className={`p-2.5 font-semibold ${styles.textTitle}`}>
-                              {vp.vendorName}
-                              <span className="block text-[10px] text-rose-500">{vp.category}</span>
-                            </td>
-                            <td className={`p-2.5 ${styles.textSub}`}>{vp.notes}</td>
-                            <td className="p-2.5 text-right font-bold text-rose-500">- Rp {Number(vp.amount).toLocaleString('id-ID')}</td>
-                          </tr>
-                        ))
+                        <>
+                          {selectedPkgVendorCosts.map((vp) => (
+                            <tr key={vp.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                              <td className={`p-2.5 ${styles.textSub}`}>{formatDateDDMMYYYY(vp.createdAt)}</td>
+                              <td className={`p-2.5 font-semibold ${styles.textTitle}`}>
+                                {vp.vendorName}
+                                <span className="block text-[10px] text-rose-500">{vp.category}</span>
+                              </td>
+                              <td className={`p-2.5 ${styles.textSub}`}>{vp.notes}</td>
+                              <td className="p-2.5 text-right font-bold text-rose-500">- Rp {Number(vp.amount).toLocaleString('id-ID')}</td>
+                            </tr>
+                          ))}
+                          {selectedPkgCommissionItems.map((item) => (
+                            <tr key={item.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                              <td className={`p-2.5 ${styles.textSub}`}>{formatDateDDMMYYYY(item.createdAt)}</td>
+                              <td className={`p-2.5 font-semibold ${styles.textTitle}`}>
+                                Komisi Mitra - {item.partnerName}
+                                <span className="block text-[10px] text-rose-500">Komisi Mitra/Agen</span>
+                              </td>
+                              <td className={`p-2.5 ${styles.textSub}`}>{item.groupBookingCode}</td>
+                              <td className="p-2.5 text-right font-bold text-rose-500">- Rp {Number(item.commissionAmount).toLocaleString('id-ID')}</td>
+                            </tr>
+                          ))}
+                        </>
                       )}
                     </tbody>
                   </table>
                 </div>
                 <div className={`md:hidden space-y-2 border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg p-2`}>
-                  {selectedPkgVendorCosts.length === 0 ? (
-                    <p className={`p-4 text-center ${styles.textSub}`}>Belum ada biaya vendor untuk paket ini.</p>
+                  {selectedPkgVendorCosts.length === 0 && selectedPkgCommissionItems.length === 0 ? (
+                    <p className={`p-4 text-center ${styles.textSub}`}>Belum ada biaya vendor atau komisi untuk paket ini.</p>
                   ) : (
-                    selectedPkgVendorCosts.map((vp) => (
-                      <div key={vp.id} className={`${styles.innerBg} border rounded-lg p-2.5 space-y-1.5`}>
-                        <div>
-                          <div className={`font-semibold ${styles.textTitle}`}>{vp.vendorName}</div>
-                          <span className="block text-[10px] text-rose-500">{vp.category}</span>
+                    <>
+                      {selectedPkgVendorCosts.map((vp) => (
+                        <div key={vp.id} className={`${styles.innerBg} border rounded-lg p-2.5 space-y-1.5`}>
+                          <div>
+                            <div className={`font-semibold ${styles.textTitle}`}>{vp.vendorName}</div>
+                            <span className="block text-[10px] text-rose-500">{vp.category}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] opacity-60 uppercase">Tanggal</span>
+                            <div className={styles.textSub}>{formatDateDDMMYYYY(vp.createdAt)}</div>
+                          </div>
+                          <div>
+                            <span className="text-[10px] opacity-60 uppercase">Catatan Pengeluaran</span>
+                            <div className={styles.textSub}>{vp.notes}</div>
+                          </div>
+                          <div>
+                            <span className="text-[10px] opacity-60 uppercase">Nominal HPP</span>
+                            <div className="font-bold text-rose-500">- Rp {Number(vp.amount).toLocaleString('id-ID')}</div>
+                          </div>
                         </div>
-                        <div>
-                          <span className="text-[10px] opacity-60 uppercase">Tanggal</span>
-                          <div className={styles.textSub}>{formatDateDDMMYYYY(vp.createdAt)}</div>
+                      ))}
+                      {selectedPkgCommissionItems.map((item) => (
+                        <div key={item.id} className={`${styles.innerBg} border rounded-lg p-2.5 space-y-1.5`}>
+                          <div>
+                            <div className={`font-semibold ${styles.textTitle}`}>Komisi Mitra - {item.partnerName}</div>
+                            <span className="block text-[10px] text-rose-500">Komisi Mitra/Agen</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] opacity-60 uppercase">Tanggal</span>
+                            <div className={styles.textSub}>{formatDateDDMMYYYY(item.createdAt)}</div>
+                          </div>
+                          <div>
+                            <span className="text-[10px] opacity-60 uppercase">Catatan Pengeluaran</span>
+                            <div className={styles.textSub}>{item.groupBookingCode}</div>
+                          </div>
+                          <div>
+                            <span className="text-[10px] opacity-60 uppercase">Nominal HPP</span>
+                            <div className="font-bold text-rose-500">- Rp {Number(item.commissionAmount).toLocaleString('id-ID')}</div>
+                          </div>
                         </div>
-                        <div>
-                          <span className="text-[10px] opacity-60 uppercase">Catatan Pengeluaran</span>
-                          <div className={styles.textSub}>{vp.notes}</div>
-                        </div>
-                        <div>
-                          <span className="text-[10px] opacity-60 uppercase">Nominal HPP</span>
-                          <div className="font-bold text-rose-500">- Rp {Number(vp.amount).toLocaleString('id-ID')}</div>
-                        </div>
-                      </div>
-                    ))
+                      ))}
+                    </>
                   )}
                 </div>
               </div>
