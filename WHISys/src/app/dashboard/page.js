@@ -512,7 +512,25 @@ export default function DashboardPage() {
           {sidebarCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
         </button>
 
-        <div className="overflow-y-auto hide-scrollbar">
+        {/* Motif dekoratif sidebar — 2 bulb organik flat (oranye di header,
+            hijau di footer), murni lengkungan bundar tanpa gradasi/blur.
+            Disembunyiin pas mode collapse (rail ikon) biar nggak gepeng. */}
+        <div className={`absolute inset-0 pointer-events-none overflow-hidden ${sidebarCollapsed ? 'md:hidden' : ''}`} aria-hidden="true">
+          <svg className="absolute top-0 left-0 w-full" style={{ height: '150px' }} viewBox="0 0 220 150" preserveAspectRatio="none">
+            <path fill="#f97316" d="M0,0 L220,0 L220,60
+              C220,100 180,132 130,126
+              C95,122 78,150 40,144
+              C18,140 0,118 0,90 Z"/>
+          </svg>
+          <svg className="absolute bottom-0 left-0 w-full" style={{ height: '150px' }} viewBox="0 0 220 150" preserveAspectRatio="none">
+            <path fill="#10b981" d="M0,150 L220,150 L220,86
+              C220,48 182,16 132,22
+              C97,26 80,0 42,6
+              C20,10 0,32 0,60 Z"/>
+          </svg>
+        </div>
+
+        <div className="relative overflow-y-auto hide-scrollbar">
           <div className={`flex items-center gap-3 px-3 py-4 mb-6 border-b ${currentTheme.border} ${sidebarCollapsed ? 'md:justify-center md:px-0' : ''}`}>
             <div
               className={`p-2 ${currentTheme.accentBg} rounded-lg text-white shrink-0 whisys-plane-trigger`}
@@ -674,7 +692,7 @@ export default function DashboardPage() {
           </nav>
         </div>
 
-        <div className={`border-t ${currentTheme.border} pt-4 flex items-center justify-between px-2 ${sidebarCollapsed ? 'md:flex-col md:items-center md:gap-2 md:px-0' : ''}`}>
+        <div className={`relative border-t ${currentTheme.border} pt-4 flex items-center justify-between px-2 ${sidebarCollapsed ? 'md:flex-col md:items-center md:gap-2 md:px-0' : ''}`}>
           <div className={`flex items-center gap-3 overflow-hidden ${sidebarCollapsed ? 'md:justify-center' : ''}`}>
             <div className={`w-8 h-8 rounded-full ${currentTheme.accentText} bg-emerald-500/10 flex items-center justify-center font-bold text-xs uppercase shrink-0`} title={userProfile?.fullName || userProfile?.email}>
               {userProfile?.role?.[0] || 'A'}
