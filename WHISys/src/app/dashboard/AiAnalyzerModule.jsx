@@ -389,7 +389,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className={`${styles.cardBg} p-4 rounded-xl border`}>
           <div className="flex items-center justify-between mb-2">
-            <span className={`text-xs ${styles.textSub}`}>Total Omset Real (Closing TC, Keberangkatan Bulan Ini)</span>
+            <span className={`text-xs ${styles.textSub}`}>Total Omset Real (Keberangkatan Bulan Ini)</span>
             <Wallet className="w-4 h-4 text-emerald-500" />
           </div>
           <h4 className="text-lg font-bold text-emerald-500">Rp {totalOmset.toLocaleString('id-ID')}</h4>
@@ -397,7 +397,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
 
         <div className={`${styles.cardBg} p-4 rounded-xl border`}>
           <div className="flex items-center justify-between mb-2">
-            <span className={`text-xs ${styles.textSub}`}>HPP Biaya Vendor (Planning, Keberangkatan Bulan Ini)</span>
+            <span className={`text-xs ${styles.textSub}`}>HPP Biaya Vendor</span>
             <Wallet className="w-4 h-4 text-rose-500" />
           </div>
           <h4 className="text-lg font-bold text-rose-500">Rp {totalVendorCost.toLocaleString('id-ID')}</h4>
