@@ -3374,22 +3374,18 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                         }}
                       />
                       <div className="flex items-center gap-1.5">
-                        <input
-                          type="date"
-                          title="Dari Tanggal Transaksi"
-                          className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
+                        <DateFieldID
+                          className={`${styles.inputBg} rounded-lg p-2 text-xs border w-[110px]`}
                           value={closingTcStartDate}
                           max={closingTcEndDate || undefined}
-                          onChange={e => setClosingTcStartDate(e.target.value)}
+                          onChange={(val) => setClosingTcStartDate(val)}
                         />
                         <span className={`text-xs ${styles.textSub}`}>s/d</span>
-                        <input
-                          type="date"
-                          title="Sampai Tanggal Transaksi"
-                          className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
+                        <DateFieldID
+                          className={`${styles.inputBg} rounded-lg p-2 text-xs border w-[110px]`}
                           value={closingTcEndDate}
                           min={closingTcStartDate || undefined}
-                          onChange={e => setClosingTcEndDate(e.target.value)}
+                          onChange={(val) => setClosingTcEndDate(val)}
                         />
                       </div>
                     </div>
