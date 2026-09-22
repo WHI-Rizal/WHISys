@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import SearchableSelect from '@/components/SearchableSelect';
+import DateFieldID from '@/components/DateFieldID';
 import {
   collection, addDoc, getDocs, doc, updateDoc, deleteDoc,
   query, where, increment
@@ -1222,11 +1223,10 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
               </div>
               <div>
                 <label className="block mb-1 font-medium">Tanggal Pembayaran</label>
-                <input
-                  type="date"
+                <DateFieldID
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                   value={payForm.paymentDate}
-                  onChange={e => setPayForm({ ...payForm, paymentDate: e.target.value })}
+                  onChange={(val) => setPayForm({ ...payForm, paymentDate: val })}
                 />
               </div>
               <div>
