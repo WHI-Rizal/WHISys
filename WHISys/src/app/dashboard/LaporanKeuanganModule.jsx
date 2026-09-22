@@ -1161,11 +1161,11 @@ function JournalTab({ styles, isDark, journalEntries, chartOfAccounts, currentUs
       <div className={`${styles.cardBg} border rounded-xl p-4 flex flex-wrap items-end gap-3`}>
         <div>
           <label className={`block mb-1 text-[10.5px] font-medium ${styles.textSub}`}>Dari Tanggal</label>
-          <input type="date" className={`${styles.inputBg} rounded-lg p-2 text-xs border`} value={filterStart} onChange={e => setFilterStart(e.target.value)} />
+          <DateFieldID className={`${styles.inputBg} rounded-lg p-2 text-xs border w-[110px]`} value={filterStart} onChange={(val) => setFilterStart(val)} />
         </div>
         <div>
           <label className={`block mb-1 text-[10.5px] font-medium ${styles.textSub}`}>Sampai Tanggal</label>
-          <input type="date" className={`${styles.inputBg} rounded-lg p-2 text-xs border`} value={filterEnd} onChange={e => setFilterEnd(e.target.value)} />
+          <DateFieldID className={`${styles.inputBg} rounded-lg p-2 text-xs border w-[110px]`} value={filterEnd} onChange={(val) => setFilterEnd(val)} />
         </div>
         <div>
           <label className={`block mb-1 text-[10.5px] font-medium ${styles.textSub}`}>Sumber</label>
@@ -1249,7 +1249,7 @@ function JournalTab({ styles, isDark, journalEntries, chartOfAccounts, currentUs
             <form onSubmit={handleManualSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
                 <label className="block mb-1 font-medium">Tanggal</label>
-                <input type="date" required className={`w-full ${styles.inputBg} rounded-lg p-2.5 border`} value={manualForm.date} onChange={e => setManualForm({ ...manualForm, date: e.target.value })} />
+                <DateFieldID required className={`w-full ${styles.inputBg} rounded-lg p-2.5 border`} value={manualForm.date} onChange={(val) => setManualForm({ ...manualForm, date: val })} />
               </div>
               <div>
                 <label className="block mb-1 font-medium">Akun Debit</label>
@@ -1426,11 +1426,11 @@ function LedgerTab({ styles, isDark, journalEntries, chartOfAccounts, financialA
         )}
         <div>
           <label className={`block mb-1 text-[10.5px] font-medium ${styles.textSub}`}>Dari Tanggal</label>
-          <input type="date" className={`${styles.inputBg} rounded-lg p-2 text-xs border`} value={filterStart} onChange={e => setFilterStart(e.target.value)} />
+          <DateFieldID className={`${styles.inputBg} rounded-lg p-2 text-xs border w-[110px]`} value={filterStart} onChange={(val) => setFilterStart(val)} />
         </div>
         <div>
           <label className={`block mb-1 text-[10.5px] font-medium ${styles.textSub}`}>Sampai Tanggal</label>
-          <input type="date" className={`${styles.inputBg} rounded-lg p-2 text-xs border`} value={filterEnd} onChange={e => setFilterEnd(e.target.value)} />
+          <DateFieldID className={`${styles.inputBg} rounded-lg p-2 text-xs border w-[110px]`} value={filterEnd} onChange={(val) => setFilterEnd(val)} />
         </div>
         <div className="flex-1" />
         <button onClick={handleExportPdf} disabled={generatingPdf} className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 disabled:opacity-60">
@@ -1602,7 +1602,7 @@ function BalanceSheetTab({ styles, isDark, journalEntries, chartOfAccounts, fina
       <div className={`${styles.cardBg} border rounded-xl p-4 flex flex-wrap items-end gap-3`}>
         <div>
           <label className={`block mb-1 text-[10.5px] font-medium ${styles.textSub}`}>Per Tanggal</label>
-          <input type="date" className={`${styles.inputBg} rounded-lg p-2 text-xs border`} value={asOfDate} onChange={e => setAsOfDate(e.target.value)} />
+          <DateFieldID className={`${styles.inputBg} rounded-lg p-2 text-xs border w-[110px]`} value={asOfDate} onChange={(val) => setAsOfDate(val)} />
         </div>
         <div className="flex-1" />
         <button onClick={handleExportPdf} disabled={generatingPdf} className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 disabled:opacity-60">
@@ -4240,20 +4240,18 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
             <div className="p-6 pb-3 flex flex-wrap items-end gap-3">
               <div>
                 <label className={`block text-[10px] font-medium mb-1 ${styles.textSub}`}>Dari Tanggal</label>
-                <input
-                  type="date"
+                <DateFieldID
                   value={mutationDateFrom}
-                  onChange={e => setMutationDateFrom(e.target.value)}
-                  className={`text-xs px-3 py-2 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300'}`}
+                  onChange={(val) => setMutationDateFrom(val)}
+                  className={`text-xs px-3 py-2 rounded-lg border w-[120px] ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300'}`}
                 />
               </div>
               <div>
                 <label className={`block text-[10px] font-medium mb-1 ${styles.textSub}`}>Sampai Tanggal</label>
-                <input
-                  type="date"
+                <DateFieldID
                   value={mutationDateTo}
-                  onChange={e => setMutationDateTo(e.target.value)}
-                  className={`text-xs px-3 py-2 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300'}`}
+                  onChange={(val) => setMutationDateTo(val)}
+                  className={`text-xs px-3 py-2 rounded-lg border w-[120px] ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300'}`}
                 />
               </div>
               {(mutationDateFrom || mutationDateTo) && (
