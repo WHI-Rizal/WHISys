@@ -102,85 +102,95 @@ export default function LoginPage() {
         <div className="absolute bottom-10 -right-10 w-56 h-56 bg-rose-500/15 rounded-full blur-3xl"></div>
       </div>
 
-      <div className="relative bg-slate-900/90 backdrop-blur-sm border border-slate-800 p-8 rounded-[2rem] w-full max-w-md shadow-2xl overflow-hidden">
+      <div className="relative bg-slate-900/90 backdrop-blur-sm border border-slate-800 rounded-[2rem] w-full max-w-md shadow-2xl overflow-hidden">
 
-        {/* Aksen lingkaran kecil di pojok kartu — versi mini dari motif blob
-            di background, biar kartunya sendiri kerasa "hidup" kayak referensi. */}
-        <div className="pointer-events-none absolute -top-10 -right-10 w-28 h-28 bg-emerald-500/20 rounded-full blur-2xl"></div>
-        <div className="pointer-events-none absolute -bottom-12 -left-12 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl"></div>
-
-        <div className="relative text-center mb-8">
-          {/* Ganti ikon pesawat generik jadi logo WHI beneran (21 Sep 2026,
-              permintaan user) — logo lengkap (mark + tulisan) dipajang di
-              kotak putih biar tetap kebaca jelas di atas background gelap
-              kartu login, ukuran badge & aksen 2 titik warna di sudut
-              dipertahankan sama persis kayak versi ikon pesawat sebelumnya. */}
-          <div className="relative w-14 h-14 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-black/30 p-1.5">
-            <img src="/logo.png" alt="Logo WHI" className="w-full h-full object-contain" />
-            <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-amber-400 border-2 border-slate-900"></span>
-            <span className="absolute -bottom-1 -left-2 w-3 h-3 rounded-full bg-rose-400 border-2 border-slate-900"></span>
+        {/* Header kartu diganti total (22 Sep 2026, permintaan user): dari
+            badge logo + judul senter, jadi blob hijau abstrak (SVG, bukan
+            kotak/garis lurus) niru referensi visual yang dikasih user, biar
+            kesan lebih modern & minimalis. Logo WHI sengaja DIHAPUS dari
+            sini (biar nggak berat/rame), badge-nya masih tetap dipakai di
+            tempat lain (mis. Portal Jamaah) — cuma di kartu login staf ini
+            aja yang diganti teks "Welcome Back!" polos. */}
+        <div className="relative h-48">
+          <svg viewBox="0 0 216 190" preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
+            <defs>
+              <linearGradient id="loginBlobGradient" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#10b981" />
+                <stop offset="100%" stopColor="#065f46" />
+              </linearGradient>
+            </defs>
+            {/* Aksen bulat merah muda transparan, ngambang di belakang blob utama */}
+            <circle cx="24" cy="20" r="26" fill="#fda4af" opacity="0.3" />
+            {/* Aksen blob kedua, hijau lebih gelap, ngintip di kiri bawah */}
+            <path d="M90,100 C68,86 34,94 20,118 C6,142 18,176 50,186 C78,195 106,178 110,152 C114,130 112,114 90,100 Z" fill="#064e3b" />
+            {/* Blob utama, bentuknya organik nggak beraturan (bukan kotak/gelombang) */}
+            <path d="M216,50 C214,14 176,-6 128,0 C92,4 92,-6 56,2 C24,9 6,26 6,58 C6,92 16,114 42,128 C70,144 98,128 124,146 C154,166 190,160 204,126 C214,102 216,82 216,50 Z" fill="url(#loginBlobGradient)" />
+          </svg>
+          <div className="relative z-10 h-full flex flex-col justify-center px-8">
+            <h1 className="text-3xl font-extrabold text-white tracking-tight leading-tight">Welcome<br />Back!</h1>
+            <p className="text-xs text-white/85 mt-2 max-w-[260px]">Masuk ke WHISys ERP untuk lanjut kelola operasional Umrah, Haji & Wisata Halal.</p>
           </div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Hai, Friends!</h1>
-          <p className="text-xs text-slate-400 mt-2">Masuk ke WHISys ERP untuk lanjut kelola operasional Wisata Halal Internasional yuk!.</p>
         </div>
 
-        {error && (
-          <div className="relative mb-4 p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        <form onSubmit={handleLogin} className="relative space-y-4 text-xs">
-          <div>
-            <label className="block mb-1 font-medium text-slate-300">Email Administrator / Staf</label>
-            <div className="relative">
-              <Mail className="w-4 h-4 text-slate-400 absolute left-4 top-3.5" />
-              <input
-                type="email" required
-                placeholder="nama@wisatahalalindonesia.com"
-                className="w-full bg-slate-950 border border-slate-800 rounded-full pl-10 pr-4 py-3 text-white focus:outline-none focus:border-emerald-500"
-                value={email} onChange={e => setEmail(e.target.value)}
-              />
+        <div className="relative p-8 pt-6">
+          {error && (
+            <div className="relative mb-4 p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
             </div>
-          </div>
+          )}
 
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="font-medium text-slate-300">Password</label>
-              <button
-                type="button"
-                onClick={handleOpenForgotModal}
-                className="text-emerald-500 hover:text-emerald-400 font-medium"
-              >
-                Lupa Password?
-              </button>
+          <form onSubmit={handleLogin} className="relative space-y-4 text-xs">
+            <div>
+              <label className="block mb-1 font-medium text-slate-300">Email Administrator / Staf</label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-slate-400 absolute left-4 top-3.5" />
+                <input
+                  type="email" required
+                  placeholder="nama@wisatahalalindonesia.com"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-full pl-10 pr-4 py-3 text-white focus:outline-none focus:border-emerald-500"
+                  value={email} onChange={e => setEmail(e.target.value)}
+                />
+              </div>
             </div>
-            <div className="relative">
-              <Lock className="w-4 h-4 text-slate-400 absolute left-4 top-3.5" />
-              <input
-                type="password" required
-                placeholder="••••••••"
-                className="w-full bg-slate-950 border border-slate-800 rounded-full pl-10 pr-4 py-3 text-white focus:outline-none focus:border-emerald-500"
-                value={password} onChange={e => setPassword(e.target.value)}
-              />
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="font-medium text-slate-300">Password</label>
+                <button
+                  type="button"
+                  onClick={handleOpenForgotModal}
+                  className="text-emerald-500 hover:text-emerald-400 font-medium"
+                >
+                  Lupa Password?
+                </button>
+              </div>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-slate-400 absolute left-4 top-3.5" />
+                <input
+                  type="password" required
+                  placeholder="••••••••"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-full pl-10 pr-4 py-3 text-white focus:outline-none focus:border-emerald-500"
+                  value={password} onChange={e => setPassword(e.target.value)}
+                />
+              </div>
             </div>
+
+            <button
+              type="submit" disabled={loading}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-full font-semibold transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2 mt-2"
+            >
+              {loading ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              ) : (
+                'Masuk ke Sistem ERP'
+              )}
+            </button>
+          </form>
+
+          <div className="relative mt-8 pt-4 border-t border-slate-800 text-center text-[11px] text-slate-500">
+            PT Wisata Halal Indonesia • Secure Enterprise System
           </div>
-
-          <button
-            type="submit" disabled={loading}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-full font-semibold transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2 mt-2"
-          >
-            {loading ? (
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-            ) : (
-              'Masuk ke Sistem ERP'
-            )}
-          </button>
-        </form>
-
-        <div className="relative mt-8 pt-4 border-t border-slate-800 text-center text-[11px] text-slate-500">
-          PT Wisata Halal Indonesia • Secure Enterprise System
         </div>
 
       </div>
