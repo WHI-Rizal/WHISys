@@ -1070,6 +1070,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
           styles={styles} isDark={isDark} currentUser={currentUser}
           transactions={paymentsIncome} vendorPayments={paymentsVendor}
           operationalExpenses={operationalExpenses} packagesList={packagesList}
+          commissionPayments={commissionPayments}
           onRefresh={fetchData}
         />
       )}
@@ -1965,7 +1966,17 @@ function ArApTab({ styles, isDark, bookingsList, vendorBills, vendorsList }) {
 // =====================================================================
 // TAB 6: LABA RUGI (P&L) — dipindah dari FinanceModule.jsx tab "Laporan"
 // =====================================================================
-function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPayments: allVendorPayments, operationalExpenses, packagesList, onRefresh }) {
+function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPayments: allVendorPayments, operationalExpenses, packagesList, commissionPayments = [], onRefresh }) {
+  // Komisi mitra/agen yang alokasinya ketaut ke paket tertentu (lihat
+  // `allocations` di partner_commission_payments, diisi AgentsModule.jsx
+  // pas staf pilih pemesanan mana yang dibayar) — di-flatten sekali di sini
+  // biar gampang di-sum per packageId pas Akui Pendapatan/Batalkan
+  // Pengakuan, sama kayak vendorPayments di bawah.
+  const commissionAllocations = commissionPayments.flatMap(cp => cp.allocations || []);
+  const getCommissionTotalForPackage = (packageId) => commissionAllocations
+    .filter(a => a.packageId === packageId)
+    .reduce((acc, a) => acc + (Number(a.commissionAmount) || 0), 0);
+
   // Pembayaran vendor yang udah dikonversi ke Saldo Deposit Vendor (DP batal
   // tapi nggak hangus, kayak tiket block-seat yang di-roll-over ke
   // keberangkatan berikutnya) SUDAH diakui HPP/selisihnya sendiri secara
@@ -2109,7 +2120,12 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
     : [];
   const totalSelectedPkgIncome = selectedPkgIncomes.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const totalSelectedPkgVendorCost = selectedPkgVendorCosts.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-  const selectedPkgProfit = totalSelectedPkgIncome - totalSelectedPkgVendorCost;
+  // Komisi mitra/agen yang udah dibayar & dialokasikan ke paket ini —
+  // ikut ditampilkan terpisah dari Biaya Vendor biar jelas asalnya, tapi
+  // sama-sama mengurangi margin (konsisten sama vendorTotal di Akui
+  // Pendapatan, lihat getCommissionTotalForPackage di atas).
+  const totalSelectedPkgCommissionCost = selectedPackageForDetail ? getCommissionTotalForPackage(selectedPackageForDetail.id) : 0;
+  const selectedPkgProfit = totalSelectedPkgIncome - totalSelectedPkgVendorCost - totalSelectedPkgCommissionCost;
 
   const recognizedPackagesInPeriod = packagesList.filter(pkg => {
     if (!pkg.revenueRecognized) return false;
@@ -2121,7 +2137,8 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
     const pkgVendorCost = vendorPayments
       .filter(vp => vp.packageId === pkg.id || (!vp.packageId && vp.packageName === pkg.name))
-      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
+      + getCommissionTotalForPackage(pkg.id);
     return { pkg, pkgIncome, pkgVendorCost, profit: pkgIncome - pkgVendorCost };
   });
 
@@ -2154,9 +2171,14 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
       const incomeTotal = transactions
         .filter(tx => (tx.packageId ? tx.packageId === pkgToRecognize.id : tx.packageName === pkgToRecognize.name))
         .reduce((acc, tx) => acc + (Number(tx.amount) || 0), 0);
+      // HPP paket ini = biaya vendor + komisi mitra/agen yang udah dibayar &
+      // dialokasikan ke paket ini (lihat getCommissionTotalForPackage di
+      // atas) — biar Margin Realisasi di Analisa Margin ikut merefleksikan
+      // biaya komisi reseller yang beneran keluar, bukan cuma biaya vendor.
       const vendorTotal = vendorPayments
         .filter(vp => (vp.packageId ? vp.packageId === pkgToRecognize.id : vp.packageName === pkgToRecognize.name))
-        .reduce((acc, vp) => acc + (Number(vp.amount) || 0), 0);
+        .reduce((acc, vp) => acc + (Number(vp.amount) || 0), 0)
+        + getCommissionTotalForPackage(pkgToRecognize.id);
 
       await updateDoc(doc(db, 'packages', pkgToRecognize.id), { revenueRecognized: true, recognizedAt: isoDate });
       await postRevenueRecognition({
@@ -2180,7 +2202,8 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
         .reduce((acc, tx) => acc + (Number(tx.amount) || 0), 0);
       const vendorTotal = vendorPayments
         .filter(vp => (vp.packageId ? vp.packageId === pkg.id : vp.packageName === pkg.name))
-        .reduce((acc, vp) => acc + (Number(vp.amount) || 0), 0);
+        .reduce((acc, vp) => acc + (Number(vp.amount) || 0), 0)
+        + getCommissionTotalForPackage(pkg.id);
 
       await updateDoc(doc(db, 'packages', pkg.id), { revenueRecognized: false, recognizedAt: null });
       await postRevenueUnrecognition({
@@ -2514,7 +2537,8 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
                     .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
                   const pkgVendorCost = vendorPayments
                     .filter(vp => vp.packageId === pkg.id || (!vp.packageId && vp.packageName === pkg.name))
-                    .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+                    .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
+                    + getCommissionTotalForPackage(pkg.id);
                   const profit = pkgIncome - pkgVendorCost;
                   const isProfit = profit >= 0;
 
@@ -2603,7 +2627,8 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
                 .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
               const pkgVendorCost = vendorPayments
                 .filter(vp => vp.packageId === pkg.id || (!vp.packageId && vp.packageName === pkg.name))
-                .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+                .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
+                + getCommissionTotalForPackage(pkg.id);
               const profit = pkgIncome - pkgVendorCost;
               const isProfit = profit >= 0;
 
@@ -2738,7 +2763,7 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
               )}
             </div>
 
-            <div className="grid grid-cols-3 gap-3 mb-6">
+            <div className={`grid gap-3 mb-6 ${totalSelectedPkgCommissionCost > 0 ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-3'}`}>
               <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
                 <span className={`text-[10px] ${styles.textSub} uppercase`}>Total Omset (Setoran)</span>
                 <p className="text-sm font-bold text-emerald-500 mt-1">Rp {totalSelectedPkgIncome.toLocaleString('id-ID')}</p>
@@ -2747,6 +2772,12 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
                 <span className={`text-[10px] ${styles.textSub} uppercase`}>Total Biaya Vendor (HPP)</span>
                 <p className="text-sm font-bold text-rose-500 mt-1">Rp {totalSelectedPkgVendorCost.toLocaleString('id-ID')}</p>
               </div>
+              {totalSelectedPkgCommissionCost > 0 && (
+                <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
+                  <span className={`text-[10px] ${styles.textSub} uppercase`}>Komisi Mitra (HPP)</span>
+                  <p className="text-sm font-bold text-rose-500 mt-1">Rp {totalSelectedPkgCommissionCost.toLocaleString('id-ID')}</p>
+                </div>
+              )}
               <div className={`${styles.innerBg} p-3 rounded-lg border text-center`}>
                 <span className={`text-[10px] ${styles.textSub} uppercase`}>Margin Laba Bersih</span>
                 <p className={`text-sm font-bold mt-1 ${selectedPkgProfit >= 0 ? 'text-blue-500' : 'text-amber-500'}`}>
