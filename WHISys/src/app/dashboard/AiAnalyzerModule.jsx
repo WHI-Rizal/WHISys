@@ -101,8 +101,55 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     fetchAllData();
   }, []);
 
-  const totalOmset = incomes.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-  const totalVendorCost = vendorCosts.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  // "Total Omset Real" DULU dihitung dari uang setoran yang beneran masuk
+  // (payments_income, cash-basis, all-time, semua booking). Diubah (22 Sep
+  // 2026) jadi berbasis NILAI BOOKING (Pendapatan Diterima Dimuka), filter
+  // closingSourceType === 'tc' + status BUKAN 'cancelled' (sama kayak
+  // Laporan Closing TC & Komisi di FinanceModule.jsx) — TAPI periodenya
+  // BUKAN tanggal transaksi (createdAt), melainkan PERIODE KEBERANGKATAN
+  // (`bk.departureDate`, dicopy dari paket pas booking dibuat). Jadi kalau
+  // sekarang bulan September, yang kehitung itu total nilai booking yang
+  // BERANGKAT bulan September — bukan yang dibooking bulan September.
+  // Reset otomatis tiap ganti bulan kalender, nggak ada input manual.
+  // `incomes` (payments_income) udah nggak dipakai lagi buat metrik ini.
+  const toLocalDateOnlyString = (dateInput) => {
+    if (!dateInput) return null;
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return null;
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  const currentMonthKey = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  })();
+  const closingTcBookingsThisMonth = bookings
+    .filter(bk => bk.closingSourceType === 'tc' && bk.closingSourceId && bk.status !== 'cancelled')
+    .filter(bk => {
+      const departureKey = toLocalDateOnlyString(bk.departureDate);
+      return !!departureKey && departureKey.startsWith(currentMonthKey);
+    });
+  const totalOmset = closingTcBookingsThisMonth.reduce((acc, bk) => acc + (Number(bk.totalAmount) || 0), 0);
+  // "HPP Biaya Vendor" DULU dari payments_vendor (cash actual yang beneran
+  // dibayar ke vendor, all-time, semua paket) — basisnya nggak nyambung lagi
+  // sama Total Omset di atas yang sekarang accrual (nilai booking, bukan
+  // cash). payments_vendor emang cocoknya buat Laporan Arus Kas, bukan buat
+  // kartu "Est. Margin Bersih" ini. Diganti (22 Sep 2026) jadi Planning
+  // Cost per pax (`pkg.budgetCostTotal / pkg.quotaTotal`, field yang sama
+  // dipakai tab Analisa Margin > Planning vs Realisasi) dikali jumlah
+  // booking di `closingTcBookingsThisMonth` (closing TC, aktif, PERIODE
+  // KEBERANGKATAN bulan ini) per paket — accrual, matching persis sama
+  // basis & periode Total Omset.
+  const totalVendorCost = closingTcBookingsThisMonth.reduce((acc, bk) => {
+    const pkg = packages.find(p => p.id === bk.packageId);
+    if (!pkg) return acc;
+    const quotaTotal = Number(pkg.quotaTotal) || 0;
+    const budgetCostTotal = Number(pkg.budgetCostTotal) || 0;
+    if (quotaTotal <= 0) return acc;
+    return acc + (budgetCostTotal / quotaTotal);
+  }, 0);
   const netMargin = totalOmset - totalVendorCost;
   // Cuma booking yang statusnya masih 'active' yang beneran makan seat —
   // yang udah dibatalkan/di-reschedule kuotanya udah dikembalikan ke paket
@@ -342,7 +389,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className={`${styles.cardBg} p-4 rounded-xl border`}>
           <div className="flex items-center justify-between mb-2">
-            <span className={`text-xs ${styles.textSub}`}>Total Omset Real</span>
+            <span className={`text-xs ${styles.textSub}`}>Total Omset Real (Closing TC, Keberangkatan Bulan Ini)</span>
             <Wallet className="w-4 h-4 text-emerald-500" />
           </div>
           <h4 className="text-lg font-bold text-emerald-500">Rp {totalOmset.toLocaleString('id-ID')}</h4>
@@ -350,7 +397,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
 
         <div className={`${styles.cardBg} p-4 rounded-xl border`}>
           <div className="flex items-center justify-between mb-2">
-            <span className={`text-xs ${styles.textSub}`}>HPP Biaya Vendor</span>
+            <span className={`text-xs ${styles.textSub}`}>HPP Biaya Vendor (Planning, Keberangkatan Bulan Ini)</span>
             <Wallet className="w-4 h-4 text-rose-500" />
           </div>
           <h4 className="text-lg font-bold text-rose-500">Rp {totalVendorCost.toLocaleString('id-ID')}</h4>
