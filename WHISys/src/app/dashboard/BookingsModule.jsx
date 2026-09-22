@@ -10,6 +10,7 @@ import { calculatePPN, addPPN } from '../../lib/ppn';
 import { getNextCustomerCode } from '../../lib/customerCode';
 import { postBookingCreated, postIncomePayment, postBookingCancelRefund, postJournalEntry, deleteJournalEntriesBySource, deleteAllJournalEntriesForBooking, resyncBookingCreatedJournalDate, ACC } from '../../lib/journal';
 import SearchableSelect from '@/components/SearchableSelect';
+import DateFieldID from '@/components/DateFieldID';
 
 // Firestore where(..., 'in', [...]) cuma dukung maks 30 nilai sekaligus —
 // buat query yang array-nya bisa aja lebih dari itu (grup rombongan gede),
@@ -5796,11 +5797,10 @@ Terimakasih🙏`;
                   />
                   <div>
                     <label className="text-[10px] opacity-70 block mb-1">Tanggal Lahir (wajib — dipakai buat login Portal Jamaah)</label>
-                    <input
-                      type="date"
+                    <DateFieldID
                       className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                       value={newOrdererForm.birthDate}
-                      onChange={e => setNewOrdererForm({ ...newOrdererForm, birthDate: e.target.value })}
+                      onChange={(val) => setNewOrdererForm({ ...newOrdererForm, birthDate: val })}
                     />
                   </div>
                   <p className="text-[10px] opacity-70">Data lengkap lainnya (KTP, alamat, dll) bisa dilengkapi belakangan di menu Data Master Jamaah.</p>
@@ -5886,11 +5886,10 @@ Terimakasih🙏`;
                         />
                         <div>
                           <label className="text-[10px] opacity-70 block mb-1">Tanggal Lahir (wajib — dipakai buat login Portal Jamaah)</label>
-                          <input
-                            type="date"
+                          <DateFieldID
                             className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                             value={entry.newJamaah.birthDate}
-                            onChange={e => handlePesertaNewJamaahChange(idx, 'birthDate', e.target.value)}
+                            onChange={(val) => handlePesertaNewJamaahChange(idx, 'birthDate', val)}
                           />
                         </div>
                         <p className="text-[10px] opacity-70">Data lengkap lainnya (KTP, alamat, dll) bisa dilengkapi belakangan di menu Data Master Jamaah.</p>
@@ -6031,12 +6030,11 @@ Terimakasih🙏`;
                   </p>
                   <div>
                     <label className="block mb-1 font-medium">Tanggal Transaksi</label>
-                    <input
-                      type="date"
+                    <DateFieldID
                       max={editBookingMinPaymentDate || undefined}
                       className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                       value={formData.transactionDate}
-                      onChange={e => setFormData({ ...formData, transactionDate: e.target.value })}
+                      onChange={(val) => setFormData({ ...formData, transactionDate: val })}
                     />
                     {editBookingMinPaymentDate && (
                       <p className="text-[10px] mt-1 opacity-70">
@@ -6333,12 +6331,11 @@ Terimakasih🙏`;
                     })()}
                     <div>
                       <label className="block mb-1 font-medium">Tanggal Setoran</label>
-                      <input
-                        type="date"
+                      <DateFieldID
                         min={editingBookingId ? getBookingMinDate(bookings.find(b => b.id === editingBookingId)?.createdAt) : undefined}
                         className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                         value={formData.paymentDate}
-                        onChange={e => setFormData({ ...formData, paymentDate: e.target.value })}
+                        onChange={(val) => setFormData({ ...formData, paymentDate: val })}
                       />
                       <p className="text-[10px] mt-1 opacity-70">
                         {editingBookingId
@@ -6414,12 +6411,11 @@ Terimakasih🙏`;
                                   (Tanggal | Metode & Catatan | Nominal) — Metode & Catatan digabung
                                   jadi 1 sel biar nggak geser posisi kolom Nominal di sebelahnya. */}
                               <div className="grid grid-cols-3 gap-2">
-                                <input
-                                  type="date"
+                                <DateFieldID
                                   min={getBookingMinDate(selectedBookingForHistory?.createdAt)}
                                   className={`${styles.inputBg} p-1.5 rounded`}
                                   value={paymentEditForm.date}
-                                  onChange={e => setPaymentEditForm({ ...paymentEditForm, date: e.target.value })}
+                                  onChange={(val) => setPaymentEditForm({ ...paymentEditForm, date: val })}
                                 />
                                 <div className="flex gap-1">
                                   <select
@@ -6518,12 +6514,11 @@ Terimakasih🙏`;
                   <div key={pay.id} className={`${styles.innerBg} border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg p-3 text-xs`}>
                     {editingPaymentId === pay.id && canManagePayments ? (
                       <div className="space-y-2">
-                        <input
-                          type="date"
+                        <DateFieldID
                           min={getBookingMinDate(selectedBookingForHistory?.createdAt)}
                           className={`w-full ${styles.inputBg} p-1.5 rounded`}
                           value={paymentEditForm.date}
-                          onChange={e => setPaymentEditForm({ ...paymentEditForm, date: e.target.value })}
+                          onChange={(val) => setPaymentEditForm({ ...paymentEditForm, date: val })}
                         />
                         <div className="flex gap-1">
                           <select
@@ -6851,12 +6846,11 @@ Terimakasih🙏`;
               })()}
               <div>
                 <label className="block mb-1 font-medium">Tanggal Setoran</label>
-                <input
-                  type="date"
+                <DateFieldID
                   min={getBookingMinDate(groupPaymentTarget.primary?.createdAt)}
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                   value={groupPaymentForm.date}
-                  onChange={e => setGroupPaymentForm({ ...groupPaymentForm, date: e.target.value })}
+                  onChange={(val) => setGroupPaymentForm({ ...groupPaymentForm, date: val })}
                 />
                 <p className="text-[10px] mt-1 opacity-70">
                   Nggak bisa sebelum tanggal pemesanan dibuat ({getBookingMinDate(groupPaymentTarget.primary?.createdAt).split('-').reverse().join('/')}).
@@ -6929,12 +6923,11 @@ Terimakasih🙏`;
                             <>
                               <td className="p-2" colSpan="3">
                                 <div className="grid grid-cols-3 gap-2">
-                                  <input
-                                    type="date"
+                                  <DateFieldID
                                     min={getBookingMinDate(groupHistoryItems.find(b => b.id === singlePay.bookingId)?.createdAt)}
                                     className={`${styles.inputBg} p-1.5 rounded`}
                                     value={paymentEditForm.date}
-                                    onChange={e => setPaymentEditForm({ ...paymentEditForm, date: e.target.value })}
+                                    onChange={(val) => setPaymentEditForm({ ...paymentEditForm, date: val })}
                                   />
                                   <div className="flex gap-1">
                                     <select
@@ -7045,12 +7038,11 @@ Terimakasih🙏`;
                     <div key={tx.key} className={`${styles.innerBg} border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg p-3 text-xs`}>
                       {isEditingThis && canManagePayments ? (
                         <div className="space-y-2">
-                          <input
-                            type="date"
+                          <DateFieldID
                             min={getBookingMinDate(groupHistoryItems.find(b => b.id === singlePay.bookingId)?.createdAt)}
                             className={`w-full ${styles.inputBg} p-1.5 rounded`}
                             value={paymentEditForm.date}
-                            onChange={e => setPaymentEditForm({ ...paymentEditForm, date: e.target.value })}
+                            onChange={(val) => setPaymentEditForm({ ...paymentEditForm, date: val })}
                           />
                           <div className="flex gap-1">
                             <select
@@ -7241,11 +7233,10 @@ Terimakasih🙏`;
                   />
                   <div>
                     <label className="text-[10px] opacity-70 block mb-1">Tanggal Lahir (wajib — dipakai buat login Portal Jamaah)</label>
-                    <input
-                      type="date"
+                    <DateFieldID
                       className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                       value={addPaxForm.newJamaah.birthDate}
-                      onChange={e => setAddPaxForm({ ...addPaxForm, newJamaah: { ...addPaxForm.newJamaah, birthDate: e.target.value } })}
+                      onChange={(val) => setAddPaxForm({ ...addPaxForm, newJamaah: { ...addPaxForm.newJamaah, birthDate: val } })}
                     />
                   </div>
                 </div>
@@ -7363,11 +7354,10 @@ Terimakasih🙏`;
                   />
                   <div>
                     <label className="text-[10px] opacity-70 block mb-1">Tanggal Lahir (wajib — dipakai buat login Portal Jamaah)</label>
-                    <input
-                      type="date"
+                    <DateFieldID
                       className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                       value={groupEditNewOrdererForm.birthDate}
-                      onChange={e => setGroupEditNewOrdererForm({ ...groupEditNewOrdererForm, birthDate: e.target.value })}
+                      onChange={(val) => setGroupEditNewOrdererForm({ ...groupEditNewOrdererForm, birthDate: val })}
                     />
                   </div>
                 </div>
@@ -7639,11 +7629,10 @@ Terimakasih🙏`;
                 })()}
                 <div>
                   <label className="block mb-1 font-medium">Tanggal Setoran</label>
-                  <input
-                    type="date"
+                  <DateFieldID
                     className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                     value={groupEditForm.addPaymentDate}
-                    onChange={e => setGroupEditForm({ ...groupEditForm, addPaymentDate: e.target.value })}
+                    onChange={(val) => setGroupEditForm({ ...groupEditForm, addPaymentDate: val })}
                   />
                 </div>
                 <div>
