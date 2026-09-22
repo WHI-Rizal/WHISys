@@ -128,7 +128,7 @@ export default function LoginPage() {
           </svg>
           <div className="relative z-10 h-full flex flex-col justify-center px-8">
             <h1 className="text-3xl font-extrabold text-white tracking-tight leading-tight">Welcome<br />Back!</h1>
-            <p className="text-xs text-white/85 mt-2 max-w-[260px]">Masuk ke WHISys ERP untuk lanjut kelola operasional Umrah, Haji & Wisata Halal.</p>
+            <p className="text-xs text-white/85 mt-2 max-w-[260px]">Masuk ke WHISys ERP untuk lanjut kelola operasional Wisata Halal Internasional yuk!.</p>
           </div>
         </div>
 
