@@ -2165,11 +2165,10 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                         </div>
                         <div>
                           <label className="block mb-1 text-[10px] font-medium opacity-60">Tanggal</label>
-                          <input
-                            type="date"
+                          <DateFieldID
                             className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`}
                             value={seg.date}
-                            onChange={e => handleFlightSegmentChange(idx, 'date', e.target.value)}
+                            onChange={(val) => handleFlightSegmentChange(idx, 'date', val)}
                           />
                         </div>
                       </div>
