@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Search, MapPin, Calendar, FileText, Loader2, AlertTriangle } from 'lucide-react';
+import { Search, MapPin, Calendar, Plane, Loader2, AlertTriangle } from 'lucide-react';
 import {
   formatTanggalPanjang, monthYearKey, monthYearLabel, formatRupiah, hargaMulai,
 } from '@/lib/publicCatalogFormat';
@@ -235,10 +235,12 @@ export default function KatalogPublikPage() {
                         </span>
                       )}
                     </div>
-                    <p className="text-xs italic text-slate-400 inline-flex items-start gap-1">
-                      <FileText className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                      {pkg.specialNote ? pkg.specialNote : 'Deskripsi paket belum tersedia'}
-                    </p>
+                    {pkg.airline && (
+                      <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+                        <Plane className="w-3.5 h-3.5" />
+                        {pkg.airline}
+                      </span>
+                    )}
                     <div className="mt-1 border-t border-slate-100 pt-2 flex items-center justify-between text-xs">
                       {typeof pkg.quotaRemaining === 'number' && (
                         <span className="text-amber-600 font-medium">Sisa Seat: {pkg.quotaRemaining}</span>
