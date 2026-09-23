@@ -4,10 +4,10 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft, Printer, MapPin, Calendar, Plane, Hotel, CheckCircle2, XCircle,
-  Loader2, AlertTriangle, MessageCircle, Users,
+  Loader2, AlertTriangle, Users,
 } from 'lucide-react';
 import {
-  formatTanggalPanjang, formatRupiah, hargaMulai, waLinkUntukPaket,
+  formatTanggalPanjang, formatRupiah, hargaMulai,
 } from '@/lib/publicCatalogFormat';
 
 // ============================================================================
@@ -344,7 +344,6 @@ export default function DetailPaketPage({ params }) {
   const harga = hargaMulai(pkg);
   const isLAOnly = pkg.type === 'Land Arrangement (LA) Only';
   const isUmrohHaji = pkg.type === 'Umroh Regular' || pkg.type === 'Umroh VIP / Plus' || pkg.type === 'Haji Khusus / Furoda';
-  const wa = waLinkUntukPaket(pkg);
 
   const hargaRows = [
     { label: 'Harga Utama', value: pkg.priceMain },
@@ -390,7 +389,10 @@ export default function DetailPaketPage({ params }) {
             </p>
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-3">{pkg.name}</h1>
 
-            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600 mb-4">
+            {/* Ke bawah (bukan menyamping) — dulu flex-wrap sejajar, sekarang
+                ditumpuk satu kolom biar rapi soal tombol WA di kotak harga
+                udah dihapus jadi kotaknya nggak longgar-longgar amat. */}
+            <div className="flex flex-col gap-1.5 text-sm text-slate-600 mb-4">
               <span className="inline-flex items-center gap-1.5">
                 <Calendar className="w-4 h-4 text-emerald-700" />
                 Keberangkatan {formatTanggalPanjang(pkg.departureDate)}
@@ -408,24 +410,19 @@ export default function DetailPaketPage({ params }) {
                   Sisa Seat: {pkg.quotaRemaining}
                 </span>
               )}
+              {pkg.airline && (
+                <span className="inline-flex items-center gap-1.5">
+                  <Plane className="w-4 h-4 text-emerald-700" />
+                  {pkg.airline}
+                </span>
+              )}
             </div>
 
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex flex-col sm:items-start gap-3">
-              <div>
-                <p className="text-xs text-emerald-700 font-medium">Harga mulai</p>
-                <p className="text-2xl font-bold text-emerald-800">
-                  {harga ? `${formatRupiah(harga)} /pax` : 'Hubungi kami'}
-                </p>
-              </div>
-              <a
-                href={wa}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="print:hidden w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg px-5 py-3 transition-colors"
-              >
-                <MessageCircle className="w-4 h-4" />
-                Konsultasi / Pesan via WhatsApp
-              </a>
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+              <p className="text-xs text-emerald-700 font-medium">Harga mulai</p>
+              <p className="text-2xl font-bold text-emerald-800">
+                {harga ? `${formatRupiah(harga)} /pax` : 'Hubungi kami'}
+              </p>
             </div>
           </div>
         </div>
@@ -596,15 +593,6 @@ export default function DetailPaketPage({ params }) {
 
         {/* CTA bawah */}
         <div className="print:hidden flex flex-col sm:flex-row gap-3 mt-8">
-          <a
-            href={wa}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-1 inline-flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg px-5 py-3 transition-colors"
-          >
-            <MessageCircle className="w-4 h-4" />
-            Konsultasi / Pesan Paket Ini
-          </a>
           <Link
             href="/katalog"
             className="flex-1 inline-flex items-center justify-center gap-2 border border-slate-300 text-slate-700 hover:bg-slate-100 text-sm font-bold rounded-lg px-5 py-3 transition-colors"
