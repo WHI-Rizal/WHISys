@@ -130,7 +130,7 @@ export default function LoginPage() {
           </svg>
           <div className="relative z-10 h-full flex flex-col justify-center px-8">
             <h1 className="text-3xl font-extrabold text-white tracking-tight leading-tight">Welcome<br />Back!</h1>
-            <p className="text-xs text-white/85 mt-2 max-w-[260px]">Masuk ke WHISys ERP untuk lanjut kelola operasional Umrah, Haji & Wisata Halal.</p>
+            <p className="text-xs text-white/85 mt-2 max-w-[260px]">Masuk ke WHISys ERP untuk lanjut kelola operasional Wisata Halal yuk!</p>
           </div>
         </div>
 
@@ -191,7 +191,7 @@ export default function LoginPage() {
           </form>
 
           <div className="relative mt-8 pt-4 border-t border-slate-800 text-center text-[11px] text-slate-500">
-            PT Wisata Halal Indonesia • Secure Enterprise System
+            PT Wisata Halal Internasional • Secure Enterprise System
           </div>
         </div>
 
