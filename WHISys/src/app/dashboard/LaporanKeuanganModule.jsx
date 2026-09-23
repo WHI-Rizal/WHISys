@@ -3398,6 +3398,8 @@ function BankReconciliationTab({ styles, isDark, currentUser, financialAccounts 
   const [loading, setLoading] = useState(true);
   const [filterAccountId, setFilterAccountId] = useState('all');
   const [filterStatus, setFilterStatus] = useState('unmatched');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
   const [importAccountId, setImportAccountId] = useState('');
   const [importFile, setImportFile] = useState(null);
@@ -3651,6 +3653,9 @@ function BankReconciliationTab({ styles, isDark, currentUser, financialAccounts 
   const filteredLines = lines.filter(l => {
     if (filterAccountId !== 'all' && l.accountId !== filterAccountId) return false;
     if (filterStatus !== 'all' && l.matchStatus !== filterStatus) return false;
+    const lineDateStr = (l.date || '').slice(0, 10);
+    if (filterDateFrom && lineDateStr < filterDateFrom) return false;
+    if (filterDateTo && lineDateStr > filterDateTo) return false;
     return true;
   });
 
@@ -3707,6 +3712,27 @@ function BankReconciliationTab({ styles, isDark, currentUser, financialAccounts 
             <option value="ignored">Diabaikan</option>
             <option value="all">Semua</option>
           </select>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)}
+              className={`px-2 py-1.5 rounded-lg border text-xs ${styles.inputBg}`}
+              title="Dari tanggal"
+            />
+            <span className={`text-xs ${styles.textSub}`}>s/d</span>
+            <input
+              type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)}
+              className={`px-2 py-1.5 rounded-lg border text-xs ${styles.inputBg}`}
+              title="Sampai tanggal"
+            />
+            {(filterDateFrom || filterDateTo) && (
+              <button
+                onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); }}
+                className={`text-xs ${styles.textSub} hover:underline`}
+              >
+                Reset
+              </button>
+            )}
+          </div>
         </div>
 
         {selectedLineIds.size > 0 && (
