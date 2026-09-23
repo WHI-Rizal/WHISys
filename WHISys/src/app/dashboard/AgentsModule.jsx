@@ -141,6 +141,35 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
     }
   };
 
+  // Cek apakah pembayaran komisi ini (lewat account_mutations yang nempel ke
+  // sourceDocId tertentu) udah "dicocokkan" (matched) ke salah satu baris
+  // Rekonsiliasi Bank. Dipake buat NGEBLOK hapus pembayaran yang udah
+  // direkon, biar link matchedMutationId di bank_statement_lines nggak
+  // ujug-ujug nyantol ke mutasi yang udah kehapus. Staff harus lepas
+  // kecocokannya dulu lewat Laporan Keuangan > Rekonsiliasi Bank.
+  const isAccountMutationReconciled = async (accountId, sourceDocIds) => {
+    const ids = Array.from(new Set((Array.isArray(sourceDocIds) ? sourceDocIds : [sourceDocIds]).filter(Boolean)));
+    if (!accountId || ids.length === 0) return false;
+    const mutationIds = new Set();
+    for (let i = 0; i < ids.length; i += 10) {
+      const chunk = ids.slice(i, i + 10);
+      const mutQ = query(collection(db, 'account_mutations'), where('accountId', '==', accountId), where('sourceDocId', 'in', chunk));
+      const mutSnap = await getDocs(mutQ);
+      mutSnap.docs.forEach(d => mutationIds.add(d.id));
+    }
+    if (mutationIds.size === 0) return false;
+    const mutationIdList = Array.from(mutationIds);
+    for (let i = 0; i < mutationIdList.length; i += 10) {
+      const chunk = mutationIdList.slice(i, i + 10);
+      const bslQ = query(collection(db, 'bank_statement_lines'), where('matchedMutationId', 'in', chunk), where('matchStatus', '==', 'matched'));
+      const bslSnap = await getDocs(bslQ);
+      if (!bslSnap.empty) return true;
+    }
+    return false;
+  };
+
+  const RECON_BLOCK_MSG = 'Transaksi ini sudah "dicocokkan" (rekonsiliasi) dengan salah satu baris mutasi bank. Lepas dulu kecocokannya lewat menu Laporan Keuangan > Rekonsiliasi Bank, baru transaksi ini bisa dihapus/diedit.';
+
   // ============ 1. DATA MASTER MITRA & AGEN ============
 
   // Jenis mitra bawaan — tapi nggak dikunci cuma ini doang. User bisa nambah
@@ -557,6 +586,10 @@ export default function AgentsModule({ theme = 'dark', userRole = '', currentUse
       return;
     }
     if (processingPaymentId) return; // udah ada request lagi jalan, cegah dobel klik
+    if (pay.accountId && await isAccountMutationReconciled(pay.accountId, [pay.id])) {
+      alert(RECON_BLOCK_MSG);
+      return;
+    }
     if (!confirm(`Hapus riwayat pembayaran komisi Rp ${Number(pay.amount).toLocaleString('id-ID')} ke "${pay.partnerName}"? Saldo Kas/Bank akan dikembalikan.`)) return;
     setProcessingPaymentId(pay.id);
     try {
