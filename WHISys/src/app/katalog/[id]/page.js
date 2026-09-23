@@ -375,59 +375,60 @@ export default function DetailPaketPage({ params }) {
       </div>
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        {/* Hero */}
-        {pkg.flyerImageDataUrl && (
-          <div className="rounded-xl overflow-hidden mb-6 border border-slate-200 bg-slate-100 flex items-center justify-center">
-            {/* Sengaja TANPA object-cover + max-h — flyer biasanya udah
-                didesain penuh dengan judul/harga di dalamnya, jadi kalau
-                dipotong/di-crop teks pentingnya bisa ilang. Tingginya
-                ngikutin rasio asli gambar (w-full + h-auto), sama kayak
-                kartu di halaman daftar katalog. */}
-            <img src={pkg.flyerImageDataUrl} alt={pkg.name} className="w-full h-auto block" />
-          </div>
-        )}
-
-        <p className="text-xs font-semibold tracking-wide text-emerald-700 uppercase mb-1">
-          {pkg.type || 'Paket Perjalanan'}{pkg.code ? ` · ${pkg.code}` : ''}
-        </p>
-        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-3">{pkg.name}</h1>
-
-        <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600 mb-4">
-          <span className="inline-flex items-center gap-1.5">
-            <Calendar className="w-4 h-4 text-emerald-700" />
-            Keberangkatan {formatTanggalPanjang(pkg.departureDate)}
-            {pkg.durationDays ? ` · ${pkg.durationDays}` : ''}
-          </span>
-          {pkg.destinationCity && (
-            <span className="inline-flex items-center gap-1.5">
-              <MapPin className="w-4 h-4 text-emerald-700" />
-              {pkg.destinationCity}
-            </span>
+        {/* Hero — flyer di kiri (ukuran ringkas, ikut lebar kolom, nggak
+            di-crop) dan info paket di kanan, niru layout dokumen PDF
+            "Detail Paket Wisata" biar nggak makan tempat kayak sebelumnya. */}
+        <div className="flex flex-col sm:flex-row gap-5 mb-6">
+          {pkg.flyerImageDataUrl && (
+            <div className="sm:w-[42%] shrink-0 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 flex items-start justify-center">
+              <img src={pkg.flyerImageDataUrl} alt={pkg.name} className="w-full h-auto block" />
+            </div>
           )}
-          {typeof pkg.quotaRemaining === 'number' && (
-            <span className="inline-flex items-center gap-1.5">
-              <Users className="w-4 h-4 text-emerald-700" />
-              Sisa Seat: {pkg.quotaRemaining}
-            </span>
-          )}
-        </div>
 
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <p className="text-xs text-emerald-700 font-medium">Harga mulai</p>
-            <p className="text-2xl font-bold text-emerald-800">
-              {harga ? `${formatRupiah(harga)} /pax` : 'Hubungi kami'}
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold tracking-wide text-emerald-700 uppercase mb-1">
+              {pkg.type || 'Paket Perjalanan'}{pkg.code ? ` · ${pkg.code}` : ''}
             </p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-3">{pkg.name}</h1>
+
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600 mb-4">
+              <span className="inline-flex items-center gap-1.5">
+                <Calendar className="w-4 h-4 text-emerald-700" />
+                Keberangkatan {formatTanggalPanjang(pkg.departureDate)}
+                {pkg.durationDays ? ` · ${pkg.durationDays}` : ''}
+              </span>
+              {pkg.destinationCity && (
+                <span className="inline-flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-emerald-700" />
+                  {pkg.destinationCity}
+                </span>
+              )}
+              {typeof pkg.quotaRemaining === 'number' && (
+                <span className="inline-flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-emerald-700" />
+                  Sisa Seat: {pkg.quotaRemaining}
+                </span>
+              )}
+            </div>
+
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex flex-col sm:items-start gap-3">
+              <div>
+                <p className="text-xs text-emerald-700 font-medium">Harga mulai</p>
+                <p className="text-2xl font-bold text-emerald-800">
+                  {harga ? `${formatRupiah(harga)} /pax` : 'Hubungi kami'}
+                </p>
+              </div>
+              <a
+                href={wa}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="print:hidden w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg px-5 py-3 transition-colors"
+              >
+                <MessageCircle className="w-4 h-4" />
+                Konsultasi / Pesan via WhatsApp
+              </a>
+            </div>
           </div>
-          <a
-            href={wa}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="print:hidden inline-flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg px-5 py-3 transition-colors"
-          >
-            <MessageCircle className="w-4 h-4" />
-            Konsultasi / Pesan via WhatsApp
-          </a>
         </div>
 
         {pkg.specialNote && (
