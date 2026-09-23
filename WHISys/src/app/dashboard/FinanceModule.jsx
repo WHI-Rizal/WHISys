@@ -346,6 +346,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // bisa keitung dobel/kelewat kalau ada transaksi yang dibayar pakai Saldo
   // Deposit — itu nggak beneran gerakin Kas/Bank).
   const [journalEntriesForCash, setJournalEntriesForCash] = useState([]);
+  // Riwayat Titip Deposit / Pengembalian Saldo Deposit / pemakaian saldo
+  // deposit dkk (collection `deposit_ledger`) — sebelumnya cuma DITULIS,
+  // nggak pernah dibaca/ditampilkan sama sekali di UI manapun. Sekarang
+  // dipakai buat tab "Riwayat Deposit Jamaah" di bawah.
+  const [depositLedger, setDepositLedger] = useState([]);
   const [bookingsList, setBookingsList] = useState([]);
   const [packagesList, setPackagesList] = useState([]);
   const [jamaahList, setJamaahList] = useState([]);
@@ -464,6 +469,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   const [savingVendorBill, setSavingVendorBill] = useState(false);
   const [savingOperational, setSavingOperational] = useState(false);
   const [activeTab, setActiveTab] = useState('income');
+
+  // Edit Titip Deposit / Pengembalian Saldo Deposit — nyimpen id baris
+  // `deposit_ledger` yang lagi diedit (null = mode catat baru). Dipisah jadi
+  // 2 state karena 2 modal beda (depositForm buat topup, withdrawDepositForm
+  // buat withdrawal), tapi polanya sama kayak editingOperationalId.
+  const [editingDepositId, setEditingDepositId] = useState(null);
+  const [editingWithdrawDepositId, setEditingWithdrawDepositId] = useState(null);
 
   // Tab "Laporan" — HUB laporan-laporan finansial yang bakal terus nambah ke
   // depannya. reportsSubTab nentuin sub-laporan mana yang lagi ditampilkan
@@ -621,6 +633,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       const jeSnap = await getDocs(collection(db, 'journal_entries'));
       setJournalEntriesForCash(jeSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
+      const dlSnap = await getDocs(collection(db, 'deposit_ledger'));
+      setDepositLedger(dlSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
       const vpSnap = await getDocs(collection(db, 'payments_vendor'));
       setVendorPayments(vpSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
@@ -706,30 +721,52 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // SDK kalau ada write bentrok) kalau ternyata saldo real-time-nya udah
   // nggak cukup, dan baru nulis balance + deposit_ledger sekaligus atomik
   // kalau aman.
-  const withdrawDepositBalanceTransactional = async (customerId, customerName, amount, notes, createdAtOverride) => {
-    const amt = Number(amount) || 0;
-    if (!customerId || amt <= 0) return;
+  // Versi GENERIK dari pola transactional di atas — dipakai bareng buat
+  // CATAT BARU, EDIT, dan HAPUS Titip Deposit & Pengembalian Saldo Deposit
+  // (fitur 23 Sep 2026, nutup gap MEDIUM dari audit 17/21 Sep: dua fitur ini
+  // dulu nggak punya UI edit/delete resmi sama sekali, bahkan riwayatnya
+  // `deposit_ledger` juga nggak pernah ditampilkan di UI manapun).
+  //
+  // `netDelta` = perubahan saldo deposit yang mau diterapkan (udah
+  // dihitung di pemanggil — misal buat edit, itu selisih nominal baru
+  // dikurangi nominal lama; buat hapus, itu kebalikan dari nominal barisnya).
+  // Selalu divalidasi dari saldo TERKINI di Firestore (bukan state React
+  // yang mungkin basi) via transaction, biar nggak ada 2 device/tab yang
+  // bisa bikin saldo jadi minus bersamaan (sama kayak alasan
+  // withdrawDepositBalanceTransactional versi lama).
+  //
+  // `ledgerDocId` + `ledgerData` ngatur baris `deposit_ledger`-nya sendiri:
+  // - `ledgerData` object → baris ditulis/ditimpa (create/edit), ID-nya
+  //   SENGAJA dipaksa sama dengan `ledgerDocId` (bukan auto-id kayak
+  //   `addDoc`) biar bisa dipakai juga sebagai `sourceDocId` yang konsisten
+  //   di `account_mutations` & `journal_entries` — tanpa ini, baris
+  //   `deposit_ledger` nggak ada cara buat dilacak balik ke jurnal/mutasi
+  //   kas-nya pas mau diedit/dihapus.
+  // - `ledgerData` null → baris `deposit_ledger` itu DIHAPUS (dipakai pas
+  //   hapus catatan).
+  const applyDepositBalanceDeltaTransactional = async (customerId, netDelta, ledgerDocId, ledgerData) => {
+    const delta = Number(netDelta) || 0;
+    if (!customerId) return;
     const customerRef = doc(db, 'jamaah', customerId);
-    const ledgerRef = doc(collection(db, 'deposit_ledger'));
     await runTransaction(db, async (tx) => {
       const snap = await tx.get(customerRef);
       if (!snap.exists()) {
         throw new Error('Data jamaah nggak ketemu — mungkin baru aja dihapus.');
       }
       const currentBalance = Number(snap.data().depositBalance || 0);
-      if (amt > currentBalance) {
-        throw new Error(`Saldo deposit "${customerName || '-'}" saat ini cuma Rp ${currentBalance.toLocaleString('id-ID')} — nggak cukup buat pengembalian Rp ${amt.toLocaleString('id-ID')} ini. Kemungkinan ada transaksi lain (setoran/pengembalian dari device/tab lain) yang baru aja ngurangin saldonya — refresh halaman ini dan cek ulang saldo terbaru sebelum coba lagi.`);
+      const newBalance = currentBalance + delta;
+      if (newBalance < -0.5) {
+        throw new Error(`Perubahan ini bakal bikin saldo deposit jadi minus (Rp ${Math.round(newBalance).toLocaleString('id-ID')}). Kemungkinan sebagian saldo ini udah kepake buat bayar setoran lain sejak dicatat — nggak bisa diedit/dihapus langsung dari sini, perlu dicek & dikoreksi manual dulu.`);
       }
-      tx.update(customerRef, { depositBalance: currentBalance - amt });
-      tx.set(ledgerRef, {
-        customerId,
-        customerName: customerName || '-',
-        type: 'withdrawal',
-        amount: -amt,
-        notes: notes || '',
-        bookingCode: '',
-        createdAt: createdAtOverride || new Date().toISOString()
-      });
+      if (delta !== 0) tx.update(customerRef, { depositBalance: newBalance });
+      if (ledgerDocId) {
+        const ledgerRef = doc(db, 'deposit_ledger', ledgerDocId);
+        if (ledgerData === null) {
+          tx.delete(ledgerRef);
+        } else if (ledgerData) {
+          tx.set(ledgerRef, ledgerData);
+        }
+      }
     });
   };
 
@@ -1334,35 +1371,76 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     setSavingDeposit(true);
     try {
       const account = financialAccounts.find(a => a.id === depositForm.accountId);
-      await adjustDepositBalance(
-        customer.id,
-        customer.fullName,
-        amountVal,
-        'topup',
-        `${depositForm.notes}${account ? ` (${account.name})` : ''}`,
-        '',
-        resolvePaymentCreatedAt(depositForm.date)
-      );
+      const isEdit = !!editingDepositId;
+      // ID baris deposit_ledger DIPAKSA SAMA dengan sourceDocId account_mutations
+      // & journal_entries (baru maupun edit) — lihat catatan di
+      // applyDepositBalanceDeltaTransactional kenapa ini penting.
+      const ledgerDocId = isEdit ? editingDepositId : `deposit_${customer.id}_${Date.now()}`;
+      let netDelta = amountVal;
+      if (isEdit) {
+        const oldEntry = depositLedger.find(d => d.id === editingDepositId);
+        if (oldEntry?.accountId && await isAccountMutationReconciled(oldEntry.accountId, [editingDepositId])) {
+          alert(RECON_BLOCK_MSG);
+          return;
+        }
+        netDelta = amountVal - (Number(oldEntry?.amount) || 0);
+      }
+      // Terapkan & validasi perubahan saldo deposit DULUAN (transaction ini
+      // yang bisa nolak/throw kalau saldonya jadi minus) — SEBELUM nyentuh
+      // mutasi Kas/Bank & jurnal, biar kalau ternyata ditolak, belum ada
+      // efek lain yang kelanjur berubah setengah-setengah.
+      await applyDepositBalanceDeltaTransactional(customer.id, netDelta, ledgerDocId, {
+        customerId: customer.id,
+        customerName: customer.fullName,
+        type: 'topup',
+        amount: amountVal,
+        notes: depositForm.notes || '',
+        bookingCode: '',
+        createdAt: resolvePaymentCreatedAt(depositForm.date),
+        accountId: depositForm.accountId,
+        accountName: account?.name || ''
+      });
+      if (isEdit) {
+        // Balikin efek lama ke Kas/Bank (saldo & baris mutasi lama) &
+        // jurnal lama, baru diterapin efek baru di bawah — pola
+        // delete+recreate sama kayak Edit Biaya Operasional.
+        const oldEntry = depositLedger.find(d => d.id === editingDepositId);
+        if (oldEntry?.accountId) {
+          await removeAccountMutationBySource(oldEntry.accountId, editingDepositId, -(Number(oldEntry.amount) || 0));
+        }
+        await deleteJournalEntriesBySource('deposit_topup', editingDepositId);
+      }
       await adjustAccountBalance(depositForm.accountId, amountVal, {
         description: `Titip Deposit - ${customer.fullName || '-'}${depositForm.notes ? ` (${depositForm.notes})` : ''}`,
         reference: customer.customerCode || customer.fullName || '',
         source: 'deposit_topup',
-        date: resolvePaymentCreatedAt(depositForm.date)
+        date: resolvePaymentCreatedAt(depositForm.date),
+        sourceDocId: ledgerDocId
       });
       await postDepositTopup({
-        sourceDocId: `deposit_${customer.id}_${Date.now()}`, jamaahName: customer.fullName, amount: amountVal,
+        sourceDocId: ledgerDocId, jamaahName: customer.fullName, amount: amountVal,
         accountId: depositForm.accountId, accountName: account?.name || '',
         date: resolvePaymentCreatedAt(depositForm.date),
         createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
       }).catch(err => {
         console.error('Gagal posting jurnal titip deposit:', err);
-        alert(`Deposit tersimpan & saldo Kas/Bank sudah bertambah, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+        alert(`Deposit tersimpan & saldo Kas/Bank sudah disesuaikan, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+      });
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: isEdit ? 'update' : 'create',
+        module: 'Keuangan',
+        targetLabel: customer.fullName,
+        details: `${isEdit ? 'Mengedit' : 'Mencatat'} titip deposit "${customer.fullName}" sebesar Rp ${amountVal.toLocaleString('id-ID')}`
       });
       setShowDepositModal(false);
+      setEditingDepositId(null);
       setDepositForm({ customerId: '', amount: '', accountId: '', notes: 'Titip Deposit (belum ada booking)', date: todayISODate() });
       fetchData();
     } catch (err) {
-      alert("Gagal mencatat deposit: " + err.message);
+      alert("Gagal menyimpan deposit: " + err.message);
     } finally {
       setSavingDeposit(false);
     }
@@ -1390,8 +1468,17 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       return;
     }
     const currentBalance = Number(customer.depositBalance || 0);
-    if (amountVal > currentBalance) {
-      alert(`Nominal pengembalian (Rp ${amountVal.toLocaleString('id-ID')}) nggak boleh lebih besar dari saldo deposit "${customer.fullName}" saat ini (Rp ${currentBalance.toLocaleString('id-ID')}).`);
+    // Kalau mode EDIT, saldo yang lagi kepake state React ini SUDAH kepotong
+    // nominal LAMA baris ini — jadi buat validasi kasar di sisi client,
+    // nominal lama itu ditambahin balik dulu biar nggak salah nolak edit
+    // yang sebenernya valid (misal nominalnya mau dinaikin). Validasi FINAL
+    // & akurat tetap dari saldo TERKINI di Firestore lewat transaction di
+    // applyDepositBalanceDeltaTransactional — ini cuma buat kasih pesan
+    // error cepat sebelum submit ke server.
+    const oldEntryForCheck = editingWithdrawDepositId ? depositLedger.find(d => d.id === editingWithdrawDepositId) : null;
+    const availableBalanceForCheck = currentBalance + Math.abs(Number(oldEntryForCheck?.amount) || 0);
+    if (amountVal > availableBalanceForCheck) {
+      alert(`Nominal pengembalian (Rp ${amountVal.toLocaleString('id-ID')}) nggak boleh lebih besar dari saldo deposit "${customer.fullName}" yang tersedia (Rp ${availableBalanceForCheck.toLocaleString('id-ID')}).`);
       return;
     }
     if (!withdrawDepositForm.accountId) {
@@ -1402,20 +1489,36 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     setSavingWithdrawDeposit(true);
     try {
       const account = financialAccounts.find(a => a.id === withdrawDepositForm.accountId);
-      const sourceDocId = `deposit_withdraw_${customer.id}_${Date.now()}`;
-      // Saldo deposit jamaah berkurang — pakai transaction (bukan
-      // adjustDepositBalance biasa) biar saldo tervalidasi ULANG dari data
-      // Firestore TERKINI di dalam transaction, bukan cuma dari state React
-      // yang udah difetch sebelumnya. Cegah saldo jadi minus kalau ada 2
-      // device/tab narik saldo jamaah yang sama nyaris bersamaan — lihat
-      // catatan lengkap di withdrawDepositBalanceTransactional.
-      await withdrawDepositBalanceTransactional(
-        customer.id,
-        customer.fullName,
-        amountVal,
-        `${withdrawDepositForm.notes}${account ? ` (${account.name})` : ''}`,
-        resolvePaymentCreatedAt(withdrawDepositForm.date)
-      );
+      const isEdit = !!editingWithdrawDepositId;
+      const ledgerDocId = isEdit ? editingWithdrawDepositId : `deposit_withdraw_${customer.id}_${Date.now()}`;
+      const newSignedAmount = -amountVal;
+      let netDelta = newSignedAmount;
+      if (isEdit) {
+        const oldEntry = depositLedger.find(d => d.id === editingWithdrawDepositId);
+        if (oldEntry?.accountId && await isAccountMutationReconciled(oldEntry.accountId, [editingWithdrawDepositId])) {
+          alert(RECON_BLOCK_MSG);
+          return;
+        }
+        netDelta = newSignedAmount - (Number(oldEntry?.amount) || 0);
+      }
+      // Saldo deposit jamaah berkurang — pakai transaction (bukan blind
+      // increment) biar saldo tervalidasi ULANG dari data Firestore TERKINI
+      // di dalam transaction, bukan cuma dari state React yang udah difetch
+      // sebelumnya. Cegah saldo jadi minus kalau ada 2 device/tab narik
+      // saldo jamaah yang sama nyaris bersamaan. Ini SENGAJA dijalankan
+      // DULUAN (sebelum nyentuh mutasi Kas/Bank & jurnal lama) — lihat
+      // catatan lengkap di applyDepositBalanceDeltaTransactional.
+      await applyDepositBalanceDeltaTransactional(customer.id, netDelta, ledgerDocId, {
+        customerId: customer.id,
+        customerName: customer.fullName,
+        type: 'withdrawal',
+        amount: newSignedAmount,
+        notes: withdrawDepositForm.notes || '',
+        bookingCode: '',
+        createdAt: resolvePaymentCreatedAt(withdrawDepositForm.date),
+        accountId: withdrawDepositForm.accountId,
+        accountName: account?.name || ''
+      });
       // Uang BENERAN keluar dari akun Kas/Bank yang dipilih (beda dari
       // pemakaian saldo deposit buat bayar setoran, yang SENGAJA nggak
       // nyentuh Kas/Bank sama sekali — lihat catatan di adjustAccountBalance).
@@ -1423,36 +1526,107 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         description: `Pengembalian Saldo Deposit - ${customer.fullName || '-'}${withdrawDepositForm.notes ? ` (${withdrawDepositForm.notes})` : ''}`,
         reference: customer.customerCode || customer.fullName || '',
         source: 'deposit_withdrawal',
-        date: resolvePaymentCreatedAt(withdrawDepositForm.date)
+        date: resolvePaymentCreatedAt(withdrawDepositForm.date),
+        sourceDocId: ledgerDocId
       });
       // Jurnal otomatis: debit Utang Deposit Jamaah (liability berkurang),
       // kredit Kas/Bank (kas keluar beneran) — kebalikan persis dari
       // postDepositTopup.
       await postDepositWithdrawal({
-        sourceDocId, jamaahName: customer.fullName, amount: amountVal,
+        sourceDocId: ledgerDocId, jamaahName: customer.fullName, amount: amountVal,
         accountId: withdrawDepositForm.accountId, accountName: account?.name || '',
         date: resolvePaymentCreatedAt(withdrawDepositForm.date),
         createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
       }).catch(err => {
         console.error('Gagal posting jurnal pengembalian saldo deposit:', err);
-        alert(`Saldo deposit & saldo Kas/Bank sudah dikurangi, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+        alert(`Saldo deposit & saldo Kas/Bank sudah disesuaikan, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk transaksi ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
       });
       logActivity({
         userId: currentUser?.uid,
         userName: currentUser?.fullName || currentUser?.email,
         userRole: currentUser?.role,
-        action: 'create',
+        action: isEdit ? 'update' : 'create',
         module: 'Keuangan',
         targetLabel: customer.fullName,
-        details: `Pengembalian saldo deposit "${customer.fullName}" sebesar Rp ${amountVal.toLocaleString('id-ID')} ditransfer via ${account?.name || '-'} (${withdrawDepositForm.notes || '-'})`
+        details: `${isEdit ? 'Mengedit' : 'Mencatat'} pengembalian saldo deposit "${customer.fullName}" sebesar Rp ${amountVal.toLocaleString('id-ID')} ditransfer via ${account?.name || '-'} (${withdrawDepositForm.notes || '-'})`
       });
       setShowWithdrawDepositModal(false);
+      setEditingWithdrawDepositId(null);
       setWithdrawDepositForm({ customerId: '', amount: '', accountId: '', notes: 'Pengembalian saldo deposit (transfer balik ke jamaah)', date: todayISODate() });
       fetchData();
     } catch (err) {
       alert("Gagal mencatat pengembalian saldo deposit: " + err.message);
     } finally {
       setSavingWithdrawDeposit(false);
+    }
+  };
+
+  // Buka modal Titip Deposit / Pengembalian Saldo Deposit yang SUDAH ADA
+  // dalam mode edit — cuma buat 2 tipe baris itu (`topup`/`withdrawal`),
+  // baris lain di Riwayat Deposit Jamaah (`usage`, `refund_conversion`, dst)
+  // itu efek SAMPING dari transaksi lain (bayar setoran, batal booking) dan
+  // sengaja nggak bisa diedit dari sini — koreksinya lewat transaksi
+  // asalnya masing-masing. Customer/Pemesan-nya SENGAJA nggak bisa diganti
+  // lewat edit (kalau salah pilih orangnya, hapus & catat ulang) — sama
+  // kayak aturan ganti Metode Bayar di edit pembayaran booking.
+  const handleEditDepositLedgerEntry = (entry) => {
+    const commonFields = {
+      customerId: entry.customerId,
+      amount: String(Math.abs(Number(entry.amount) || 0)),
+      accountId: entry.accountId || '',
+      notes: entry.notes || '',
+      date: (entry.createdAt || '').slice(0, 10) || todayISODate()
+    };
+    if (entry.type === 'topup') {
+      setEditingDepositId(entry.id);
+      setDepositForm(commonFields);
+      setShowDepositModal(true);
+    } else if (entry.type === 'withdrawal') {
+      setEditingWithdrawDepositId(entry.id);
+      setWithdrawDepositForm(commonFields);
+      setShowWithdrawDepositModal(true);
+    } else {
+      alert('Baris ini otomatis tercatat dari transaksi lain (pemakaian saldo deposit buat bayar setoran, konversi refund pembatalan, dll) — nggak bisa diedit langsung dari sini. Koreksi lewat transaksi asalnya.');
+    }
+  };
+
+  const handleDeleteDepositLedgerEntry = async (entry) => {
+    if (blockIfNotFinanceRole()) return;
+    if (entry.type !== 'topup' && entry.type !== 'withdrawal') {
+      alert('Baris ini otomatis tercatat dari transaksi lain (pemakaian saldo deposit buat bayar setoran, konversi refund pembatalan, dll) — nggak bisa dihapus langsung dari sini. Koreksi lewat transaksi asalnya.');
+      return;
+    }
+    if (entry.accountId && await isAccountMutationReconciled(entry.accountId, [entry.id])) {
+      alert(RECON_BLOCK_MSG);
+      return;
+    }
+    const label = entry.type === 'topup' ? 'titip deposit' : 'pengembalian saldo deposit';
+    if (!confirm(`Yakin mau menghapus catatan ${label} "${entry.customerName}" senilai Rp ${Math.abs(Number(entry.amount) || 0).toLocaleString('id-ID')} ini? Saldo deposit jamaah & saldo Kas/Bank terkait bakal ikut disesuaikan balik.`)) return;
+    try {
+      // Sama kayak di handleDepositSubmit/handleWithdrawDepositSubmit — transaction
+      // validasi saldo ini SENGAJA dijalankan DULUAN, sebelum nyentuh mutasi
+      // Kas/Bank & jurnal lama (yang manggil fungsi "diam-diam" tanpa throw).
+      // Kalau urutannya dibalik dan transaction ini gagal (misal saldo udah
+      // kepake di tempat lain), mutasi & jurnal keburu ke-hapus duluan
+      // padahal saldo depositnya gagal disesuaikan — sistem jadi nyangkut
+      // setengah-setengah.
+      await applyDepositBalanceDeltaTransactional(entry.customerId, -(Number(entry.amount) || 0), entry.id, null);
+      if (entry.accountId) {
+        await removeAccountMutationBySource(entry.accountId, entry.id, -(Number(entry.amount) || 0));
+      }
+      await deleteJournalEntriesBySource(entry.type === 'topup' ? 'deposit_topup' : 'deposit_withdrawal', entry.id);
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Keuangan',
+        targetLabel: entry.customerName,
+        details: `Menghapus catatan ${label} "${entry.customerName}" senilai Rp ${Math.abs(Number(entry.amount) || 0).toLocaleString('id-ID')}`
+      });
+      fetchData();
+    } catch (err) {
+      alert(`Gagal menghapus catatan ${label}: ` + err.message);
     }
   };
 
@@ -2609,7 +2783,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // laporan ini, dengan customer-nya udah otomatis terpilih — biar Finance
   // nggak perlu cari nama itu lagi dari awal di modal.
   const handleQuickWithdrawFromReport = (customerId) => {
-    setWithdrawDepositForm(prev => ({ ...prev, customerId }));
+    setEditingWithdrawDepositId(null);
+    setWithdrawDepositForm({ customerId, amount: '', accountId: '', notes: 'Pengembalian saldo deposit (transfer balik ke jamaah)', date: todayISODate() });
     setShowWithdrawDepositModal(true);
   };
   // ================ /Laporan > Saldo Deposit Jamaah ================
@@ -2631,7 +2806,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             <ArrowDownLeft className="w-4 h-4" /> + Terima Setoran Jamaah
           </button>
           <button
-            onClick={() => setShowDepositModal(true)}
+            onClick={() => { setEditingDepositId(null); setDepositForm({ customerId: '', amount: '', accountId: '', notes: 'Titip Deposit (belum ada booking)', date: todayISODate() }); setShowDepositModal(true); }}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
           >
             <Wallet className="w-4 h-4" /> + Tambah Deposit
@@ -2668,7 +2843,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           <div className={`${styles.cardBg} border p-5 rounded-xl`}>
             <p className={`text-xs ${styles.textSub} mb-1`}>Kas Keluar/Masuk Lainnya</p>
             <h3 className="text-2xl font-bold text-orange-500">Rp {totalKeluarLainnya.toLocaleString('id-ID')}</h3>
-            <p className={`text-[10px] ${styles.textSub} mt-1`}>Komisi Mitra/Agen/Reseller, Topup/tarik saldo deposit jamaah, dll.</p>
+            <p className={`text-[10px] ${styles.textSub} mt-1`}>Komisi Mitra/Agen, topup/tarik saldo deposit jamaah, dll — dicatat di modul lain tapi tetap gerakin Kas/Bank.</p>
           </div>
         )}
         <div className={`${styles.cardBg} border p-5 rounded-xl`}>
@@ -2676,7 +2851,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           <h3 className={`text-2xl font-bold ${netCashflow >= 0 ? 'text-blue-500' : 'text-amber-500'}`}>
             Rp {netCashflow.toLocaleString('id-ID')}
           </h3>
-          <p className={`text-[10px] ${styles.textSub} mt-1`}></p>
+          <p className={`text-[10px] ${styles.textSub} mt-1`}>Sama dengan Kas Bersih di Laporan Keuangan &gt; Arus Kas.</p>
         </div>
       </div>
 
@@ -2712,6 +2887,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           }`}
         >
           Biaya Operasional Kantor ({operationalExpenses.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('deposit_ledger')}
+          className={`px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+            activeTab === 'deposit_ledger' ? `${styles.tabActive} text-blue-500 border` : `${styles.textSub} hover:${styles.textTitle}`
+          }`}
+        >
+          <Wallet className="w-3.5 h-3.5" /> Riwayat Deposit Jamaah ({depositLedger.length})
         </button>
         <button
           onClick={() => setActiveTab('vendors_master')}
@@ -3258,6 +3441,127 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         </div>
       )}
 
+      {activeTab === 'deposit_ledger' && (() => {
+        // Badge tipe baris — cuma 'topup' & 'withdrawal' yang lahir dari 2
+        // modal di tab ini (Tambah Deposit / Pengembalian Saldo Deposit),
+        // makanya cuma 2 tipe itu yang dikasih tombol Edit/Hapus. Tipe lain
+        // ('usage' = dipakai bayar setoran, 'refund_conversion' = konversi
+        // refund booking batal jadi saldo) itu EFEK SAMPING otomatis dari
+        // transaksi lain (BookingsModule.jsx/FinanceModule.jsx) — sengaja
+        // read-only di sini, koreksinya lewat transaksi asalnya masing-masing.
+        const typeBadge = (type) => {
+          const map = {
+            topup: { label: 'Titip Deposit', cls: 'bg-blue-500/10 text-blue-500 border-blue-500/20' },
+            withdrawal: { label: 'Pengembalian', cls: 'bg-amber-500/10 text-amber-500 border-amber-500/20' },
+            usage: { label: 'Dipakai Bayar Setoran', cls: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
+            refund_conversion: { label: 'Konversi Refund Batal', cls: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' },
+          };
+          return map[type] || { label: type || '-', cls: 'bg-slate-500/10 text-slate-400 border-slate-500/20' };
+        };
+        const sortedLedger = [...depositLedger].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+        const renderActions = (entry) => (
+          entry.type === 'topup' || entry.type === 'withdrawal' ? (
+            <div className="flex items-center justify-center gap-1.5">
+              <button
+                onClick={() => handleEditDepositLedgerEntry(entry)}
+                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-blue-500 rounded-lg transition-colors`}
+                title="Edit"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => handleDeleteDepositLedgerEntry(entry)}
+                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
+                title="Hapus"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <span className={`text-[10px] ${styles.textSub}`}>Otomatis</span>
+          )
+        );
+        return (
+          <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                  <tr>
+                    <th className="p-4">Jamaah / Pemesan</th>
+                    <th className="p-4">Tipe</th>
+                    <th className="p-4">Catatan & Tanggal</th>
+                    <th className="p-4 text-right">Nominal</th>
+                    <th className="p-4 text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                  {sortedLedger.length === 0 ? (
+                    <tr>
+                      <td colSpan="5" className={`p-8 text-center ${styles.textSub}`}>Belum ada riwayat deposit jamaah.</td>
+                    </tr>
+                  ) : (
+                    sortedLedger.map((entry) => {
+                      const badge = typeBadge(entry.type);
+                      const amt = Number(entry.amount) || 0;
+                      return (
+                        <tr key={entry.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
+                          <td className={`p-4 font-semibold ${styles.textTitle}`}>{entry.customerName || '-'}</td>
+                          <td className="p-4">
+                            <span className={`${badge.cls} border px-2 py-0.5 rounded-full text-[10px] font-medium`}>{badge.label}</span>
+                          </td>
+                          <td className={`p-4 ${styles.textSub}`}>
+                            {entry.notes || '-'}
+                            {entry.accountName && <span className="block text-[10px] text-slate-400">{entry.accountName}</span>}
+                            <span className="block text-[10px] text-slate-400">{formatDateDDMMYYYY(entry.createdAt)}</span>
+                          </td>
+                          <td className={`p-4 text-right font-bold ${amt >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                            {amt >= 0 ? '+' : '-'} Rp {Math.abs(amt).toLocaleString('id-ID')}
+                          </td>
+                          <td className="p-4 text-center">{renderActions(entry)}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="md:hidden space-y-3 p-3">
+              {sortedLedger.length === 0 ? (
+                <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada riwayat deposit jamaah.</p>
+              ) : (
+                sortedLedger.map((entry) => {
+                  const badge = typeBadge(entry.type);
+                  const amt = Number(entry.amount) || 0;
+                  return (
+                    <div key={entry.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
+                      <div className="flex items-center justify-between">
+                        <span className={`font-semibold ${styles.textTitle}`}>{entry.customerName || '-'}</span>
+                        <span className={`${badge.cls} border px-2 py-0.5 rounded-full text-[10px] font-medium`}>{badge.label}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] opacity-60 uppercase">Catatan & Tanggal</span>
+                        <div className={styles.textSub}>
+                          {entry.notes || '-'}
+                          {entry.accountName && <span className="block text-[10px] text-slate-400">{entry.accountName}</span>}
+                          <span className="block text-[10px] text-slate-400">{formatDateDDMMYYYY(entry.createdAt)}</span>
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-[10px] opacity-60 uppercase">Nominal</span>
+                        <div className={`font-bold ${amt >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                          {amt >= 0 ? '+' : '-'} Rp {Math.abs(amt).toLocaleString('id-ID')}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 pt-1">{renderActions(entry)}</div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {activeTab === 'vendors_master' && (
         <div className="space-y-4">
           <div className={`${styles.cardBg} border rounded-xl p-4 flex justify-between items-center`}>
@@ -3726,7 +4030,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                     <button
                       type="button"
                       onClick={() => {
-                        setWithdrawDepositForm(prev => ({ ...prev, customerId: '' }));
+                        setEditingWithdrawDepositId(null);
+                        setWithdrawDepositForm({ customerId: '', amount: '', accountId: '', notes: 'Pengembalian saldo deposit (transfer balik ke jamaah)', date: todayISODate() });
                         setShowWithdrawDepositModal(true);
                       }}
                       className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white px-3 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap"
@@ -4407,32 +4712,40 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       {showDepositModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
-            <button onClick={() => setShowDepositModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+            <button onClick={() => { setShowDepositModal(false); setEditingDepositId(null); }} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
             <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
-              <Wallet className="w-5 h-5 text-blue-500" /> Tambah Saldo Deposit
+              <Wallet className="w-5 h-5 text-blue-500" /> {editingDepositId ? 'Edit Titip Deposit' : 'Tambah Saldo Deposit'}
             </h3>
             <p className={`text-xs ${styles.textSub} mb-4`}>
-              Buat customer yang sudah transfer DP tapi belum jelas mau dipakai buat booking mana — nominalnya masuk saldo Pemesan dulu, baru dipakai belakangan lewat Metode Bayar "Saldo Deposit".
+              {editingDepositId
+                ? 'Koreksi nominal/akun/tanggal/keterangan baris titip deposit ini. Pemesannya sendiri nggak bisa diganti lewat edit — kalau salah pilih orangnya, hapus baris ini terus catat ulang.'
+                : 'Buat customer yang sudah transfer DP tapi belum jelas mau dipakai buat booking mana — nominalnya masuk saldo Pemesan dulu, baru dipakai belakangan lewat Metode Bayar "Saldo Deposit".'}
             </p>
 
             <form onSubmit={handleDepositSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
                 <label className="block mb-1 font-medium">Pemesan / Customer</label>
-                <select
-                  required
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={depositForm.customerId}
-                  onChange={e => setDepositForm({ ...depositForm, customerId: e.target.value })}
-                >
-                  <option value="">-- Pilih Data Master Jamaah --</option>
-                  {jamaahList.map(j => (
-                    <option key={j.id} value={j.id}>
-                      {j.fullName} - {j.customerCode || 'CST'} (Saldo saat ini: Rp {Number(j.depositBalance || 0).toLocaleString('id-ID')})
-                    </option>
-                  ))}
-                </select>
+                {editingDepositId ? (
+                  <p className={`${styles.innerBg} border rounded-lg p-2.5 ${styles.textTitle} font-medium`}>
+                    {jamaahList.find(j => j.id === depositForm.customerId)?.fullName || '-'}
+                  </p>
+                ) : (
+                  <select
+                    required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={depositForm.customerId}
+                    onChange={e => setDepositForm({ ...depositForm, customerId: e.target.value })}
+                  >
+                    <option value="">-- Pilih Data Master Jamaah --</option>
+                    {jamaahList.map(j => (
+                      <option key={j.id} value={j.id}>
+                        {j.fullName} - {j.customerCode || 'CST'} (Saldo saat ini: Rp {Number(j.depositBalance || 0).toLocaleString('id-ID')})
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -4482,11 +4795,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
               </div>
 
               <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                <button type="button" onClick={() => setShowDepositModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                <button type="button" onClick={() => { setShowDepositModal(false); setEditingDepositId(null); }} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
                 <button type="submit" disabled={savingDeposit} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium disabled:opacity-60">
-                  {savingDeposit ? 'Menyimpan...' : 'Simpan Deposit'}
+                  {savingDeposit ? 'Menyimpan...' : (editingDepositId ? 'Simpan Perubahan' : 'Simpan Deposit')}
                 </button>
               </div>
             </form>
@@ -4497,35 +4810,45 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       {showWithdrawDepositModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
-            <button onClick={() => setShowWithdrawDepositModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+            <button onClick={() => { setShowWithdrawDepositModal(false); setEditingWithdrawDepositId(null); }} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
             <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
-              <RotateCcw className="w-5 h-5 text-amber-500" /> Pengembalian Saldo Deposit
+              <RotateCcw className="w-5 h-5 text-amber-500" /> {editingWithdrawDepositId ? 'Edit Pengembalian Saldo Deposit' : 'Pengembalian Saldo Deposit'}
             </h3>
             <p className={`text-xs ${styles.textSub} mb-4`}>
-              Buat saldo deposit jamaah (misal hasil refund booking batal yang tadinya dipilih "jadi saldo deposit dulu") yang akhirnya beneran mau ditransfer balik ke customer — BUKAN dipakai buat bayar booking lain. Saldo deposit & saldo akun Kas/Bank yang dipakai transfer sama-sama berkurang, dan jurnalnya otomatis keposting.
+              {editingWithdrawDepositId
+                ? 'Koreksi nominal/akun/tanggal/keterangan baris pengembalian ini. Pemesannya sendiri nggak bisa diganti lewat edit — kalau salah pilih orangnya, hapus baris ini terus catat ulang.'
+                : 'Buat saldo deposit jamaah (misal hasil refund booking batal yang tadinya dipilih "jadi saldo deposit dulu") yang akhirnya beneran mau ditransfer balik ke customer — BUKAN dipakai buat bayar booking lain. Saldo deposit & saldo akun Kas/Bank yang dipakai transfer sama-sama berkurang, dan jurnalnya otomatis keposting.'}
             </p>
 
             <form onSubmit={handleWithdrawDepositSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
               <div>
                 <label className="block mb-1 font-medium">Pemesan / Customer</label>
-                <SearchableSelect
-                  isDark={isDark}
-                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
-                  placeholder="-- Pilih Data Master Jamaah --"
-                  value={withdrawDepositForm.customerId}
-                  onChange={(val) => setWithdrawDepositForm({ ...withdrawDepositForm, customerId: val })}
-                  options={jamaahList
-                    .filter(j => Number(j.depositBalance || 0) !== 0)
-                    .map(j => ({
-                      value: j.id,
-                      label: `${j.fullName} - ${j.customerCode || 'CST'}`,
-                      sublabel: `Saldo saat ini: Rp ${Number(j.depositBalance || 0).toLocaleString('id-ID')}`,
-                    }))}
-                />
-                {jamaahList.filter(j => Number(j.depositBalance || 0) !== 0).length === 0 && (
-                  <p className="text-[10px] mt-1 text-amber-500">Nggak ada jamaah yang punya saldo deposit saat ini.</p>
+                {editingWithdrawDepositId ? (
+                  <p className={`${styles.innerBg} border rounded-lg p-2.5 ${styles.textTitle} font-medium`}>
+                    {jamaahList.find(j => j.id === withdrawDepositForm.customerId)?.fullName || '-'}
+                  </p>
+                ) : (
+                  <>
+                    <SearchableSelect
+                      isDark={isDark}
+                      inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                      placeholder="-- Pilih Data Master Jamaah --"
+                      value={withdrawDepositForm.customerId}
+                      onChange={(val) => setWithdrawDepositForm({ ...withdrawDepositForm, customerId: val })}
+                      options={jamaahList
+                        .filter(j => Number(j.depositBalance || 0) !== 0)
+                        .map(j => ({
+                          value: j.id,
+                          label: `${j.fullName} - ${j.customerCode || 'CST'}`,
+                          sublabel: `Saldo saat ini: Rp ${Number(j.depositBalance || 0).toLocaleString('id-ID')}`,
+                        }))}
+                    />
+                    {jamaahList.filter(j => Number(j.depositBalance || 0) !== 0).length === 0 && (
+                      <p className="text-[10px] mt-1 text-amber-500">Nggak ada jamaah yang punya saldo deposit saat ini.</p>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -4586,11 +4909,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
               </div>
 
               <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                <button type="button" onClick={() => setShowWithdrawDepositModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                <button type="button" onClick={() => { setShowWithdrawDepositModal(false); setEditingWithdrawDepositId(null); }} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
                 <button type="submit" disabled={savingWithdrawDeposit} className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium disabled:opacity-60">
-                  {savingWithdrawDeposit ? 'Menyimpan...' : 'Simpan Pengembalian'}
+                  {savingWithdrawDeposit ? 'Menyimpan...' : (editingWithdrawDepositId ? 'Simpan Perubahan' : 'Simpan Pengembalian')}
                 </button>
               </div>
             </form>
