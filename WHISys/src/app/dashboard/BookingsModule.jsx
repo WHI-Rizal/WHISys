@@ -1023,6 +1023,11 @@ Terimakasih🙏`;
       alert("Cuma Finance & Super Admin yang boleh menghapus riwayat pembayaran.");
       return;
     }
+    const oldPayForRecon = paymentHistory.find(p => p.id === payId);
+    if (oldPayForRecon?.accountId && await isAccountMutationReconciled(oldPayForRecon.accountId, [payId, oldPayForRecon.groupTransactionId])) {
+      alert(RECON_BLOCK_MSG);
+      return;
+    }
     if (!confirm("Apakah Anda yakin ingin menghapus catatan pembayaran ini?")) return;
     try {
       const oldPay = paymentHistory.find(p => p.id === payId);
@@ -1077,6 +1082,10 @@ Terimakasih🙏`;
       return;
     }
     if (savingPaymentEdit) return; // cegah double-klik nerapin delta saldo akun dua kali
+    if (oldPay?.accountId && await isAccountMutationReconciled(oldPay.accountId, [payId, oldPay.groupTransactionId])) {
+      alert(RECON_BLOCK_MSG);
+      return;
+    }
     setSavingPaymentEdit(true);
     try {
       await updateDoc(doc(db, 'payments_income', payId), {
@@ -1704,6 +1713,40 @@ Terimakasih🙏`;
     }
   };
 
+  // Cek apakah transaksi ini (lewat account_mutations yang nempel ke
+  // sourceDocId tertentu — id doc payments_income sendiri ATAU
+  // groupTransactionId-nya kalau ini porsi setoran grup) udah "dicocokkan"
+  // (matched) ke salah satu baris Rekonsiliasi Bank. Dipake buat NGEBLOK
+  // hapus/edit pembayaran yang udah direkon — baris account_mutations
+  // SELALU dihapus+ditulis-ulang tiap ada hapus/edit (nggak pernah
+  // di-updateDoc langsung, lihat updateAccountMutationAmount/
+  // adjustGroupMutationShare di bawah), jadi kalau dibiarkan link
+  // matchedMutationId di bank_statement_lines bakal nyantol ke mutasi yang
+  // udah kehapus/ganti nominal diam-diam. Staff harus lepas kecocokannya
+  // dulu lewat Laporan Keuangan > Rekonsiliasi Bank.
+  const isAccountMutationReconciled = async (accountId, sourceDocIds) => {
+    const ids = Array.from(new Set((Array.isArray(sourceDocIds) ? sourceDocIds : [sourceDocIds]).filter(Boolean)));
+    if (!accountId || ids.length === 0) return false;
+    const mutationIds = new Set();
+    for (let i = 0; i < ids.length; i += 10) {
+      const chunk = ids.slice(i, i + 10);
+      const mutQ = query(collection(db, 'account_mutations'), where('accountId', '==', accountId), where('sourceDocId', 'in', chunk));
+      const mutSnap = await getDocs(mutQ);
+      mutSnap.docs.forEach(d => mutationIds.add(d.id));
+    }
+    if (mutationIds.size === 0) return false;
+    const mutationIdList = Array.from(mutationIds);
+    for (let i = 0; i < mutationIdList.length; i += 10) {
+      const chunk = mutationIdList.slice(i, i + 10);
+      const bslQ = query(collection(db, 'bank_statement_lines'), where('matchedMutationId', 'in', chunk), where('matchStatus', '==', 'matched'));
+      const bslSnap = await getDocs(bslQ);
+      if (!bslSnap.empty) return true;
+    }
+    return false;
+  };
+
+  const RECON_BLOCK_MSG = 'Transaksi ini sudah "dicocokkan" (rekonsiliasi) dengan salah satu baris mutasi bank. Lepas dulu kecocokannya lewat menu Laporan Keuangan > Rekonsiliasi Bank, baru transaksi ini bisa dihapus/diedit.';
+
   // Update NOMINAL baris account_mutations yang berasal dari satu dokumen
   // transaksi (dicari lewat sourceDocId) — dipake pas transaksi asalnya
   // diedit nominalnya, biar riwayat mutasi tetap 1 baris per transaksi
@@ -2287,6 +2330,10 @@ Terimakasih🙏`;
       alert("Cuma Finance & Super Admin yang boleh menghapus riwayat pembayaran.");
       return;
     }
+    if (pay.accountId && await isAccountMutationReconciled(pay.accountId, [pay.id, pay.groupTransactionId])) {
+      alert(RECON_BLOCK_MSG);
+      return;
+    }
     if (!confirm("Apakah Anda yakin ingin menghapus catatan pembayaran ini?")) return;
     try {
       await deleteDoc(doc(db, 'payments_income', pay.id));
@@ -2391,6 +2438,14 @@ Terimakasih🙏`;
     if (!canManagePayments) {
       alert("Cuma Finance & Super Admin yang boleh menghapus riwayat pembayaran.");
       return;
+    }
+    {
+      const reconAccountId = docs.find(d => d.accountId)?.accountId;
+      const reconSourceIds = [...docs.map(d => d.id), docs.find(d => d.groupTransactionId)?.groupTransactionId];
+      if (reconAccountId && await isAccountMutationReconciled(reconAccountId, reconSourceIds)) {
+        alert(RECON_BLOCK_MSG);
+        return;
+      }
     }
     if (!confirm(`Apakah Anda yakin ingin menghapus transaksi setoran ini? ${docs.length} catatan pembagian ke peserta akan ikut terhapus.`)) return;
     try {
