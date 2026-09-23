@@ -348,7 +348,6 @@ export default function DetailPaketPage({ params }) {
 
   const hargaRows = [
     { label: 'Harga Utama', value: pkg.priceMain },
-    { label: 'Quad (4 orang/kamar)', value: pkg.priceQuad },
     { label: 'Triple (3 orang/kamar)', value: pkg.priceTriple },
     { label: 'Double (2 orang/kamar)', value: pkg.priceDouble },
     { label: 'Anak-anak', value: pkg.priceChild },
