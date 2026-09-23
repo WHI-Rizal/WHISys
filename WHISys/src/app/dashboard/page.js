@@ -467,7 +467,7 @@ export default function DashboardPage() {
           <div
             className={`p-1.5 ${currentTheme.accentBg} rounded-lg text-white shrink-0 whisys-plane-trigger`}
             onClick={flyThePlane}
-            title="Klik dulu deh, hehe"
+            title="Jalan Lebih Tenang"
           >
             <Plane className={`w-4 h-4 ${planeFlying ? 'whisys-plane-flying' : ''}`} onAnimationEnd={() => setPlaneFlying(false)} />
           </div>
