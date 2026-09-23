@@ -192,10 +192,10 @@ function handlePrintKatalog(pkg) {
         <style>
           body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color:#1e293b; margin:0; padding:0; }
           .doc-page { padding:26px 35px; }
-          .kop-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; border-bottom:3px double #059669; padding-bottom:10px; margin-bottom:18px; }
-          .kop-logo { width:165px; height:165px; object-fit:contain; flex-shrink:0; }
-          .kop-text { text-align:right; padding-top:6px; }
-          .company-logo-title { font-size:20px; font-weight:800; color:#059669; margin:0; letter-spacing:0.3px; }
+          .kop-header { display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:3px double #059669; padding-bottom:8px; margin-bottom:14px; }
+          .kop-logo { width:64px; height:64px; object-fit:contain; flex-shrink:0; }
+          .kop-text { text-align:right; }
+          .company-logo-title { font-size:18px; font-weight:800; color:#059669; margin:0; letter-spacing:0.3px; }
           .company-address { font-size:10px; color:#64748b; margin:3px 0 0 0; max-width:420px; margin-left:auto; line-height:1.5; }
           .doc-title { font-size:15px; font-weight:800; color:#0f172a; text-align:center; letter-spacing:0.5px; margin:0 0 16px 0; }
           .section-title { font-size:12px; font-weight:800; color:#059669; text-transform:uppercase; letter-spacing:0.5px; margin:18px 0 8px 0; border-bottom:1px solid #e2e8f0; padding-bottom:4px; }
