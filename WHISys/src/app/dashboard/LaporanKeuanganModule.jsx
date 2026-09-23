@@ -3499,6 +3499,54 @@ function BankReconciliationTab({ styles, isDark, currentUser, financialAccounts 
     setSavingLineId(null);
   };
 
+  // Hapus permanen 1 baris mutasi bank — dipakai buat beresin salah
+  // import (misal tanggal ketuker gara-gara format file Excel-nya beda
+  // dari yang diasumsikan parser). Cuma boleh baris yang BELUM dicocokkan
+  // (kalau udah matched, harus dibatalkan dulu kecocokannya biar
+  // account_mutations sisi lain nggak nyangkut nunjuk ke baris yang
+  // udah nggak ada).
+  const handleDeleteLine = async (line) => {
+    if (line.matchStatus === 'matched') {
+      alert('Baris ini udah dicocokkan ke mutasi sistem — batalkan kecocokannya dulu (tombol "Batalkan") sebelum dihapus.');
+      return;
+    }
+    if (!confirm(`Hapus permanen baris mutasi bank ini?\n\n"${line.description}"\n${formatDateDDMMYYYY((line.date || '').slice(0, 10))} · ${formatRp(line.debit || line.credit)}\n\nDipakai kalau baris ini salah import (misal tanggalnya ketuker) — nggak bisa dibatalkan.`)) return;
+    setSavingLineId(line.id);
+    try {
+      await deleteDoc(doc(db, 'bank_statement_lines', line.id));
+      setSelectedLineIds(prev => { const next = new Set(prev); next.delete(line.id); return next; });
+      await fetchReconciliationData();
+    } catch (err) {
+      alert('Gagal menghapus baris: ' + err.message);
+    }
+    setSavingLineId(null);
+  };
+
+  // Hapus banyak baris sekaligus (dari checkbox seleksi) — buat beresin
+  // batch salah import tanpa harus hapus satu-satu.
+  const handleBulkDeleteSelected = async () => {
+    const toDelete = selectedLines.filter(l => l.matchStatus !== 'matched');
+    if (toDelete.length === 0) {
+      alert('Nggak ada baris terpilih yang bisa dihapus (baris yang udah dicocokkan harus dibatalkan dulu satu-satu).');
+      return;
+    }
+    if (!confirm(`Hapus permanen ${toDelete.length} baris mutasi bank yang dicentang? Nggak bisa dibatalkan.`)) return;
+    setGroupMatchSubmitting(true);
+    try {
+      for (let i = 0; i < toDelete.length; i += 400) {
+        const chunk = toDelete.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach(l => batch.delete(doc(db, 'bank_statement_lines', l.id)));
+        await batch.commit();
+      }
+      clearSelection();
+      await fetchReconciliationData();
+    } catch (err) {
+      alert('Gagal menghapus baris terpilih: ' + err.message);
+    }
+    setGroupMatchSubmitting(false);
+  };
+
   // Toggle centang 1 baris bank buat mode "cocokkan banyak sekaligus".
   // Dibatasi: cuma baris 'unmatched', dan cuma boleh 1 akun dalam 1
   // seleksi (kalau staf centang baris dari akun lain, seleksi lama
@@ -3747,6 +3795,14 @@ function BankReconciliationTab({ styles, isDark, currentUser, financialAccounts 
               >
                 Cocokkan ke 1 Mutasi Sistem
               </button>
+              <button
+                onClick={handleBulkDeleteSelected}
+                disabled={groupMatchSubmitting}
+                className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-[10.5px] font-medium rounded-md disabled:opacity-60"
+                title="Hapus permanen baris yang dicentang — dipakai buat beresin salah import"
+              >
+                Hapus Baris Terpilih
+              </button>
               <button onClick={clearSelection} className={`px-2.5 py-1.5 text-[10.5px] font-medium rounded-md border ${styles.textSub}`}>
                 Batalkan Pilihan
               </button>
@@ -3830,6 +3886,14 @@ function BankReconciliationTab({ styles, isDark, currentUser, financialAccounts 
                             >
                               Abaikan
                             </button>
+                            <button
+                              onClick={() => handleDeleteLine(line)}
+                              disabled={savingLineId === line.id}
+                              className="px-2.5 py-1 text-[10.5px] font-medium rounded-md border border-rose-500/40 text-rose-500 hover:bg-rose-500/10 disabled:opacity-50"
+                              title="Hapus permanen — dipakai buat beresin salah import (misal tanggal ketuker)"
+                            >
+                              Hapus
+                            </button>
                           </div>
                         </div>
                       ) : (
@@ -3837,13 +3901,23 @@ function BankReconciliationTab({ styles, isDark, currentUser, financialAccounts 
                           <p className={`text-[10.5px] ${styles.textSub} flex items-center gap-1`}>
                             <AlertTriangle className="w-3 h-3 text-amber-500 flex-shrink-0" /> Nggak ada saran kecocokan otomatis — cek manual di tab Kas & Bank, atau tandai diabaikan kalau memang nggak ada padanannya.
                           </p>
-                          <button
-                            onClick={() => handleIgnore(line)}
-                            disabled={savingLineId === line.id}
-                            className={`px-2.5 py-1 text-[10.5px] font-medium rounded-md border ${styles.textSub} flex-shrink-0`}
-                          >
-                            Abaikan
-                          </button>
+                          <div className="flex gap-1.5 flex-shrink-0">
+                            <button
+                              onClick={() => handleIgnore(line)}
+                              disabled={savingLineId === line.id}
+                              className={`px-2.5 py-1 text-[10.5px] font-medium rounded-md border ${styles.textSub}`}
+                            >
+                              Abaikan
+                            </button>
+                            <button
+                              onClick={() => handleDeleteLine(line)}
+                              disabled={savingLineId === line.id}
+                              className="px-2.5 py-1 text-[10.5px] font-medium rounded-md border border-rose-500/40 text-rose-500 hover:bg-rose-500/10 disabled:opacity-50"
+                              title="Hapus permanen — dipakai buat beresin salah import (misal tanggal ketuker)"
+                            >
+                              Hapus
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
