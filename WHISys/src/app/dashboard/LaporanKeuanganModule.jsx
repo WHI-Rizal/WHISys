@@ -4125,7 +4125,22 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
         running += (r.type === 'in' ? Number(r.amount) || 0 : -(Number(r.amount) || 0));
         return { ...r, balanceAfter: running };
       });
-      setMutationRows(withBalance);
+
+      // Status "Sudah/Belum Rekonsiliasi" — nyambung ke tab Rekonsiliasi
+      // Bank: 1 mutasi sistem dianggap "Sudah Rekon" kalau ada minimal 1
+      // baris bank_statement_lines yang matchStatus-nya 'matched' dan
+      // matchedMutationId-nya nunjuk ke mutasi ini (baik dicocokkan
+      // sendiri-sendiri, maupun lewat "Cocokkan Gabungan").
+      const matchedQ = query(
+        collection(db, 'bank_statement_lines'),
+        where('accountId', '==', acc.id),
+        where('matchStatus', '==', 'matched')
+      );
+      const matchedSnap = await getDocs(matchedQ);
+      const reconciledMutationIds = new Set(matchedSnap.docs.map(d => d.data().matchedMutationId).filter(Boolean));
+      const withReconStatus = withBalance.map(r => ({ ...r, reconciled: reconciledMutationIds.has(r.id) }));
+
+      setMutationRows(withReconStatus);
     } catch (err) {
       alert('Gagal mengambil riwayat mutasi: ' + err.message);
       setMutationRows([]);
@@ -4150,7 +4165,7 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
       return;
     }
     const escapeCsv = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
-    const header = ['Tanggal', 'Keterangan', 'Referensi', 'Masuk', 'Keluar', 'Saldo'];
+    const header = ['Tanggal', 'Keterangan', 'Referensi', 'Masuk', 'Keluar', 'Saldo', 'Status Rekonsiliasi'];
     const lines = [header.join(',')];
     rows.forEach(r => {
       lines.push([
@@ -4159,7 +4174,8 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
         escapeCsv(r.reference),
         r.type === 'in' ? Number(r.amount) || 0 : 0,
         r.type === 'out' ? Number(r.amount) || 0 : 0,
-        Number(r.balanceAfter) || 0
+        Number(r.balanceAfter) || 0,
+        escapeCsv(r.reconciled ? 'Sudah Rekon' : 'Belum Rekon')
       ].join(','));
     });
     const csvContent = '﻿' + lines.join('\r\n');
@@ -4464,13 +4480,14 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
                         <th className="p-3 text-right">Masuk</th>
                         <th className="p-3 text-right">Keluar</th>
                         <th className="p-3 text-right">Saldo</th>
+                        <th className="p-3 text-center">Status Rekon</th>
                       </tr>
                     </thead>
                     <tbody className={`divide-y ${styles.tableRowBorder}`}>
                       {mutationLoading ? (
-                        <tr><td colSpan="6" className={`p-8 text-center ${styles.textSub}`}>Memuat riwayat mutasi...</td></tr>
+                        <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Memuat riwayat mutasi...</td></tr>
                       ) : getFilteredMutationRows().length === 0 ? (
-                        <tr><td colSpan="6" className={`p-8 text-center ${styles.textSub}`}>Belum ada mutasi pada rentang tanggal ini.</td></tr>
+                        <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada mutasi pada rentang tanggal ini.</td></tr>
                       ) : (
                         getFilteredMutationRows().map(r => (
                           <tr key={r.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
@@ -4480,6 +4497,13 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
                             <td className="p-3 text-right font-medium text-emerald-500">{r.type === 'in' ? `Rp ${Number(r.amount).toLocaleString('id-ID')}` : '-'}</td>
                             <td className="p-3 text-right font-medium text-rose-500">{r.type === 'out' ? `Rp ${Number(r.amount).toLocaleString('id-ID')}` : '-'}</td>
                             <td className={`p-3 text-right font-bold ${styles.textTitle}`}>Rp {Number(r.balanceAfter).toLocaleString('id-ID')}</td>
+                            <td className="p-3 text-center">
+                              <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${
+                                r.reconciled ? 'bg-emerald-500/15 text-emerald-500' : 'bg-amber-500/15 text-amber-500'
+                              }`}>
+                                {r.reconciled ? 'Sudah Rekon' : 'Belum Rekon'}
+                              </span>
+                            </td>
                           </tr>
                         ))
                       )}
@@ -4494,7 +4518,14 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
                   ) : (
                     getFilteredMutationRows().map(r => (
                       <div key={r.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
-                        <div className={`font-semibold ${styles.textTitle}`}>{formatDateDDMMYYYY(r.createdAt)}</div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`font-semibold ${styles.textTitle}`}>{formatDateDDMMYYYY(r.createdAt)}</span>
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${
+                            r.reconciled ? 'bg-emerald-500/15 text-emerald-500' : 'bg-amber-500/15 text-amber-500'
+                          }`}>
+                            {r.reconciled ? 'Sudah Rekon' : 'Belum Rekon'}
+                          </span>
+                        </div>
                         <div>
                           <span className="text-[10px] opacity-60 uppercase">Keterangan</span>
                           <div className={styles.textTitle}>{r.description || '-'}</div>
