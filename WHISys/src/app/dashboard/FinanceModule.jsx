@@ -2668,7 +2668,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           <div className={`${styles.cardBg} border p-5 rounded-xl`}>
             <p className={`text-xs ${styles.textSub} mb-1`}>Kas Keluar/Masuk Lainnya</p>
             <h3 className="text-2xl font-bold text-orange-500">Rp {totalKeluarLainnya.toLocaleString('id-ID')}</h3>
-            <p className={`text-[10px] ${styles.textSub} mt-1`}>Komisi Mitra/Agen, topup/tarik saldo deposit jamaah, dll — dicatat di modul lain tapi tetap gerakin Kas/Bank.</p>
+            <p className={`text-[10px] ${styles.textSub} mt-1`}>Komisi Mitra/Agen/Reseller, Topup/tarik saldo deposit jamaah, dll.</p>
           </div>
         )}
         <div className={`${styles.cardBg} border p-5 rounded-xl`}>
@@ -2676,7 +2676,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           <h3 className={`text-2xl font-bold ${netCashflow >= 0 ? 'text-blue-500' : 'text-amber-500'}`}>
             Rp {netCashflow.toLocaleString('id-ID')}
           </h3>
-          <p className={`text-[10px] ${styles.textSub} mt-1`}>Sama dengan Kas Bersih di Laporan Keuangan &gt; Arus Kas.</p>
+          <p className={`text-[10px] ${styles.textSub} mt-1`}></p>
         </div>
       </div>
 
