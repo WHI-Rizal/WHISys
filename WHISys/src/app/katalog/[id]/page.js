@@ -377,8 +377,13 @@ export default function DetailPaketPage({ params }) {
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* Hero */}
         {pkg.flyerImageDataUrl && (
-          <div className="rounded-xl overflow-hidden mb-6 border border-slate-200">
-            <img src={pkg.flyerImageDataUrl} alt={pkg.name} className="w-full object-cover max-h-96" />
+          <div className="rounded-xl overflow-hidden mb-6 border border-slate-200 bg-slate-100 flex items-center justify-center">
+            {/* Sengaja TANPA object-cover + max-h — flyer biasanya udah
+                didesain penuh dengan judul/harga di dalamnya, jadi kalau
+                dipotong/di-crop teks pentingnya bisa ilang. Tingginya
+                ngikutin rasio asli gambar (w-full + h-auto), sama kayak
+                kartu di halaman daftar katalog. */}
+            <img src={pkg.flyerImageDataUrl} alt={pkg.name} className="w-full h-auto block" />
           </div>
         )}
 
