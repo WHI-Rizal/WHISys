@@ -771,6 +771,39 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     });
   };
 
+  // Cek apakah transaksi ini (lewat account_mutations yang nempel ke
+  // sourceDocId tertentu) udah "dicocokkan" (matched) ke salah satu baris
+  // Rekonsiliasi Bank. Dipake buat NGEBLOK hapus/edit transaksi yang udah
+  // direkon — biar link matchedMutationId di bank_statement_lines nggak
+  // ujug-ujug nyantol ke mutasi yang udah kehapus/ganti nominal (baris
+  // account_mutations SELALU dihapus+ditulis-ulang tiap ada hapus/edit,
+  // nggak pernah di-updateDoc langsung — lihat catatan di
+  // removeAccountMutationBySource). Staff harus lepas kecocokannya dulu
+  // lewat Laporan Keuangan > Rekonsiliasi Bank, baru transaksi ini boleh
+  // dihapus/diedit.
+  const isAccountMutationReconciled = async (accountId, sourceDocIds) => {
+    const ids = Array.from(new Set((Array.isArray(sourceDocIds) ? sourceDocIds : [sourceDocIds]).filter(Boolean)));
+    if (!accountId || ids.length === 0) return false;
+    const mutationIds = new Set();
+    for (let i = 0; i < ids.length; i += 10) {
+      const chunk = ids.slice(i, i + 10);
+      const mutQ = query(collection(db, 'account_mutations'), where('accountId', '==', accountId), where('sourceDocId', 'in', chunk));
+      const mutSnap = await getDocs(mutQ);
+      mutSnap.docs.forEach(d => mutationIds.add(d.id));
+    }
+    if (mutationIds.size === 0) return false;
+    const mutationIdList = Array.from(mutationIds);
+    for (let i = 0; i < mutationIdList.length; i += 10) {
+      const chunk = mutationIdList.slice(i, i + 10);
+      const bslQ = query(collection(db, 'bank_statement_lines'), where('matchedMutationId', 'in', chunk), where('matchStatus', '==', 'matched'));
+      const bslSnap = await getDocs(bslQ);
+      if (!bslSnap.empty) return true;
+    }
+    return false;
+  };
+
+  const RECON_BLOCK_MSG = 'Transaksi ini sudah "dicocokkan" (rekonsiliasi) dengan salah satu baris mutasi bank. Lepas dulu kecocokannya lewat menu Laporan Keuangan > Rekonsiliasi Bank, baru transaksi ini bisa dihapus/diedit.';
+
   // Hapus baris account_mutations yang berasal dari SATU dokumen transaksi
   // (dicari lewat sourceDocId) — dipake pas transaksi asalnya dihapus, biar
   // riwayat mutasi ikutan hilang (bukan nambah baris "koreksi hapus").
@@ -1422,6 +1455,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       alert(`Pembayaran vendor ini tidak dapat dihapus karena paket "${recognizedPkg.name}" omzet & HPP-nya sudah "Diakui" dan sudah masuk Laporan P&L.\n\nBatalkan dulu pengakuan pendapatan paket ini lewat tombol "Batalkan Pengakuan" di tab Riwayat Bayar Vendor/Laporan, baru pembayaran ini bisa dihapus/dikoreksi.`);
       return;
     }
+    if (vp.accountId && await isAccountMutationReconciled(vp.accountId, [vp.id])) {
+      alert(RECON_BLOCK_MSG);
+      return;
+    }
     if (vp.convertedToDeposit) {
       if (!confirm(`PERHATIAN: transaksi ini udah pernah dikonversi jadi Saldo Deposit Vendor (Rp ${Number(vp.convertedAmount || 0).toLocaleString('id-ID')}${vp.convertedSelisihAmount > 0 ? `, selisih Rp ${Number(vp.convertedSelisihAmount).toLocaleString('id-ID')} udah keakui sebagai beban` : ''}). Jurnal konversinya bakal ikut dihapus otomatis, TAPI saldo deposit vendor yang udah kebentuk (Rp ${Number(vp.convertedAmount || 0).toLocaleString('id-ID')}) TIDAK otomatis ditarik balik. Kalau emang mau dikoreksi, sesuaikan juga saldo deposit vendornya secara manual. Tetap lanjut hapus?`)) return;
     } else if (vp.invoiceCorrected) {
@@ -1482,6 +1519,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const handleDeleteOperationalExpense = async (op) => {
     if (blockIfNotFinanceRole()) return;
+    if (op.accountId && await isAccountMutationReconciled(op.accountId, [op.id])) {
+      alert(RECON_BLOCK_MSG);
+      return;
+    }
     if (!confirm("Apakah Anda yakin ingin menghapus catatan biaya operasional ini?")) return;
     try {
       await deleteDoc(doc(db, 'expenses_operational', op.id));
@@ -1655,6 +1696,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     if (recognizedPkg) {
       alert(`Setoran ini tidak dapat dihapus karena paket "${recognizedPkg.name}" omzetnya sudah "Diakui" dan sudah masuk Laporan P&L.\n\nBatalkan dulu pengakuan pendapatan paket ini lewat tombol "Batalkan Pengakuan" di tab Riwayat Setoran Jamaah/Laporan, baru setoran ini bisa dihapus/dikoreksi.`);
       return;
+    }
+    {
+      const reconAccountId = row.docs.find(d => d.accountId)?.accountId;
+      const reconSourceIds = [...row.docs.map(d => d.id), row.docs.find(d => d.groupTransactionId)?.groupTransactionId];
+      if (reconAccountId && await isAccountMutationReconciled(reconAccountId, reconSourceIds)) {
+        alert(RECON_BLOCK_MSG);
+        return;
+      }
     }
     let confirmMsg = row.isMerged
       ? `Hapus transaksi setoran gabungan senilai Rp ${row.amount.toLocaleString('id-ID')} ini? Ini akan menghapus ${row.docs.length} catatan setoran split (per peserta) yang jadi bagiannya sekaligus.`
@@ -2013,6 +2062,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         // pola yang sama kayak hapus-lalu-catat-ulang, cuma digabung jadi
         // 1 langkah biar user nggak perlu 2 aksi terpisah.
         const oldOp = operationalExpenses.find(o => o.id === editingOperationalId);
+        if (oldOp?.accountId && await isAccountMutationReconciled(oldOp.accountId, [editingOperationalId])) {
+          alert(RECON_BLOCK_MSG);
+          setSavingOperational(false);
+          return;
+        }
         if (oldOp?.accountId) {
           await removeAccountMutationBySource(oldOp.accountId, editingOperationalId, Number(oldOp.amount) || 0);
         }
