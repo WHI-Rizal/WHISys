@@ -119,8 +119,10 @@ export default function LoginPage() {
                 <stop offset="100%" stopColor="#065f46" />
               </linearGradient>
             </defs>
-            {/* Aksen bulat merah muda transparan, ngambang di belakang blob utama */}
-            <circle cx="24" cy="20" r="26" fill="#fda4af" opacity="0.3" />
+            {/* Aksen bulat oren, ngambang di belakang blob utama — oren
+                #f97316 solid (nggak transparan) biar semenyala warna oren
+                di motif sidebar dashboard */}
+            <circle cx="24" cy="20" r="26" fill="#f97316" />
             {/* Aksen blob kedua, hijau lebih gelap, ngintip di kiri bawah */}
             <path d="M90,100 C68,86 34,94 20,118 C6,142 18,176 50,186 C78,195 106,178 110,152 C114,130 112,114 90,100 Z" fill="#064e3b" />
             {/* Blob utama, bentuknya organik nggak beraturan (bukan kotak/gelombang) */}
@@ -128,7 +130,7 @@ export default function LoginPage() {
           </svg>
           <div className="relative z-10 h-full flex flex-col justify-center px-8">
             <h1 className="text-3xl font-extrabold text-white tracking-tight leading-tight">Welcome<br />Back!</h1>
-            <p className="text-xs text-white/85 mt-2 max-w-[260px]">Masuk ke WHISys ERP untuk lanjut kelola operasional Wisata Halal Internasional yuk!.</p>
+            <p className="text-xs text-white/85 mt-2 max-w-[260px]">Masuk ke WHISys ERP untuk lanjut kelola operasional Umrah, Haji & Wisata Halal.</p>
           </div>
         </div>
 
@@ -189,7 +191,7 @@ export default function LoginPage() {
           </form>
 
           <div className="relative mt-8 pt-4 border-t border-slate-800 text-center text-[11px] text-slate-500">
-            PT Wisata Halal Internasional • Secure Enterprise System
+            PT Wisata Halal Indonesia • Secure Enterprise System
           </div>
         </div>
 
