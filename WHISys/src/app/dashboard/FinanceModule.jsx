@@ -13,7 +13,7 @@ import { calculatePPN } from '../../lib/ppn';
 import {
   postIncomePayment, postDepositTopup, postDepositWithdrawal, postVendorBillCreated, postVendorPayment,
   postOperationalExpense, postVendorDepositConversion, postVendorInvoiceCorrection,
-  deleteJournalEntriesBySource
+  deleteJournalEntriesBySource, ACC
 } from '../../lib/journal';
 
 const DEFAULT_COMPANY_PROFILE = {
@@ -338,6 +338,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   const [transactions, setTransactions] = useState([]);
   const [vendorPayments, setVendorPayments] = useState([]);
   const [operationalExpenses, setOperationalExpenses] = useState([]);
+  // Baris jurnal yang nyentuh akun Kas & Bank (1101) — dipakai buat hitung
+  // "Total Kas Masuk/Keluar" & "Saldo Kas Bersih Operasional" di tab Arus
+  // Kas Operasional & Payments, SUPAYA angkanya sama persis dengan yang ada
+  // di Laporan Keuangan > Arus Kas (bukan sekadar jumlah mentah field
+  // `amount` di payments_income/payments_vendor/expenses_operational, yang
+  // bisa keitung dobel/kelewat kalau ada transaksi yang dibayar pakai Saldo
+  // Deposit — itu nggak beneran gerakin Kas/Bank).
+  const [journalEntriesForCash, setJournalEntriesForCash] = useState([]);
   const [bookingsList, setBookingsList] = useState([]);
   const [packagesList, setPackagesList] = useState([]);
   const [jamaahList, setJamaahList] = useState([]);
@@ -609,6 +617,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
       const txSnap = await getDocs(collection(db, 'payments_income'));
       setTransactions(txSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      const jeSnap = await getDocs(collection(db, 'journal_entries'));
+      setJournalEntriesForCash(jeSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       const vpSnap = await getDocs(collection(db, 'payments_vendor'));
       setVendorPayments(vpSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -2198,10 +2209,34 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     }
   };
 
-  const totalIncome = transactions.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-  const totalVendorPaid = vendorPayments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-  const totalOperational = operationalExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-  const netCashflow = totalIncome - totalVendorPaid - totalOperational;
+  // Dihitung dari baris jurnal yang nyentuh akun Kas & Bank (1101), BUKAN
+  // dari jumlah mentah field `amount` tiap dokumen — biar konsisten sama
+  // Laporan Keuangan > Arus Kas (lihat CashFlowTab di LaporanKeuanganModule.jsx)
+  // dan nggak keitung dobel buat transaksi yang dibayar pakai Saldo Deposit
+  // (itu nggak beneran gerakin Kas/Bank, jadi memang nggak dijurnal ke 1101).
+  const cashBankLinesFinance = [];
+  journalEntriesForCash.forEach(e => {
+    (e.lines || []).filter(l => l.accountCode === ACC.KAS_BANK).forEach(l => {
+      cashBankLinesFinance.push({ source: e.source, debit: l.debit || 0, credit: l.credit || 0 });
+    });
+  });
+  // Total Kas Masuk & Kas Keluar SELURUH perusahaan (semua sumber) — angka
+  // ini yang dipakai buat Saldo, biar selalu persis sama dengan Laporan
+  // Keuangan > Arus Kas, apapun sumber transaksinya (termasuk komisi
+  // mitra/agen & topup/tarik saldo deposit yang nggak tercatat di collection
+  // payments_income/payments_vendor/expenses_operational).
+  const totalMasukSemuaSumber = cashBankLinesFinance.reduce((acc, l) => acc + l.debit, 0);
+  const totalKeluarSemuaSumber = cashBankLinesFinance.reduce((acc, l) => acc + l.credit, 0);
+  // Breakdown "Keluar" — cuma dipecah 2 kategori yang relevan buat modul ini
+  // (Vendor & Biaya Operasional Kantor). Kalau ada sumber kas keluar lain
+  // (komisi Mitra/Agen, tarik saldo deposit jamaah, dst), selisihnya
+  // ditampung di totalKeluarLainnya biar Masuk - Vendor - Operasional -
+  // Lainnya tetap = Saldo (nggak ada uang yang kelihatan "hilang").
+  const totalIncome = totalMasukSemuaSumber;
+  const totalVendorPaid = cashBankLinesFinance.filter(l => l.source === 'vendor_payment').reduce((acc, l) => acc + l.credit, 0);
+  const totalOperational = cashBankLinesFinance.filter(l => l.source === 'operational_expense').reduce((acc, l) => acc + l.credit, 0);
+  const totalKeluarLainnya = Math.max(0, totalKeluarSemuaSumber - totalVendorPaid - totalOperational);
+  const netCashflow = totalMasukSemuaSumber - totalKeluarSemuaSumber;
 
   // Opsi "Pilih Kode Booking" di modal Terima Setoran Jamaah — dikelompokkan
   // per kode booking rombongan (bukan per pax lagi), biar 1 kode booking cuma
@@ -2616,7 +2651,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+      <div className={`grid grid-cols-1 md:grid-cols-4 ${totalKeluarLainnya > 0 ? 'lg:grid-cols-5' : ''} gap-5`}>
         <div className={`${styles.cardBg} border p-5 rounded-xl`}>
           <p className={`text-xs ${styles.textSub} mb-1`}>Total Kas Masuk (Jamaah)</p>
           <h3 className="text-2xl font-bold text-emerald-500">Rp {totalIncome.toLocaleString('id-ID')}</h3>
@@ -2629,11 +2664,19 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           <p className={`text-xs ${styles.textSub} mb-1`}>Total Biaya Operasional Kantor</p>
           <h3 className="text-2xl font-bold text-amber-500">Rp {totalOperational.toLocaleString('id-ID')}</h3>
         </div>
+        {totalKeluarLainnya > 0 && (
+          <div className={`${styles.cardBg} border p-5 rounded-xl`}>
+            <p className={`text-xs ${styles.textSub} mb-1`}>Kas Keluar/Masuk Lainnya</p>
+            <h3 className="text-2xl font-bold text-orange-500">Rp {totalKeluarLainnya.toLocaleString('id-ID')}</h3>
+            <p className={`text-[10px] ${styles.textSub} mt-1`}>Komisi Mitra/Agen, topup/tarik saldo deposit jamaah, dll — dicatat di modul lain tapi tetap gerakin Kas/Bank.</p>
+          </div>
+        )}
         <div className={`${styles.cardBg} border p-5 rounded-xl`}>
           <p className={`text-xs ${styles.textSub} mb-1`}>Saldo Kas Bersih Operasional</p>
           <h3 className={`text-2xl font-bold ${netCashflow >= 0 ? 'text-blue-500' : 'text-amber-500'}`}>
             Rp {netCashflow.toLocaleString('id-ID')}
           </h3>
+          <p className={`text-[10px] ${styles.textSub} mt-1`}>Sama dengan Kas Bersih di Laporan Keuangan &gt; Arus Kas.</p>
         </div>
       </div>
 
