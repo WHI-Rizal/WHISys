@@ -17,8 +17,9 @@
 //   pakai fallback default (lihat DEFAULT_COMPANY_INFO). Kalau nanti data
 //   perusahaan mau ikut sinkron ke publik juga, tinggal expose field itu
 //   lewat endpoint publik terpisah dan oper ke `companyInfo` di sini.
-// - `logoSize`: dashboard pakai logo kop surat lebih besar (165px) biar
-//   senada sama contoh flyer promosi; versi publik tetap 64px seperti semula.
+//
+// Kop surat SENGAJA tanpa logo WHI, cuma nama PT + alamat rata kiri (bukan
+// lupa dihapus) — permintaan biar cetakan itinerary lebih ringkas/plain.
 // ============================================================================
 
 export const DEFAULT_COMPANY_INFO = {
@@ -45,7 +46,6 @@ const fmtRp = (n) => `Rp ${Math.round(Number(n) || 0).toLocaleString('id-ID')}`;
 export function buildItineraryPrintHtml(pkg, days, options = {}) {
   const {
     companyInfo = null,
-    logoSize = 165,
   } = options;
 
   const compName = companyInfo?.name || DEFAULT_COMPANY_INFO.name;
@@ -94,7 +94,6 @@ export function buildItineraryPrintHtml(pkg, days, options = {}) {
 
   const page1 = `
     <div class="kop-header">
-      <img src="/logo.png" class="kop-logo" onerror="this.style.display='none'" />
       <div class="kop-text">
         <h1 class="company-logo-title">${compName}</h1>
         <p class="company-address">${compAddress}</p>
@@ -177,11 +176,10 @@ export function buildItineraryPrintHtml(pkg, days, options = {}) {
         <style>
           body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color:#1e293b; margin:0; padding:0; }
           .doc-page { padding:26px 35px; }
-          .kop-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; border-bottom:3px double #059669; padding-bottom:10px; margin-bottom:18px; }
-          .kop-logo { width:${logoSize}px; height:${logoSize}px; object-fit:contain; flex-shrink:0; }
-          .kop-text { text-align:right; padding-top:6px; }
+          .kop-header { border-bottom:3px double #059669; padding-bottom:10px; margin-bottom:18px; }
+          .kop-text { text-align:left; }
           .company-logo-title { font-size:20px; font-weight:800; color:#059669; margin:0; letter-spacing:0.3px; }
-          .company-address { font-size:10px; color:#64748b; margin:3px 0 0 0; max-width:420px; margin-left:auto; line-height:1.5; }
+          .company-address { font-size:10px; color:#64748b; margin:3px 0 0 0; max-width:420px; line-height:1.5; }
           .doc-title { font-size:15px; font-weight:800; color:#0f172a; text-align:center; letter-spacing:0.5px; margin:0 0 16px 0; }
           .section-title { font-size:12px; font-weight:800; color:#059669; text-transform:uppercase; letter-spacing:0.5px; margin:18px 0 8px 0; border-bottom:1px solid #e2e8f0; padding-bottom:4px; }
           .page1-body { display:flex; gap:16px; margin-bottom:6px; }
