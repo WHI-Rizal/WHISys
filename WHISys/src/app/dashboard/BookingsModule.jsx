@@ -275,25 +275,35 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const isSales = roleLower === 'sales';
   const isOperational = roleLower === 'operational';
   const canManagePayments = roleLower.includes('super') || roleLower === 'admin' || roleLower === 'finance';
-  // Edit Booking, Batalkan/Refund, dan Hapus Booking cuma boleh Finance & Super
-  // Admin — ini yang megang keputusan soal uang customer.
-  const canManageBookings = canManagePayments;
+  // Edit Booking (data penuh: identitas, room/bus, biaya tambahan/diskon,
+  // closing source, dst) SEKARANG dibuka juga buat TC/Sales (Operational &
+  // Sales), nggak lagi eksklusif Finance/Super Admin (23 Sep 2026 — request
+  // user: "bolehkan saja TC/Sales untuk edit bookingannya", sekaligus
+  // ngegantiin tombol "Tambah Peserta" yang terpisah, karena sekarang nambah
+  // peserta udah bisa langsung lewat form Edit Booking ini).
+  //
+  // Yang TETAP dikunci ke Finance & Super Admin doang (bukan bagian dari
+  // "edit data booking", tapi soal UANG/keputusan finansial & aksi yang
+  // nggak bisa dibalik): Setoran Grup/Tambahan, Batalkan & Refund, Hapus
+  // Booking, Reschedule, dan Koreksi Tanggal Transaksi — lihat
+  // `canManagePayments` yang masih dipakai apa adanya buat semua itu.
+  const canManageBookings = canManagePayments || isSales || isOperational;
   // Reschedule tetap dibatasin ke Finance & Super Admin doang — Operational
-  // & Sales nggak boleh.
-  const canReschedule = canManageBookings;
+  // & Sales nggak boleh (ganti paket butuh penyesuaian kuota & berpotensi
+  // "reschedule gratis" kalau dibuka bebas).
+  const canReschedule = canManagePayments;
   // Nyatet setoran DP awal boleh semua staf yang login — Operational sering
   // yang input booking + DP awal jamaah di lapangan, baru setoran berikutnya
   // dilanjutin tim Finance lewat Edit Booking (yang emang udah dibatasin
   // Finance & Super Admin doang di atas).
   const canRecordPayment = true;
 
-  // TC/Sales BUKAN "edit bebas" — Edit Booking penuh (ganti data jamaah,
-  // room/bus, biaya tambahan/diskon, closing source, dst) tetap eksklusif
-  // Finance & Super Admin (canManageBookings di atas), itu yang megang
-  // keputusan soal uang & data customer. `canAddParticipant` di bawah ini
-  // SEKARANG cuma dipakai buat 1 hal doang: nentuin siapa yang boleh nambah
-  // PESERTA BARU (nyusul) ke booking/grup — lihat tombol "Tambah Peserta" &
-  // handleAddPaxToGroup.
+  // `canAddParticipant` sekarang otomatis sama nilainya kayak canManageBookings
+  // di semua role yang ada (Edit Booking udah kebuka buat TC/Sales juga di
+  // atas), tapi tetap dipertahankan sebagai flag terpisah (dipakai di
+  // `canEditOwnGroup` & handleAddPaxToGroup) biar kalau nanti ada role baru
+  // yang cuma boleh nambah peserta tanpa akses Edit Booking penuh, tinggal
+  // dipisah lagi di sini tanpa bongkar logic di tempat lain.
   //
   // CATATAN: sebelumnya ini dibatasin cuma ke grup yang staff itu SENDIRI
   // yang bikin (dicek dari createdByUid, fallback cocokkan nama closingSourceName).
@@ -1177,19 +1187,19 @@ Terimakasih🙏`;
 
   const handleOpenEditModal = async (item) => {
     // Edit Booking (form penuh: identitas jamaah, room/bus, biaya
-    // tambahan/diskon, closing source, dst) tetap eksklusif Finance & Super
-    // Admin. TC/Sales yang mau nambah peserta ke booking/grup manapun pakai
-    // tombol "Tambah Peserta" (handleOpenGroupEditModal), bukan form ini.
+    // tambahan/diskon, closing source, dst) kebuka buat semua staf yang
+    // punya canManageBookings, termasuk TC/Sales sekarang.
     if (!canManageBookings) {
-      alert("Cuma Finance & Super Admin yang boleh mengedit booking. TC/Sales cuma bisa menambah peserta baru lewat tombol \"Tambah Peserta\".");
+      alert("Kamu tidak punya akses untuk mengedit booking ini.");
       return;
     }
     setEditingBookingId(item.id);
     // Cari tanggal setoran paling awal yang udah tercatat buat booking ini,
-    // buat batas atas field koreksi Tanggal Transaksi di bawah (Finance/Super
-    // Admin doang yang bisa lihat & isi field ini).
+    // buat batas atas field koreksi Tanggal Transaksi di bawah — field itu
+    // sendiri masih Finance/Super Admin doang (canManagePayments), jadi
+    // fetch-nya juga digantung ke situ, bukan canManageBookings.
     setEditBookingMinPaymentDate(null);
-    if (canManageBookings) {
+    if (canManagePayments) {
       const payments = await fetchPaymentHistory(item.id);
       const dates = (payments || [])
         .map(p => (p.createdAt ? String(p.createdAt).slice(0, 10) : null))
@@ -1231,7 +1241,7 @@ Terimakasih🙏`;
         : '',
       leadSourceOther: item.leadSource && !LEAD_SOURCE_OPTIONS.includes(item.leadSource) ? item.leadSource : '',
       // Tanggal Transaksi (Koreksi) — prefill dari createdAt booking ini.
-      // Cuma dipakai/ditampilkan kalau canManageBookings (Finance/Super
+      // Cuma dipakai/ditampilkan kalau canManagePayments (Finance/Super
       // Admin); TC/Sales nggak lihat field ini soalnya field ini nentuin
       // periode laporan keuangan (Closing TC, P&L, Sumber Lead per Bulan).
       transactionDate: item.createdAt ? String(item.createdAt).slice(0, 10) : ''
@@ -1459,7 +1469,7 @@ Terimakasih🙏`;
   };
 
   const handleDeleteBooking = async (item) => {
-    if (!canManageBookings) {
+    if (!canManagePayments) {
       alert("Cuma Finance & Super Admin yang boleh menghapus booking.");
       return;
     }
@@ -1587,7 +1597,7 @@ Terimakasih🙏`;
       alert("Cuma Finance & Super Admin yang boleh reschedule booking.");
       return;
     }
-    if (mode === 'cancel' && !canManageBookings) {
+    if (mode === 'cancel' && !canManagePayments) {
       alert("Cuma Finance & Super Admin yang boleh membatalkan booking & proses refund.");
       return;
     }
@@ -1860,7 +1870,7 @@ Terimakasih🙏`;
   const handleCancelSubmit = async (e) => {
     e.preventDefault();
     if (!selectedBookingForAction) return;
-    if (!canManageBookings) {
+    if (!canManagePayments) {
       alert("Cuma Finance & Super Admin yang boleh memproses pembatalan/refund.");
       return;
     }
@@ -2148,7 +2158,7 @@ Terimakasih🙏`;
   // ============ SETORAN GRUP (BAYAR SEKALIGUS UTK 1 GRUP BOOKING) ============
 
   const handleOpenGroupPaymentModal = (group) => {
-    if (!canManageBookings) {
+    if (!canManagePayments) {
       alert("Cuma Finance & Super Admin yang boleh mencatat setoran tambahan lewat sini.");
       return;
     }
@@ -2160,7 +2170,7 @@ Terimakasih🙏`;
   const handleGroupPaymentSubmit = async (e) => {
     e.preventDefault();
     if (!groupPaymentTarget) return;
-    if (!canManageBookings) {
+    if (!canManagePayments) {
       alert("Cuma Finance & Super Admin yang boleh mencatat setoran tambahan lewat sini.");
       return;
     }
@@ -2706,13 +2716,13 @@ Terimakasih🙏`;
     // lewat jalur manapun form ini berhenti (validasi gagal, sukses, ATAU
     // error), nggak ada celah tombol Simpan kelupaan ke-lock permanen.
     try {
-      // Edit data grup (paket/harga/biaya tambahan/diskon/setoran) tetap
-      // eksklusif Finance & Super Admin — TC/Sales cuma dikasih akses "Tambah
-      // Peserta" (handleAddPaxToGroup di atas), bukan form ini. Form ini
-      // sendiri disembunyikan dari TC/Sales di JSX, jadi cek ini jaga-jaga
-      // (defense in depth) kalau entah gimana caranya handler ini kepanggil.
+      // Edit data grup (identitas, room/bus, biaya tambahan/diskon/closing
+      // source, dst) sekarang kebuka juga buat TC/Sales (Operational &
+      // Sales), nggak eksklusif Finance/Super Admin lagi. Cek ini tetap
+      // dipertahankan sebagai jaga-jaga (defense in depth) — form ini sendiri
+      // udah digembok di JSX buat role yang nggak masuk canManageBookings.
       if (!canManageBookings) {
-        alert("Cuma Finance & Super Admin yang boleh mengedit data booking (paket/harga/biaya tambahan). TC/Sales cuma bisa menambah peserta baru lewat form di atasnya.");
+        alert("Kamu tidak punya akses untuk mengedit data booking ini.");
         return;
       }
       if (!groupEditForm.packageId) {
@@ -3170,7 +3180,7 @@ Terimakasih🙏`;
 
   // ---- 4. Batalkan / Refund (Grup) ----
   const handleOpenGroupCancelModal = (group) => {
-    if (!canManageBookings) {
+    if (!canManagePayments) {
       alert("Cuma Finance & Super Admin yang boleh membatalkan booking & proses refund.");
       return;
     }
@@ -3188,7 +3198,7 @@ Terimakasih🙏`;
   const handleGroupCancelSubmit = async (e) => {
     e.preventDefault();
     if (!groupCancelTarget) return;
-    if (!canManageBookings) {
+    if (!canManagePayments) {
       alert("Cuma Finance & Super Admin yang boleh memproses pembatalan/refund.");
       return;
     }
@@ -3316,7 +3326,7 @@ Terimakasih🙏`;
 
   // ---- 5. Hapus Booking (Grup) ----
   const handleGroupDeleteBooking = async (group) => {
-    if (!canManageBookings) {
+    if (!canManagePayments) {
       alert("Cuma Finance & Super Admin yang boleh menghapus booking.");
       return;
     }
@@ -4337,10 +4347,9 @@ Terimakasih🙏`;
           alert('Paket nggak bisa diganti lewat Edit Booking. Pakai tombol "Reschedule" (Finance/Super Admin) buat pindah paket.');
           return;
         }
-        // Defense in depth — sinkron sama gate di handleOpenEditModal: form
-        // Edit Booking penuh ini eksklusif Finance & Super Admin.
+        // Defense in depth — sinkron sama gate di handleOpenEditModal.
         if (!canManageBookings) {
-          alert("Cuma Finance & Super Admin yang boleh mengedit booking.");
+          alert("Kamu tidak punya akses untuk mengedit booking ini.");
           return;
         }
         if (paymentVal > 0 && isPaymentDateBeforeBooking(formData.paymentDate, currentBooking?.createdAt)) {
@@ -4352,7 +4361,7 @@ Terimakasih🙏`;
         // yang bisa geser field ini (lihat gating di JSX). Nggak boleh
         // digeser ke tanggal SETELAH ada setoran yang udah tercatat buat
         // booking ini, biar nggak ada uang masuk "sebelum" booking-nya ada.
-        if (canManageBookings && formData.transactionDate && editBookingMinPaymentDate && formData.transactionDate > editBookingMinPaymentDate) {
+        if (canManagePayments && formData.transactionDate && editBookingMinPaymentDate && formData.transactionDate > editBookingMinPaymentDate) {
           alert(`Tanggal Transaksi nggak boleh digeser ke setelah tanggal setoran yang udah tercatat (${editBookingMinPaymentDate.split('-').reverse().join('/')}). Betulkan/hapus dulu setorannya lewat Riwayat Pembayaran kalau memang tanggal setoran itu yang salah.`);
           return;
         }
@@ -4364,7 +4373,7 @@ Terimakasih🙏`;
         // Dihitung duluan (bukan inline di updateDoc) karena nilainya juga
         // dipakai buat nyamain tanggal jurnal `booking_created` di bawah —
         // lihat penjelasan di situ soal kenapa ini perlu.
-        const correctedCreatedAt = canManageBookings
+        const correctedCreatedAt = canManagePayments
           ? resolveCorrectedCreatedAt(formData.transactionDate, currentBooking?.createdAt)
           : null;
 
@@ -4492,7 +4501,7 @@ Terimakasih🙏`;
           module: 'Booking',
           targetLabel: selectedJamaah.fullName || currentBooking?.bookingCode,
           details: `Mengedit booking ${currentBooking?.bookingCode || '-'} an. ${selectedJamaah.fullName || '-'}, paket ${selectedPkg.name}.`
-            + (canManageBookings && formData.transactionDate && currentBooking?.createdAt && formData.transactionDate !== String(currentBooking.createdAt).slice(0, 10)
+            + (canManagePayments && formData.transactionDate && currentBooking?.createdAt && formData.transactionDate !== String(currentBooking.createdAt).slice(0, 10)
                 ? ` Tanggal Transaksi dikoreksi dari ${String(currentBooking.createdAt).slice(0, 10).split('-').reverse().join('/')} ke ${formData.transactionDate.split('-').reverse().join('/')}.`
                 : '')
         });
@@ -5081,7 +5090,7 @@ Terimakasih🙏`;
             )}
 
             {/* 4. BATALKAN / REFUND (GRUP) — cuma muncul kalau masih ada pax aktif */}
-            {activeGroupItems.length > 0 && canManageBookings && (
+            {activeGroupItems.length > 0 && canManagePayments && (
               <button
                 onClick={() => handleOpenGroupCancelModal(activeGroupSummary)}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[11px] font-medium transition-colors"
@@ -5092,7 +5101,7 @@ Terimakasih🙏`;
             )}
 
             {/* 5. HAPUS BOOKING (GRUP) */}
-            {canManageBookings && (
+            {canManagePayments && (
               <button
                 onClick={() => handleGroupDeleteBooking(activeGroupSummary)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg text-[11px] font-medium transition-colors`}
@@ -5237,7 +5246,7 @@ Terimakasih🙏`;
                                   doang (tanpa dibagi rata ke pax lain kayak tombol Setoran
                                   Grup di ringkasan). Pakai modal & handler yang sama dgn
                                   Setoran Grup, cuma "grup"-nya di-isi 1 booking ini aja. */}
-                              {canManageBookings && (
+                              {canManagePayments && (
                                 <button
                                   onClick={() => handleOpenGroupPaymentModal({
                                     code: item.bookingCode,
@@ -5255,9 +5264,8 @@ Terimakasih🙏`;
                               {canManageBookings && (
                                 <>
                                   {/* TOMBOL EDIT BOOKING (data penuh: identitas,
-                                      room/bus, biaya tambahan/diskon, dst) — eksklusif
-                                      Finance/Super Admin. TC/Sales pakai tombol "Tambah
-                                      Peserta" di header grup buat nambah peserta baru. */}
+                                      room/bus, biaya tambahan/diskon, dst) — sekarang
+                                      kebuka juga buat TC/Sales. */}
                                   <button
                                     onClick={() => handleOpenEditModal(item)}
                                     className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
@@ -5283,7 +5291,7 @@ Terimakasih🙏`;
                                     </>
                                   )}
 
-                                  {canManageBookings && (
+                                  {canManagePayments && (
                                     <>
                                       {/* TOMBOL BATALKAN / REFUND */}
                                       <button
@@ -5298,7 +5306,7 @@ Terimakasih🙏`;
                                 </>
                               )}
 
-                              {canManageBookings && (
+                              {canManagePayments && (
                                 <>
                                   {/* TOMBOL HAPUS BOOKING */}
                                   <button
@@ -5393,7 +5401,7 @@ Terimakasih🙏`;
                       <MessageSquare className="w-4 h-4" />
                     </button>
 
-                    {canManageBookings && (
+                    {canManagePayments && (
                       <button
                         onClick={() => handleOpenGroupPaymentModal({
                           code: item.bookingCode,
@@ -5428,7 +5436,7 @@ Terimakasih🙏`;
                       </button>
                     )}
 
-                    {(item.status || 'active') === 'active' && canManageBookings && (
+                    {(item.status || 'active') === 'active' && canManagePayments && (
                       <button
                         onClick={() => handleOpenActionModal(item, 'cancel')}
                         className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
@@ -5438,7 +5446,7 @@ Terimakasih🙏`;
                       </button>
                     )}
 
-                    {canManageBookings && (
+                    {canManagePayments && (
                       <button
                         onClick={() => handleDeleteBooking(item)}
                         className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
@@ -5515,7 +5523,7 @@ Terimakasih🙏`;
                     <td className={`p-4 font-semibold ${styles.textTitle}`}>{formatPercentID(group.percentBayar)}</td>
                     <td className="p-4 text-center">
                       <div className="inline-flex items-center gap-1.5">
-                        {canManageBookings && (
+                        {canManagePayments && (
                           <button
                             onClick={(e) => { e.stopPropagation(); handleOpenGroupPaymentModal(group); }}
                             className="inline-flex items-center justify-center p-2 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-500 hover:text-white rounded-lg transition-colors"
@@ -5597,7 +5605,7 @@ Terimakasih🙏`;
                   </div>
 
                   <div className="flex flex-wrap gap-2 mt-3">
-                    {canManageBookings && (
+                    {canManagePayments && (
                       <button
                         onClick={(e) => { e.stopPropagation(); handleOpenGroupPaymentModal(group); }}
                         className="p-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-500 hover:text-white rounded-lg transition-colors"
@@ -6077,7 +6085,7 @@ Terimakasih🙏`;
                 </div>
               </div>
 
-              {editingBookingId && canManageBookings && (
+              {editingBookingId && canManagePayments && (
                 <div className={`${styles.innerBg} p-4 rounded-xl border space-y-3`}>
                   <p className="text-[11px] font-bold text-amber-500 uppercase tracking-wider">Koreksi Tanggal Transaksi (Finance/Super Admin)</p>
                   <p className="text-[10px] opacity-70 -mt-2">
