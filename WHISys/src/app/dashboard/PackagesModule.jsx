@@ -827,7 +827,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
   // kalau format cetakan diubah, dua-duanya (dashboard & publik) otomatis
   // ikut sinkron.
   const handlePrintItinerary = (pkg, days) => {
-    printItineraryDocument(pkg, days, { companyInfo, logoSize: 165 });
+    printItineraryDocument(pkg, days, { companyInfo });
   };
 
   // ============ Rencana Anggaran (Planning Cost) — tambah/edit/hapus baris ============
