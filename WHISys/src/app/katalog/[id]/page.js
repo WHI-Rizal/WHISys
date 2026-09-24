@@ -41,13 +41,11 @@ import { printItineraryDocument } from '@/lib/itineraryPrintDoc';
 // sini (itu koleksi privat, cuma kebaca staf login) — jadi `companyInfo`
 // dibiarkan kosong dan otomatis pakai fallback default di
 // itineraryPrintDoc.js (kalau nanti butuh sinkron beneran, tinggal expose
-// field itu lewat endpoint publik terpisah dan oper ke sini). Ukuran logo
-// kop surat (64px) tetap dipertahankan seperti sebelumnya, beda dari versi
-// dashboard yang 165px.
+// field itu lewat endpoint publik terpisah dan oper ke sini).
 // ============================================================================
 function handlePrintKatalog(pkg) {
   const days = Array.isArray(pkg.itinerary) ? pkg.itinerary : [];
-  printItineraryDocument(pkg, days, { logoSize: 64 });
+  printItineraryDocument(pkg, days);
 }
 
 function renderMeals(meals) {
