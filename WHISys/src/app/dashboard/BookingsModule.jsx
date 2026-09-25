@@ -991,6 +991,27 @@ Terimakasih🙏`;
     }
   };
 
+  // Tanggal setoran TERAKHIR yang beneran tercatat buat 1 booking — dipakai
+  // reschedule (single & grup) biar jurnal Carry-Over-nya kepakein tanggal
+  // uang itu ASLINYA masuk (25 Sep 2026: laporan user, DP tanggal 9 Sep tapi
+  // jurnal penyesuaian carry-over-nya kepakein tanggal PAS RESCHEDULE
+  // diproses — jadi nggak nyambung pas dicocokin ke Rekonsiliasi Bank/Jurnal
+  // Umum bulan setoran aslinya). Kalau nggak ketemu setoran sama sekali
+  // (harusnya nggak kejadian karena carry-over cuma jalan kalau totalPaid >
+  // 0), fallback ke createdAt booking-nya sendiri.
+  const getLastPaymentDate = async (bookingId, fallbackDate) => {
+    try {
+      const q = query(collection(db, 'payments_income'), where('bookingId', '==', bookingId));
+      const snap = await getDocs(q);
+      const dates = snap.docs.map(d => d.data().createdAt).filter(Boolean);
+      if (dates.length === 0) return fallbackDate || new Date().toISOString();
+      return dates.reduce((latest, curr) => (curr > latest ? curr : latest), dates[0]);
+    } catch (err) {
+      console.error('Gagal mengambil tanggal setoran terakhir:', err);
+      return fallbackDate || new Date().toISOString();
+    }
+  };
+
   const handleOpenHistory = async (item) => {
     setSelectedBookingForHistory(item);
     await fetchPaymentHistory(item.id);
@@ -1663,7 +1684,12 @@ Terimakasih🙏`;
   // booking. delta positif = nambah saldo (top up / konversi refund batal),
   // delta negatif = pakai saldo buat bayar. Tiap perubahan juga dicatat ke
   // 'deposit_ledger' biar ada riwayatnya.
-  const adjustDepositBalance = async (customerId, customerName, delta, type, notes, bookingCode) => {
+  // `date` opsional (dipakai reschedule biar entri top-up deposit-nya
+  // dated tanggal setoran ASLI, bukan tanggal aksi ini diproses) —
+  // default tetap "sekarang" kalau nggak dikasih, jadi semua pemanggil
+  // lain (batal/refund, pemakaian saldo deposit buat bayar setoran, dst)
+  // nggak berubah behaviornya sama sekali.
+  const adjustDepositBalance = async (customerId, customerName, delta, type, notes, bookingCode, date) => {
     if (!customerId || !delta) return;
     await updateDoc(doc(db, 'jamaah', customerId), { depositBalance: increment(delta) });
     await addDoc(collection(db, 'deposit_ledger'), {
@@ -1673,7 +1699,7 @@ Terimakasih🙏`;
       amount: delta,
       notes: notes || '',
       bookingCode: bookingCode || '',
-      createdAt: new Date().toISOString()
+      createdAt: date || new Date().toISOString()
     });
   };
 
@@ -1990,6 +2016,11 @@ Terimakasih🙏`;
       const oldBooking = selectedBookingForAction;
       const newPkg = packagesList.find(p => p.id === rescheduleForm.newPackageId);
       if (!newPkg) return;
+      // Satu timestamp dipakein konsisten buat SEMUA hal yang emang "terjadi
+      // hari ini" (booking baru lahir, pemakaian saldo deposit ke booking
+      // baru, tutup buku sisa piutang booking lama) — beda dari carryOverDate
+      // (tanggal setoran asli) yang dipakai khusus buat konversi ke deposit.
+      const nowIsoReschedule = new Date().toISOString();
 
       // Reservasi 1 seat di paket tujuan secara atomik (transaction) SEBELUM
       // booking baru dibuat — kalau ternyata kuotanya udah keburu habis
@@ -2049,52 +2080,96 @@ Terimakasih🙏`;
         // Lead per Bulan" nggak kehilangan jejak asal lead cuma gara-gara
         // pesertanya reschedule.
         leadSource: oldBooking.leadSource || '',
-        createdAt: new Date().toISOString()
+        createdAt: nowIsoReschedule
       });
 
       // Jurnal booking baru — piutang & pendapatan diterima dimuka penuh
       // sebesar newPrice, sama kayak booking normal.
       await postBookingCreated({
         bookingId: newBookingRef.id, bookingCode: newBookingCode, totalAmount: newPrice,
-        date: new Date().toISOString(), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+        date: nowIsoReschedule, createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
       }).catch(err => {
         console.error('Gagal posting jurnal booking reschedule:', err);
         alert(`Booking hasil reschedule (${newBookingCode}) berhasil dibuat, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Piutang Jamaah) untuk booking ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance, atau tambahkan Jurnal Manual di Laporan Keuangan → Jurnal Umum.`);
       });
 
-      // 2. Pindahkan setoran yang sudah dibayar sebagai carry-over ke booking baru
+      // 2. Setoran yang udah dibayar di booking lama (carry-over) — SEKARANG
+      // dilewatin ke Saldo Deposit customer dulu, BUKAN reclass langsung
+      // kayak sebelumnya (25 Sep 2026, permintaan user: "pakai deposit
+      // customer, jurnal top up-nya sesuai uang masuk awal"). Alasannya:
+      // ini makai jalur yang SAMA PERSIS kayak fitur "Batalkan/Refund ->
+      // Deposit / Saldo Akun" yang udah teruji, jejaknya kelihatan jelas di
+      // riwayat Saldo Deposit customer (bukan reclass senyap), dan kalau
+      // prosesnya somehow kepotong di tengah jalan, uangnya "aman" nyangkut
+      // sebagai saldo deposit customer, bukan hilang jejak.
+      //
+      // Urutannya: (a) TOP UP dulu — booking lama "ditutup" & uangnya
+      // dikonversi jadi Saldo Deposit, dated tanggal SETORAN ASLI (bukan
+      // tanggal reschedule) biar nyambung ke Rekonsiliasi Bank/Jurnal Umum
+      // bulan setoran itu terjadi. (b) baru USAGE — saldo deposit itu
+      // langsung dipakein buat bayar booking BARU, dated tanggal reschedule
+      // diproses (booking barunya emang baru "lahir" hari ini).
+      const oldPkg = packagesList.find(p => p.id === oldBooking.packageId);
       if (carryOverAmount > 0) {
-        await addDoc(collection(db, 'payments_income'), {
+        // Dipakein tanggal setoran TERAKHIR yang beneran masuk ke booking
+        // lama (bukan tanggal reschedule diproses).
+        const carryOverDate = await getLastPaymentDate(oldBooking.id, oldBooking.createdAt);
+
+        // (a) Booking lama: konversi carryOverAmount jadi Saldo Deposit
+        // Pemesan — sama persis pola "Batalkan/Refund -> Deposit/Saldo
+        // Akun" (adjustDepositBalance + postBookingCancelRefund
+        // refundToDeposit:true), TAPI writeOffAmount dipisah 0 di sini
+        // (sisa piutang yang beneran belum dibayar di-write-off TERPISAH
+        // di bawah, dated tanggal reschedule, bukan tanggal setoran).
+        if (oldBooking.ordererId) {
+          await adjustDepositBalance(
+            oldBooking.ordererId, oldBooking.ordererName, carryOverAmount,
+            'refund_conversion', `Konversi carry-over reschedule booking ${oldBooking.bookingCode} -> ${newBookingCode}`,
+            oldBooking.bookingCode, carryOverDate
+          );
+        }
+        await postBookingCancelRefund({
+          bookingId: oldBooking.id, bookingCode: oldBooking.bookingCode,
+          writeOffAmount: 0, refundAmount: carryOverAmount,
+          isRecognized: !!(oldPkg && oldPkg.revenueRecognized),
+          refundToDeposit: true,
+          date: carryOverDate, createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+        }).catch(err => {
+          console.error('Gagal posting jurnal konversi carry-over ke deposit (reschedule):', err);
+          alert(`Reschedule tersimpan, TAPI jurnal konversi carry-over ke Saldo Deposit GAGAL diposting (${err.message}). Laporan Keuangan untuk reschedule ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+        });
+
+        // (b) Booking baru: saldo deposit yang barusan kebentuk langsung
+        // dipakein buat bayar booking baru ini — dicatat sebagai setoran
+        // biasa dengan metode "Saldo Deposit" (sama kayak staf pilih
+        // "Saldo Deposit" manual di form Setoran), jadi kelihatan konsisten
+        // di Riwayat Pembayaran booking baru ini.
+        const carryPayRef = await addDoc(collection(db, 'payments_income'), {
           bookingId: newBookingRef.id,
           bookingCode: newBookingCode,
           jamaahName: oldBooking.jamaahName,
           packageId: newPkg.id,
           packageName: newPkg.name,
           amount: carryOverAmount,
-          paymentMethod: 'Carry-Over Reschedule',
-          notes: `Pindahan setoran dari booking ${oldBooking.bookingCode} (reschedule)`,
-          createdAt: new Date().toISOString()
+          paymentMethod: 'Saldo Deposit',
+          notes: `Carry-over reschedule dari booking ${oldBooking.bookingCode} (via Saldo Deposit)`,
+          createdAt: nowIsoReschedule
         });
-        // Carry-over BUKAN kas baru masuk (uangnya udah dicatat di booking
-        // lama) — jadi bukan postIncomePayment biasa (itu bakal ganda-catat
-        // Kas/Bank). Sebagai gantinya: lepas Pendapatan Diterima Dimuka yang
-        // nempel di booking lama sebesar carryOverAmount, pindahin jadi
-        // pengurang Piutang Jamaah booking BARU (bukan kas). Dikombinasikan
-        // dengan write-off sisa piutang booking lama di bawah, total
-        // Pendapatan Diterima Dimuka booking lama jadi nol bersih (tutup buku).
-        await postJournalEntry({
-          date: new Date().toISOString(),
-          description: `Carry-Over Reschedule ${oldBooking.bookingCode} -> ${newBookingCode}`,
-          source: 'booking_reschedule_carryover', sourceDocId: newBookingRef.id, reference: newBookingCode,
-          lines: [
-            { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: carryOverAmount, credit: 0 },
-            { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: 0, credit: carryOverAmount },
-          ],
+        await postIncomePayment({
+          paymentId: carryPayRef.id, bookingCode: newBookingCode, amount: carryOverAmount,
+          paymentMethod: 'Saldo Deposit', date: nowIsoReschedule,
           createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
         }).catch(err => {
-          console.error('Gagal posting jurnal carry-over reschedule:', err);
-          alert(`Reschedule tersimpan, TAPI jurnal carry-over-nya GAGAL diposting (${err.message}). Laporan Keuangan untuk reschedule ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+          console.error('Gagal posting jurnal pemakaian Saldo Deposit (reschedule):', err);
+          alert(`Reschedule tersimpan, TAPI jurnal pemakaian Saldo Deposit buat booking baru GAGAL diposting (${err.message}). Laporan Keuangan untuk reschedule ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
         });
+        if (oldBooking.ordererId) {
+          await adjustDepositBalance(
+            oldBooking.ordererId, oldBooking.ordererName, -carryOverAmount,
+            'usage', `Bayar booking hasil reschedule ${newBookingCode} (carry-over dari ${oldBooking.bookingCode})`,
+            newBookingCode
+          );
+        }
       }
 
       // Tutup buku booking lama — sisa piutang yang belum dibayar (nggak
@@ -2102,16 +2177,17 @@ Terimakasih🙏`;
       // di-write-off, dikreditkan ke Pendapatan Diterima Dimuka/Pendapatan
       // (tergantung status pengakuan pendapatan paket lama) persis kayak
       // pola pembatalan booking — bukan pembatalan beneran, tapi booking
-      // lama emang nggak lanjut lagi jadi piutangnya harus ditutup.
+      // lama emang nggak lanjut lagi jadi piutangnya harus ditutup. Ini
+      // TERPISAH dari konversi carry-over di atas (beda tanggal: ini dated
+      // tanggal reschedule diproses, bukan tanggal setoran).
       {
         const oldWriteOff = Math.max(0, Number(oldBooking.totalAmount || 0) - Number(oldBooking.totalPaid || 0));
         if (oldWriteOff > 0) {
-          const oldPkg = packagesList.find(p => p.id === oldBooking.packageId);
           await postBookingCancelRefund({
             bookingId: oldBooking.id, bookingCode: oldBooking.bookingCode,
             writeOffAmount: oldWriteOff, refundAmount: 0,
             isRecognized: !!(oldPkg && oldPkg.revenueRecognized),
-            date: new Date().toISOString(), createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+            date: nowIsoReschedule, createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
           }).catch(err => {
             console.error('Gagal posting jurnal tutup buku booking lama (reschedule):', err);
             alert(`Reschedule tersimpan, TAPI jurnal tutup buku booking lamanya GAGAL diposting (${err.message}). Laporan Keuangan untuk reschedule ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
@@ -3088,42 +3164,68 @@ Terimakasih🙏`;
           alert(`Booking hasil reschedule grup (${newBookingCode}) berhasil dibuat, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Piutang Jamaah) untuk booking ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance, atau tambahkan Jurnal Manual di Laporan Keuangan → Jurnal Umum.`);
         });
 
+        // Carry-over sekarang dilewatin ke Saldo Deposit Pemesan dulu —
+        // sama persis pola reschedule per-peserta (lihat komentar panjang di
+        // handleRescheduleSubmit): (a) TOP UP booking lama -> Saldo Deposit,
+        // dated tanggal setoran ASLI; (b) USAGE saldo itu buat bayar booking
+        // baru, dated tanggal reschedule grup diproses.
+        const oldPkgForWriteOff = packagesList.find(p => p.id === oldBooking.packageId);
         if (carryOverAmount > 0) {
-          await addDoc(collection(db, 'payments_income'), {
+          const carryOverDate = await getLastPaymentDate(oldBooking.id, oldBooking.createdAt);
+
+          if (oldBooking.ordererId) {
+            await adjustDepositBalance(
+              oldBooking.ordererId, oldBooking.ordererName, carryOverAmount,
+              'refund_conversion', `Konversi carry-over reschedule grup booking ${oldBooking.bookingCode} -> ${newBookingCode}`,
+              oldBooking.bookingCode, carryOverDate
+            );
+          }
+          await postBookingCancelRefund({
+            bookingId: oldBooking.id, bookingCode: oldBooking.bookingCode,
+            writeOffAmount: 0, refundAmount: carryOverAmount,
+            isRecognized: !!(oldPkgForWriteOff && oldPkgForWriteOff.revenueRecognized),
+            refundToDeposit: true,
+            date: carryOverDate, createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+          }).catch(err => {
+            console.error('Gagal posting jurnal konversi carry-over ke deposit (reschedule grup):', err);
+            alert(`Reschedule grup tersimpan, TAPI jurnal konversi carry-over ke Saldo Deposit GAGAL diposting (${err.message}). Laporan Keuangan untuk reschedule ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+          });
+
+          const carryPayRef = await addDoc(collection(db, 'payments_income'), {
             bookingId: newBookingRef.id,
             bookingCode: newBookingCode,
             jamaahName: oldBooking.jamaahName,
             packageId: newPkg.id,
             packageName: newPkg.name,
             amount: carryOverAmount,
-            paymentMethod: 'Carry-Over Reschedule',
-            notes: `Pindahan setoran dari booking ${oldBooking.bookingCode} (reschedule grup ${groupRescheduleTarget.code})`,
+            paymentMethod: 'Saldo Deposit',
+            notes: `Carry-over reschedule grup dari booking ${oldBooking.bookingCode} (via Saldo Deposit)`,
             createdAt: nowIso
           });
-          // Sama kayak reschedule per-peserta: carry-over BUKAN kas baru,
-          // jadi bukan postIncomePayment — lepas Pendapatan Diterima Dimuka
-          // booking lama, pindahin jadi pengurang Piutang Jamaah booking baru.
-          await postJournalEntry({
-            date: nowIso,
-            description: `Carry-Over Reschedule Grup ${oldBooking.bookingCode} -> ${newBookingCode}`,
-            source: 'booking_reschedule_carryover', sourceDocId: newBookingRef.id, reference: newBookingCode,
-            lines: [
-              { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: carryOverAmount, credit: 0 },
-              { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: 0, credit: carryOverAmount },
-            ],
+          await postIncomePayment({
+            paymentId: carryPayRef.id, bookingCode: newBookingCode, amount: carryOverAmount,
+            paymentMethod: 'Saldo Deposit', date: nowIso,
             createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
           }).catch(err => {
-            console.error('Gagal posting jurnal carry-over reschedule grup:', err);
-            alert(`Reschedule grup tersimpan, TAPI jurnal carry-over-nya GAGAL diposting (${err.message}). Laporan Keuangan untuk reschedule ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+            console.error('Gagal posting jurnal pemakaian Saldo Deposit (reschedule grup):', err);
+            alert(`Reschedule grup tersimpan, TAPI jurnal pemakaian Saldo Deposit buat booking baru GAGAL diposting (${err.message}). Laporan Keuangan untuk reschedule ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
           });
+          if (oldBooking.ordererId) {
+            await adjustDepositBalance(
+              oldBooking.ordererId, oldBooking.ordererName, -carryOverAmount,
+              'usage', `Bayar booking hasil reschedule grup ${newBookingCode} (carry-over dari ${oldBooking.bookingCode})`,
+              newBookingCode
+            );
+          }
         }
 
         // Tutup buku booking lama — write-off sisa piutang yang nggak akan
         // ketagih lewat booking lama (pola sama kayak reschedule per-peserta).
+        // TERPISAH dari konversi carry-over di atas (dated tanggal reschedule
+        // diproses, bukan tanggal setoran).
         {
           const oldWriteOff = Math.max(0, Number(oldBooking.totalAmount || 0) - Number(oldBooking.totalPaid || 0));
           if (oldWriteOff > 0) {
-            const oldPkgForWriteOff = packagesList.find(p => p.id === oldBooking.packageId);
             await postBookingCancelRefund({
               bookingId: oldBooking.id, bookingCode: oldBooking.bookingCode,
               writeOffAmount: oldWriteOff, refundAmount: 0,
