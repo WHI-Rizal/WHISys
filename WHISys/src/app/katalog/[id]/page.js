@@ -235,11 +235,11 @@ export default function DetailPaketPage({ params }) {
                 <tbody className="divide-y divide-slate-100">
                   {pkg.flightSegments.map((f, idx) => (
                     <tr key={idx}>
-                      <td className="px-3 py-2">{f.flightNumber || '-'}</td>
-                      <td className="px-3 py-2">{f.date || '-'}</td>
-                      <td className="px-3 py-2">{f.route || '-'}</td>
-                      <td className="px-3 py-2">{f.depTime || '-'}</td>
-                      <td className="px-3 py-2">{f.arrTime || '-'}</td>
+                      <td className="px-3 py-2 text-slate-700">{f.flightNumber || '-'}</td>
+                      <td className="px-3 py-2 text-slate-700">{f.date || '-'}</td>
+                      <td className="px-3 py-2 text-slate-700">{f.route || '-'}</td>
+                      <td className="px-3 py-2 text-slate-700">{f.depTime || '-'}</td>
+                      <td className="px-3 py-2 text-slate-700">{f.arrTime || '-'}</td>
                     </tr>
                   ))}
                 </tbody>
