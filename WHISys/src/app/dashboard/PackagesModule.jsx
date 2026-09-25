@@ -999,20 +999,29 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         // up to date.
         await syncPublicCatalog(editingPackageId, { ...originalPkg, ...payload });
 
-        // Sinkronkan revisi harga jual ke SEMUA booking AKTIF yang masih
-        // pakai paket ini. Booking nyimpen harga sendiri sebagai SNAPSHOT
-        // (field `totalAmount`, dihitung dari harga paket + biaya tambahan
-        // - diskon + PPN, dibekukan pas booking dibuat) — kalau nggak
-        // disinkronkan di sini, revisi harga paket master nggak bakal
-        // kebawa ke SO/tagihan customer yang udah ada, dan piutang jamaah
-        // di Laporan Keuangan tetap pakai harga lama selamanya. Booking
-        // yang statusnya bukan 'active' (batal/reschedule) dilewatin —
-        // harga mereka udah nggak relevan lagi.
+        // Sinkronkan revisi harga jual & tanggal keberangkatan ke SEMUA
+        // booking AKTIF yang masih pakai paket ini. Booking nyimpen
+        // harga (`totalAmount`) DAN tanggal keberangkatan (`departureDate`)
+        // sendiri sebagai SNAPSHOT, dibekukan pas booking dibuat — kalau
+        // nggak disinkronkan di sini:
+        //  - revisi harga paket master nggak bakal kebawa ke SO/tagihan
+        //    customer yang udah ada, piutang jamaah di Laporan Keuangan
+        //    tetap pakai harga lama selamanya.
+        //  - revisi tanggal keberangkatan paket (reschedule massal, geser
+        //    jadwal, dst) nggak bakal kebawa ke booking yang udah ada, dan
+        //    Due Date Pelunasan (H-40 sebelum keberangkatan, lihat
+        //    getDueDatePelunasan di BookingsModule.jsx) ikut ketinggalan
+        //    tetap ngitung dari tanggal keberangkatan LAMA — staf bisa
+        //    nagih di tanggal yang salah tanpa sadar.
+        // Booking yang statusnya bukan 'active' (batal/reschedule)
+        // dilewatin — data mereka udah nggak relevan lagi.
         let syncedBookingCount = 0;
+        let departureDateSyncedCount = 0;
         const priceChanged = ['priceMain', 'priceQuad', 'priceTriple', 'priceDouble'].some(
           k => Number(originalPkg?.[k] || 0) !== Number(payload[k] || 0)
         );
-        if (originalPkg && priceChanged) {
+        const departureDateChanged = (originalPkg?.departureDate || '') !== (payload.departureDate || '');
+        if (originalPkg && (priceChanged || departureDateChanged)) {
           try {
             const bookingsSnap = await getDocs(query(collection(db, 'bookings'), where('packageId', '==', editingPackageId)));
             const activeBookings = bookingsSnap.docs
@@ -1020,44 +1029,70 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
               .filter(b => (b.status || 'active') === 'active');
             const nowIso = new Date().toISOString();
             for (const b of activeBookings) {
-              let newBasePrice = Number(payload.priceQuad || payload.priceMain || 0);
-              if (b.roomType === 'Triple') newBasePrice = Number(payload.priceTriple || newBasePrice);
-              if (b.roomType === 'Double') newBasePrice = Number(payload.priceDouble || newBasePrice);
-              const chargesTotal = (b.extraCharges || []).reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
-              const discountsTotal = (b.extraDiscounts || []).reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
-              const newTotalAmount = addPPN(newBasePrice + chargesTotal - discountsTotal).total;
-              const delta = newTotalAmount - Number(b.totalAmount || 0);
-              if (delta === 0) continue;
-              await updateDoc(doc(db, 'bookings', b.id), { totalAmount: newTotalAmount, updatedAt: nowIso });
-              // Piutang Jamaah & Pendapatan Diterima Dimuka disesuaikan
-              // sebesar selisihnya doang — akun ini balance-sheet-only,
-              // nggak nyentuh akun Pendapatan (4101) yang udah "Diakui" di
-              // P&L (kalaupun paketnya udah "Akui Pendapatan", itu dihitung
-              // dari uang yang beneran disetor, bukan dari totalAmount ini
-              // — jadi aman disinkronkan kapan pun).
-              await postJournalEntry({
-                date: nowIso,
-                description: `Sinkron Revisi Harga Paket "${payload.name}" - ${b.bookingCode || b.id}`,
-                source: 'booking_edit_adjustment', sourceDocId: b.id, reference: b.bookingCode || '',
-                lines: delta > 0 ? [
-                  { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: delta, credit: 0 },
-                  { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: 0, credit: delta },
-                ] : [
-                  { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: -delta, credit: 0 },
-                  { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: 0, credit: -delta },
-                ],
-                createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
-              }).catch(err => {
-                console.error('Gagal posting jurnal sinkron revisi harga paket:', err);
-              });
+              const bookingUpdate = { updatedAt: nowIso };
+              let bookingTouched = false;
+
+              // Tanggal keberangkatan — sinkron dulu, murni cascade data
+              // (bukan angka uang), nggak butuh jurnal.
+              if (departureDateChanged && b.departureDate !== payload.departureDate) {
+                bookingUpdate.departureDate = payload.departureDate;
+                bookingTouched = true;
+                departureDateSyncedCount++;
+              }
+
+              // Harga — hitung ulang & siapin jurnal penyesuaian kalau beda.
+              let delta = 0;
+              if (priceChanged) {
+                let newBasePrice = Number(payload.priceQuad || payload.priceMain || 0);
+                if (b.roomType === 'Triple') newBasePrice = Number(payload.priceTriple || newBasePrice);
+                if (b.roomType === 'Double') newBasePrice = Number(payload.priceDouble || newBasePrice);
+                const chargesTotal = (b.extraCharges || []).reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
+                const discountsTotal = (b.extraDiscounts || []).reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
+                const newTotalAmount = addPPN(newBasePrice + chargesTotal - discountsTotal).total;
+                delta = newTotalAmount - Number(b.totalAmount || 0);
+                if (delta !== 0) {
+                  bookingUpdate.totalAmount = newTotalAmount;
+                  bookingTouched = true;
+                }
+              }
+
+              if (!bookingTouched) continue;
+              await updateDoc(doc(db, 'bookings', b.id), bookingUpdate);
+
+              if (delta !== 0) {
+                // Piutang Jamaah & Pendapatan Diterima Dimuka disesuaikan
+                // sebesar selisihnya doang — akun ini balance-sheet-only,
+                // nggak nyentuh akun Pendapatan (4101) yang udah "Diakui" di
+                // P&L (kalaupun paketnya udah "Akui Pendapatan", itu dihitung
+                // dari uang yang beneran disetor, bukan dari totalAmount ini
+                // — jadi aman disinkronkan kapan pun).
+                await postJournalEntry({
+                  date: nowIso,
+                  description: `Sinkron Revisi Harga Paket "${payload.name}" - ${b.bookingCode || b.id}`,
+                  source: 'booking_edit_adjustment', sourceDocId: b.id, reference: b.bookingCode || '',
+                  lines: delta > 0 ? [
+                    { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: delta, credit: 0 },
+                    { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: 0, credit: delta },
+                  ] : [
+                    { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: -delta, credit: 0 },
+                    { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: 0, credit: -delta },
+                  ],
+                  createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+                }).catch(err => {
+                  console.error('Gagal posting jurnal sinkron revisi harga paket:', err);
+                });
+              }
               syncedBookingCount++;
             }
             if (syncedBookingCount > 0) {
-              alert(`Harga paket "${payload.name}" berhasil diperbarui. ${syncedBookingCount} booking aktif yang masih pakai paket ini otomatis ikut disesuaikan tagihan & jurnalnya.`);
+              const parts = [];
+              if (priceChanged) parts.push('tagihan & jurnalnya');
+              if (departureDateChanged) parts.push(`tanggal keberangkatan${departureDateSyncedCount > 0 ? ` (${departureDateSyncedCount} booking, termasuk Due Date Pelunasan-nya ikut kehitung ulang)` : ''}`);
+              alert(`Paket "${payload.name}" berhasil diperbarui. ${syncedBookingCount} booking aktif yang masih pakai paket ini otomatis ikut disesuaikan ${parts.join(' & ')}.`);
             }
           } catch (syncErr) {
-            console.error('Gagal menyinkronkan revisi harga ke booking existing:', syncErr);
-            alert(`Harga paket tersimpan, TAPI GAGAL menyinkronkan ke booking yang udah ada (${syncErr.message}). Tagihan/piutang booking lama mungkin masih pakai harga lama — cek manual di Booking & Manifest, atau lapor ke tim IT.`);
+            console.error('Gagal menyinkronkan revisi paket ke booking existing:', syncErr);
+            alert(`Data paket tersimpan, TAPI GAGAL menyinkronkan ke booking yang udah ada (${syncErr.message}). Tagihan/tanggal keberangkatan booking lama mungkin masih pakai data lama — cek manual di Booking & Manifest, atau lapor ke tim IT.`);
           }
         }
 
@@ -1068,7 +1103,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
           action: 'update',
           module: 'Paket Perjalanan',
           targetLabel: payload.name,
-          details: `Mengubah data paket "${payload.name}" (${payload.code || '-'})${syncedBookingCount > 0 ? ` — ${syncedBookingCount} booking aktif ikut disesuaikan harga/tagihannya` : ''}.`
+          details: `Mengubah data paket "${payload.name}" (${payload.code || '-'})${syncedBookingCount > 0 ? ` — ${syncedBookingCount} booking aktif ikut disesuaikan${priceChanged ? ' harga/tagihannya' : ''}${priceChanged && departureDateChanged ? ' &' : ''}${departureDateChanged ? ' tanggal keberangkatannya' : ''}` : ''}.`
         });
       } else {
         // Paket baru: Sisa Kuota harus diisi penuh sama dengan Kuota Total
