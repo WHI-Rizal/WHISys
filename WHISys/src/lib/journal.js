@@ -1013,6 +1013,15 @@ export const diagnoseMissingIncomePaymentJournals = ({ paymentsIncome, journalEn
   );
   const affected = (paymentsIncome || [])
     .filter(p => Number(p.amount || 0) > 0)
+    // Dokumen setoran dgn paymentMethod 'Carry-Over Reschedule' SENGAJA nggak
+    // pernah dikasih jurnal income_payment sendiri (mekanisme reschedule lama,
+    // sebelum 29 Sep 2026) — efek keuangannya udah kecatet lewat jurnal reklas
+    // terpisah (source 'booking_reschedule_carryover': Dr Pendapatan Diterima
+    // Dimuka booking lama, Cr Piutang Jamaah booking baru). Kalau nggak
+    // dikecualiin di sini, dokumen ini keliatan "belum kejurnal" terus padahal
+    // itu memang desainnya, dan kalau staf iseng klik "Posting Jurnal" bakal
+    // DOBEL-nyatet uang yang sebenarnya nggak pernah masuk sebagai kas baru.
+    .filter(p => p.paymentMethod !== 'Carry-Over Reschedule')
     .filter(p => !journaledPaymentIds.has(p.id))
     .map(p => ({
       paymentId: p.id, bookingCode: p.bookingCode, jamaahName: p.jamaahName,
