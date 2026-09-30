@@ -2465,9 +2465,19 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // nggak ngitung booking yang batal, jadi laporan closing ini disamain).
   // Booking batal TETAP kelihatan di CSV export (lihat closingTcCancelledInPeriod
   // di bawah) biar tetap ketauan jejaknya, cuma nilainya dikosongin.
+  //
+  // Booking berstatus 'rescheduled' JUGA dikeluarkan (30 Sep 2026, pola sama
+  // persis kayak 'cancelled' di atas) — begitu booking di-reschedule,
+  // piutang/pendapatannya udah "ditutup buku" dan digantiin sama booking
+  // BARU hasil reschedule (yang sekarang ikut bawa closingSourceType/Id-nya
+  // sendiri, lihat handleRescheduleSubmit/handleGroupRescheduleSubmit di
+  // BookingsModule.jsx). Kalau booking lama TETAP kehitung di sini, closing-nya
+  // jadi DOBEL (di booking lama yang harusnya udah nggak berlaku, DAN di
+  // booking baru) — persis kasus yang bikin "Total Closingan" beda sama
+  // Neraca (selisih ~Rp 40 juta ketemu 30 Sep 2026).
   const closingTcBookingsInPeriod = bookingsList.filter(bk => {
     if (bk.closingSourceType !== 'tc' || !bk.closingSourceId) return false;
-    if (bk.status === 'cancelled') return false;
+    if (bk.status === 'cancelled' || bk.status === 'rescheduled') return false;
     const txDate = toLocalDateOnlyString(bk.createdAt);
     if (!txDate) return false;
     if (closingTcStartDate && txDate < closingTcStartDate) return false;
@@ -2482,6 +2492,19 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   const closingTcCancelledInPeriod = bookingsList.filter(bk => {
     if (bk.closingSourceType !== 'tc' || !bk.closingSourceId) return false;
     if (bk.status !== 'cancelled') return false;
+    const txDate = toLocalDateOnlyString(bk.createdAt);
+    if (!txDate) return false;
+    if (closingTcStartDate && txDate < closingTcStartDate) return false;
+    if (closingTcEndDate && txDate > closingTcEndDate) return false;
+    return true;
+  });
+
+  // Sama kayak closingTcCancelledInPeriod, tapi buat booking yang statusnya
+  // 'rescheduled' — tetap kelihatan jejaknya di CSV export ("Direschedule"),
+  // cuma nggak ikut dihitung ke Total Closingan.
+  const closingTcRescheduledInPeriod = bookingsList.filter(bk => {
+    if (bk.closingSourceType !== 'tc' || !bk.closingSourceId) return false;
+    if (bk.status !== 'rescheduled') return false;
     const txDate = toLocalDateOnlyString(bk.createdAt);
     if (!txDate) return false;
     if (closingTcStartDate && txDate < closingTcStartDate) return false;
@@ -2695,6 +2718,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     const detailRows = [
       ...groupBookingRows(closingTcBookingsInPeriod, 'Aktif', true),
       ...groupBookingRows(closingTcCancelledInPeriod, 'Dibatalkan', false),
+      ...groupBookingRows(closingTcRescheduledInPeriod, 'Direschedule', false),
     ].sort((a, b) => {
       if (a.tcName !== b.tcName) return a.tcName.localeCompare(b.tcName, 'id');
       return a.txDateRaw.localeCompare(b.txDateRaw);
