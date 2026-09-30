@@ -2080,6 +2080,19 @@ Terimakasih🙏`;
         // Lead per Bulan" nggak kehilangan jejak asal lead cuma gara-gara
         // pesertanya reschedule.
         leadSource: oldBooking.leadSource || '',
+        // Closing TC/Partner JUGA ikut dibawa (30 Sep 2026) — sebelumnya
+        // nggak di-carry, jadi booking lama (yang udah 'rescheduled') masih
+        // nyantol di "Total Closingan Semua TC" walau piutangnya udah
+        // ditutup buku, SEMENTARA booking baru hasil reschedule nggak
+        // kehitung closing-nya sama sekali (nggak punya closingSourceType).
+        // Ini bikin "Total Closingan" beda sama "2201 - Pendapatan Diterima
+        // Dimuka" di Neraca. TC yang bawa closing awal tetap harus dapet
+        // kredit closingannya, cuma sekarang nempel di booking baru (lihat
+        // juga pengecualian status 'rescheduled' di closingTcBookingsInPeriod,
+        // FinanceModule.jsx, biar booking lama nggak kehitung dobel).
+        closingSourceType: oldBooking.closingSourceType || '',
+        closingSourceId: oldBooking.closingSourceId || '',
+        closingSourceName: oldBooking.closingSourceName || '',
         createdAt: nowIsoReschedule
       });
 
@@ -3153,6 +3166,12 @@ Terimakasih🙏`;
           createdByUid: oldBooking.createdByUid || '',
           createdByName: oldBooking.createdByName || '',
           leadSource: oldBooking.leadSource || '',
+          // Closing TC/Partner ikut dibawa (30 Sep 2026) — lihat catatan
+          // panjang di handleRescheduleSubmit soal kenapa ini perlu, biar
+          // "Total Closingan Semua TC" nggak beda sama Neraca abis reschedule.
+          closingSourceType: oldBooking.closingSourceType || '',
+          closingSourceId: oldBooking.closingSourceId || '',
+          closingSourceName: oldBooking.closingSourceName || '',
           createdAt: nowIso
         });
 
