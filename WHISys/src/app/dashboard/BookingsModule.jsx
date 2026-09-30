@@ -1107,6 +1107,17 @@ Terimakasih🙏`;
       alert("Ganti Metode Bayar ke/dari \"Saldo Deposit\" nggak bisa lewat edit ini (biar saldo deposit & akun Kas/Bank tetap akurat). Hapus catatan ini, terus catat ulang lewat \"+Bayar\".");
       return;
     }
+    // Setoran ini porsi dari transaksi GRUP yang digabung (beberapa pax
+    // dibayar sekaligus, satu baris account_mutations dipakai bareng —
+    // lihat adjustGroupMutationShare) — pindah akun Kas/Bank nggak
+    // didukung di sini karena baris mutasinya milik bersama, bukan milik
+    // 1 dokumen ini doang. Diblok tegas (dulu cuma komentar, nggak
+    // dicegah beneran) biar nggak diem-diem bikin saldo akun lama/baru
+    // selisih dari Riwayat Pembayaran.
+    if (oldPay?.groupTransactionId && oldPay?.accountId && paymentEditForm.accountId && paymentEditForm.accountId !== oldPay.accountId) {
+      alert("Setoran ini bagian dari transaksi setoran grup yang digabung — akun Kas/Bank-nya nggak bisa diganti lewat sini (baris Riwayat Mutasi-nya dipakai bareng peserta lain dalam transaksi yang sama). Nominal & tanggal tetap bisa dikoreksi. Kalau akunnya emang salah, hubungi tim IT/Finance buat koreksi manual.");
+      return;
+    }
     if (paymentEditForm.date && isPaymentDateBeforeBooking(paymentEditForm.date, selectedBookingForHistory?.createdAt)) {
       const minDate = getBookingMinDate(selectedBookingForHistory?.createdAt);
       alert(`Tanggal setoran nggak boleh sebelum tanggal pemesanan ${selectedBookingForHistory?.bookingCode || ''} dibuat (${minDate.split('-').reverse().join('/')}).`);
@@ -1130,18 +1141,44 @@ Terimakasih🙏`;
         ...(paymentEditForm.date ? { createdAt: resolvePaymentCreatedAt(paymentEditForm.date) } : {})
       });
 
-      // Selisih nominal lama vs baru disesuaikan ke akun yang sama (edit ini
-      // nggak dukung pindah akun sekaligus ganti nominal, biar simpel). Kalau
-      // doc ini porsi dari setoran grup yang digabung (groupTransactionId),
-      // selisihnya diterapkan ke baris mutasi gabungan (bukan dicari lewat id
-      // doc sendiri yang nggak bakal ketemu — lihat adjustGroupMutationShare).
+      // Kalau akun Kas/Bank-nya DIGANTI (bukan cuma nominal), uangnya harus
+      // dipindah PENUH dari akun lama ke akun baru — bukan cuma nyesuain
+      // selisih nominal di akun lama kayak sebelumnya. Cara lama itu yang
+      // bikin Riwayat Mutasi akun lama (misal BCA) masih nyimpen sisa uang
+      // yang sebenarnya udah "pindah" ke akun baru (misal BSI) di
+      // payments_income/Riwayat Pembayaran, jadi saldo dua akun itu beda
+      // sama yang seharusnya (kasus selisih BSI/BCA).
+      const paymentAccountChanged = oldPay?.accountId && paymentEditForm.accountId && paymentEditForm.accountId !== oldPay.accountId;
       if (oldPay?.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
-        const delta = Number(paymentEditForm.amount) - (Number(oldPay.amount) || 0);
-        if (oldPay.groupTransactionId) {
-          await adjustGroupMutationShare(oldPay.accountId, oldPay.groupTransactionId, delta);
+        if (paymentAccountChanged) {
+          // (Transaksi grup gabungan udah diblok di validasi awal — titik
+          // ini cuma kejalanin buat setoran non-grup, aman dipindah penuh.)
+          await removeAccountMutationBySource(oldPay.accountId, payId, -(Number(oldPay.amount) || 0));
+          await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount), {
+            description: paymentEditForm.notes || selectedBookingForHistory?.bookingCode || '-',
+            source: 'income_payment',
+            sourceDocId: payId,
+            date: paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : oldPay?.createdAt
+          });
         } else {
-          await updateAccountMutationAmount(oldPay.accountId, payId, Number(paymentEditForm.amount), delta);
+          const delta = Number(paymentEditForm.amount) - (Number(oldPay.amount) || 0);
+          if (oldPay.groupTransactionId) {
+            await adjustGroupMutationShare(oldPay.accountId, oldPay.groupTransactionId, delta);
+          } else {
+            await updateAccountMutationAmount(oldPay.accountId, payId, Number(paymentEditForm.amount), delta);
+          }
         }
+      } else if (!oldPay?.accountId && paymentEditForm.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
+        // Kasus lama: setoran ini SEBELUMNYA nggak punya akun tercatat (data
+        // lawas/nggak lengkap) tapi sekarang staf ngisi akunnya lewat edit —
+        // catat sebagai mutasi baru di akun itu (belum pernah ada mutasi
+        // buat dokumen ini sama sekali).
+        await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount), {
+          description: paymentEditForm.notes || selectedBookingForHistory?.bookingCode || '-',
+          source: 'income_payment',
+          sourceDocId: payId,
+          date: paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : oldPay?.createdAt
+        });
       }
 
       // Jurnal lama buat setoran ini nggak bisa di-update langsung (jurnal
@@ -2465,6 +2502,13 @@ Terimakasih🙏`;
       alert("Ganti Metode Bayar ke/dari \"Saldo Deposit\" nggak bisa lewat edit ini (biar saldo deposit & akun Kas/Bank tetap akurat). Hapus catatan ini, terus catat ulang lewat \"+Bayar\".");
       return;
     }
+    // Sama kayak handleSavePaymentEdit — kalau setoran ini masih porsi dari
+    // transaksi grup yang digabung, baris Riwayat Mutasinya dipakai bareng
+    // peserta lain, jadi akunnya nggak boleh diganti lewat sini.
+    if (pay?.groupTransactionId && pay?.accountId && paymentEditForm.accountId && paymentEditForm.accountId !== pay.accountId) {
+      alert("Setoran ini bagian dari transaksi setoran grup yang digabung — akun Kas/Bank-nya nggak bisa diganti lewat sini (baris Riwayat Mutasi-nya dipakai bareng peserta lain dalam transaksi yang sama). Nominal & tanggal tetap bisa dikoreksi. Kalau akunnya emang salah, hubungi tim IT/Finance buat koreksi manual.");
+      return;
+    }
     const bookingItemForDate = groupHistoryItems.find(b => b.id === pay.bookingId);
     if (paymentEditForm.date && isPaymentDateBeforeBooking(paymentEditForm.date, bookingItemForDate?.createdAt)) {
       const minDate = getBookingMinDate(bookingItemForDate?.createdAt);
@@ -2482,9 +2526,31 @@ Terimakasih🙏`;
         ...(paymentEditForm.date ? { createdAt: resolvePaymentCreatedAt(paymentEditForm.date) } : {})
       });
 
+      // Sama kayak handleSavePaymentEdit — kalau akunnya diganti, uangnya
+      // dipindah PENUH ke akun baru (bukan cuma nyesuain selisih nominal di
+      // akun lama), biar Riwayat Mutasi per akun (BSI/BCA/dst) nggak
+      // selisih sama Riwayat Pembayaran.
+      const groupPaymentAccountChanged = pay.accountId && paymentEditForm.accountId && paymentEditForm.accountId !== pay.accountId;
       if (pay.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
-        const delta = Number(paymentEditForm.amount) - (Number(pay.amount) || 0);
-        await updateAccountMutationAmount(pay.accountId, pay.id, Number(paymentEditForm.amount), delta);
+        if (groupPaymentAccountChanged) {
+          await removeAccountMutationBySource(pay.accountId, pay.id, -(Number(pay.amount) || 0));
+          await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount), {
+            description: paymentEditForm.notes || pay.bookingCode || '-',
+            source: 'income_payment',
+            sourceDocId: pay.id,
+            date: paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : pay?.createdAt
+          });
+        } else {
+          const delta = Number(paymentEditForm.amount) - (Number(pay.amount) || 0);
+          await updateAccountMutationAmount(pay.accountId, pay.id, Number(paymentEditForm.amount), delta);
+        }
+      } else if (!pay.accountId && paymentEditForm.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
+        await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount), {
+          description: paymentEditForm.notes || pay.bookingCode || '-',
+          source: 'income_payment',
+          sourceDocId: pay.id,
+          date: paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : pay?.createdAt
+        });
       }
 
       const bookingItem = groupHistoryItems.find(b => b.id === pay.bookingId);
