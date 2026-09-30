@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit, writeBatch, documentId, increment } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit, writeBatch, documentId } from 'firebase/firestore';
 import {
   BookOpen, Wallet, TrendingUp, Scale, Users, RefreshCw, Download,
   ChevronDown, ChevronRight, ShieldCheck, X, BarChart3, CheckCircle2, RotateCcw,
@@ -4016,7 +4016,6 @@ function BankReconciliationTab({ styles, isDark, currentUser, financialAccounts 
 // TAB 7: KAS & BANK — dipindah dari FinanceModule.jsx tab "Laporan"
 // =====================================================================
 function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh }) {
-  const isFinanceOrAdmin = ['finance', 'admin', 'super admin'].includes((currentUser?.role || '').toLowerCase()) || (currentUser?.role || '').toLowerCase().includes('super');
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState(null);
   const [accountForm, setAccountForm] = useState({
@@ -4147,44 +4146,6 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
       setMutationRows([]);
     } finally {
       setMutationLoading(false);
-    }
-  };
-
-  // Hapus 1 baris mutasi yang SALAH/YATIM (misal sisa dari bug lama —
-  // dokumen transaksi sumbernya udah kehapus/pindah akun, tapi baris
-  // mutasinya nyangkut di akun yang salah). SENGAJA nggak dipakai buat
-  // koreksi transaksi normal — buat itu tetap lewat Edit/Hapus di Riwayat
-  // Pembayaran/dst biar konsisten sama jurnal & dokumen sumbernya. Baris
-  // yang udah "Sudah Rekon" (nyantol ke Rekonsiliasi Bank) diblok, harus
-  // dilepas dulu dari situ.
-  const handleDeleteMutationRow = async (row) => {
-    if (!isFinanceOrAdmin) {
-      alert('Cuma Finance & Super Admin yang boleh menghapus baris mutasi.');
-      return;
-    }
-    if (row.reconciled) {
-      alert('Baris mutasi ini udah dicocokkan (Sudah Rekon) ke Rekonsiliasi Bank — lepas kecocokannya dulu lewat tab Rekonsiliasi Bank sebelum dihapus dari sini.');
-      return;
-    }
-    const arahTeks = row.type === 'in' ? 'MASUK' : 'KELUAR';
-    const confirmMsg = `Hapus baris mutasi "${row.description || '-'}" (${arahTeks} Rp ${Number(row.amount).toLocaleString('id-ID')}) dari akun "${mutationAccount.name}"?\n\nCuma buat baris mutasi yang SALAH/YATIM (misal sisa dari transaksi yang udah kehapus/pindah akun tapi baris ini ketinggalan) — BUKAN buat koreksi transaksi yang masih normal/aktif.\n\nSaldo akun "${mutationAccount.name}" bakal disesuaikan Rp ${Number(row.amount).toLocaleString('id-ID')} (${row.type === 'in' ? 'dikurangi' : 'ditambah'}).`;
-    if (!confirm(confirmMsg)) return;
-    try {
-      const delta = row.type === 'in' ? -(Number(row.amount) || 0) : (Number(row.amount) || 0);
-      await deleteDoc(doc(db, 'account_mutations', row.id));
-      await updateDoc(doc(db, 'financial_accounts', mutationAccount.id), { balance: increment(delta) });
-      logActivity({
-        userId: currentUser?.uid, userName: currentUser?.fullName || currentUser?.email, userRole: currentUser?.role,
-        action: 'delete', module: 'Akun Keuangan',
-        targetLabel: mutationAccount.name,
-        details: `Menghapus baris mutasi yatim/salah "${row.description || '-'}" (${arahTeks} Rp ${Number(row.amount).toLocaleString('id-ID')}) dari akun "${mutationAccount.name}" (ref: ${row.reference || row.sourceDocId || '-'}).`
-      });
-      const freshAccSnap = await getDoc(doc(db, 'financial_accounts', mutationAccount.id));
-      const freshAcc = freshAccSnap.exists() ? { id: freshAccSnap.id, ...freshAccSnap.data() } : { ...mutationAccount, balance: Number(mutationAccount.balance || 0) + delta };
-      onRefresh();
-      await handleOpenMutations(freshAcc);
-    } catch (err) {
-      alert('Gagal menghapus baris mutasi: ' + err.message);
     }
   };
 
@@ -4520,14 +4481,13 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
                         <th className="p-3 text-right">Keluar</th>
                         <th className="p-3 text-right">Saldo</th>
                         <th className="p-3 text-center">Status Rekon</th>
-                        {isFinanceOrAdmin && <th className="p-3 text-center">Aksi</th>}
                       </tr>
                     </thead>
                     <tbody className={`divide-y ${styles.tableRowBorder}`}>
                       {mutationLoading ? (
-                        <tr><td colSpan="8" className={`p-8 text-center ${styles.textSub}`}>Memuat riwayat mutasi...</td></tr>
+                        <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Memuat riwayat mutasi...</td></tr>
                       ) : getFilteredMutationRows().length === 0 ? (
-                        <tr><td colSpan="8" className={`p-8 text-center ${styles.textSub}`}>Belum ada mutasi pada rentang tanggal ini.</td></tr>
+                        <tr><td colSpan="7" className={`p-8 text-center ${styles.textSub}`}>Belum ada mutasi pada rentang tanggal ini.</td></tr>
                       ) : (
                         getFilteredMutationRows().map(r => (
                           <tr key={r.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
@@ -4544,19 +4504,6 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
                                 {r.reconciled ? 'Sudah Rekon' : 'Belum Rekon'}
                               </span>
                             </td>
-                            {isFinanceOrAdmin && (
-                              <td className="p-3 text-center">
-                                {!r.reconciled && (
-                                  <button
-                                    onClick={() => handleDeleteMutationRow(r)}
-                                    title="Hapus baris mutasi yatim/salah (bukan buat koreksi transaksi normal)"
-                                    className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </td>
-                            )}
                           </tr>
                         ))
                       )}
@@ -4599,14 +4546,6 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
                           <span className="text-[10px] opacity-60 uppercase">Saldo</span>
                           <div className={`font-bold ${styles.textTitle}`}>Rp {Number(r.balanceAfter).toLocaleString('id-ID')}</div>
                         </div>
-                        {isFinanceOrAdmin && !r.reconciled && (
-                          <button
-                            onClick={() => handleDeleteMutationRow(r)}
-                            className="w-full mt-1 flex items-center justify-center gap-1 py-1.5 text-rose-500 bg-rose-500/10 rounded-lg text-[10px] font-medium"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" /> Hapus Baris (Yatim/Salah)
-                          </button>
-                        )}
                       </div>
                     ))
                   )}
