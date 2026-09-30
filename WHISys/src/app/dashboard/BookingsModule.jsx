@@ -1148,6 +1148,12 @@ Terimakasih🙏`;
       // yang sebenarnya udah "pindah" ke akun baru (misal BSI) di
       // payments_income/Riwayat Pembayaran, jadi saldo dua akun itu beda
       // sama yang seharusnya (kasus selisih BSI/BCA).
+      // Tanggal yang bakal dipakai buat baris mutasi (kalau staff ganti
+      // field tanggal di form edit) — dihitung SEKALI di sini, dipakai
+      // konsisten ke semua percabangan di bawah, biar Riwayat Mutasi ikut
+      // kekoreksi persis kayak Riwayat Pembayaran, bukan diam-diam nyisain
+      // tanggal lama.
+      const resolvedNewDate = paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : oldPay?.createdAt;
       const paymentAccountChanged = oldPay?.accountId && paymentEditForm.accountId && paymentEditForm.accountId !== oldPay.accountId;
       if (oldPay?.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
         if (paymentAccountChanged) {
@@ -1158,14 +1164,14 @@ Terimakasih🙏`;
             description: paymentEditForm.notes || selectedBookingForHistory?.bookingCode || '-',
             source: 'income_payment',
             sourceDocId: payId,
-            date: paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : oldPay?.createdAt
+            date: resolvedNewDate
           });
         } else {
           const delta = Number(paymentEditForm.amount) - (Number(oldPay.amount) || 0);
           if (oldPay.groupTransactionId) {
-            await adjustGroupMutationShare(oldPay.accountId, oldPay.groupTransactionId, delta);
+            await adjustGroupMutationShare(oldPay.accountId, oldPay.groupTransactionId, delta, resolvedNewDate);
           } else {
-            await updateAccountMutationAmount(oldPay.accountId, payId, Number(paymentEditForm.amount), delta);
+            await updateAccountMutationAmount(oldPay.accountId, payId, Number(paymentEditForm.amount), delta, resolvedNewDate);
           }
         }
       } else if (!oldPay?.accountId && paymentEditForm.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
@@ -1177,7 +1183,7 @@ Terimakasih🙏`;
           description: paymentEditForm.notes || selectedBookingForHistory?.bookingCode || '-',
           source: 'income_payment',
           sourceDocId: payId,
-          date: paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : oldPay?.createdAt
+          date: resolvedNewDate
         });
       }
 
@@ -1829,7 +1835,7 @@ Terimakasih🙏`;
   // nggak bisa diam-diam diubah lewat cara laen di luar app ini — jadi
   // nominal baris di sini DIGANTI lewat hapus-baris-lama+tulis-baris-baru,
   // BUKAN updateDoc langsung (yang bakal ditolak Rules & gagal diem-diem).
-  const updateAccountMutationAmount = async (accountId, sourceDocId, newAmount, delta) => {
+  const updateAccountMutationAmount = async (accountId, sourceDocId, newAmount, delta, newDate) => {
     if (!accountId) return;
     if (delta) {
       await updateDoc(doc(db, 'financial_accounts', accountId), { balance: increment(delta) });
@@ -1841,7 +1847,14 @@ Terimakasih🙏`;
       await Promise.all(snap.docs.map(async (d) => {
         const old = d.data();
         await deleteDoc(d.ref);
-        await addDoc(collection(db, 'account_mutations'), { ...old, amount: Math.abs(newAmount) });
+        // `newDate` (kalau dikasih) dipakai buat nimpa `createdAt` baris
+        // mutasinya juga — dulu di sini cuma `amount` yang ke-update, jadi
+        // kalau staff koreksi TANGGAL setoran lewat Edit, Riwayat Pembayaran
+        // langsung berubah tapi Riwayat Mutasi diam-diam tetap nyimpen
+        // tanggal LAMA selamanya (baris kesimpen ulang tiap edit, tapi
+        // createdAt-nya nggak pernah disentuh) — itu yang bikin dua-duanya
+        // beda tanggal padahal transaksinya sama.
+        await addDoc(collection(db, 'account_mutations'), { ...old, amount: Math.abs(newAmount), createdAt: newDate || old.createdAt });
       }));
     } catch (err) {
       console.error('Gagal memperbarui riwayat mutasi terkait:', err);
@@ -1863,18 +1876,26 @@ Terimakasih🙏`;
   // di-updateDoc langsung (Rules-nya cuma izinin create/delete), jadi nominal
   // baru ditulis lewat hapus-baris-lama+tulis-baris-baru (dgn field2 lain
   // yang sama biar tetep 1 baris per transaksi), bukan updateDoc.
-  const adjustGroupMutationShare = async (accountId, groupTransactionId, deltaAmount) => {
-    if (!accountId || !groupTransactionId || !deltaAmount) return;
+  const adjustGroupMutationShare = async (accountId, groupTransactionId, deltaAmount, newDate) => {
+    if (!accountId || !groupTransactionId) return;
+    // Dulu di sini nge-skip total kalau deltaAmount 0 — jadi kalau staff
+    // cuma koreksi TANGGAL doang (nominal nggak berubah), baris mutasi
+    // gabungannya nggak pernah disentuh sama sekali, `createdAt`-nya tetap
+    // tanggal lama selamanya. Sekarang tetap lanjut kalau ada `newDate` yang
+    // mau diterapkan, walau deltaAmount-nya 0.
+    if (!deltaAmount && !newDate) return;
     try {
-      await updateDoc(doc(db, 'financial_accounts', accountId), { balance: increment(deltaAmount) });
+      if (deltaAmount) {
+        await updateDoc(doc(db, 'financial_accounts', accountId), { balance: increment(deltaAmount) });
+      }
       const q = query(collection(db, 'account_mutations'), where('accountId', '==', accountId), where('sourceDocId', '==', groupTransactionId));
       const snap = await getDocs(q);
       await Promise.all(snap.docs.map(async (d) => {
         const old = d.data();
-        const newAmount = (Number(old.amount) || 0) + deltaAmount;
+        const newAmount = (Number(old.amount) || 0) + (deltaAmount || 0);
         await deleteDoc(d.ref);
         if (newAmount > 0) {
-          await addDoc(collection(db, 'account_mutations'), { ...old, amount: newAmount });
+          await addDoc(collection(db, 'account_mutations'), { ...old, amount: newAmount, createdAt: newDate || old.createdAt });
         }
       }));
     } catch (err) {
@@ -2529,7 +2550,10 @@ Terimakasih🙏`;
       // Sama kayak handleSavePaymentEdit — kalau akunnya diganti, uangnya
       // dipindah PENUH ke akun baru (bukan cuma nyesuain selisih nominal di
       // akun lama), biar Riwayat Mutasi per akun (BSI/BCA/dst) nggak
-      // selisih sama Riwayat Pembayaran.
+      // selisih sama Riwayat Pembayaran. Tanggal barunya (kalau diganti) juga
+      // dihitung sekali & dipakai konsisten ke semua percabangan, biar
+      // Riwayat Mutasi nggak diam-diam nyisain tanggal lama.
+      const resolvedNewDate = paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : pay?.createdAt;
       const groupPaymentAccountChanged = pay.accountId && paymentEditForm.accountId && paymentEditForm.accountId !== pay.accountId;
       if (pay.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
         if (groupPaymentAccountChanged) {
@@ -2538,18 +2562,18 @@ Terimakasih🙏`;
             description: paymentEditForm.notes || pay.bookingCode || '-',
             source: 'income_payment',
             sourceDocId: pay.id,
-            date: paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : pay?.createdAt
+            date: resolvedNewDate
           });
         } else {
           const delta = Number(paymentEditForm.amount) - (Number(pay.amount) || 0);
-          await updateAccountMutationAmount(pay.accountId, pay.id, Number(paymentEditForm.amount), delta);
+          await updateAccountMutationAmount(pay.accountId, pay.id, Number(paymentEditForm.amount), delta, resolvedNewDate);
         }
       } else if (!pay.accountId && paymentEditForm.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
         await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount), {
           description: paymentEditForm.notes || pay.bookingCode || '-',
           source: 'income_payment',
           sourceDocId: pay.id,
-          date: paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : pay?.createdAt
+          date: resolvedNewDate
         });
       }
 
