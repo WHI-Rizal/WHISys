@@ -218,17 +218,29 @@ export const postBookingCreated = async ({ bookingId, bookingCode, totalAmount, 
 //    Jamaah, sisi lain Kas/Bank (atau Utang Deposit Jamaah kalau
 //    dibayar pakai Saldo Deposit customer). `batch` opsional, sama kayak
 //    postBookingCreated di atas.
-export const postIncomePayment = async ({ paymentId, bookingCode, amount, paymentMethod, accountId, accountName, date, createdByUid, createdByName, batch }) => {
+export const postIncomePayment = async ({ paymentId, bookingCode, amount, paymentMethod, accountId, accountName, date, createdByUid, createdByName, batch, mdrAmount = 0 }) => {
   const amt = Number(amount) || 0;
   if (amt <= 0) return null;
   const viaDeposit = paymentMethod === 'Saldo Deposit';
-  const debitLine = viaDeposit
-    ? glLine(ACC.UTANG_DEPOSIT_JAMAAH, amt, 0)
-    : glLine(ACC.KAS_BANK, amt, 0, { accountId, accountName });
+  // Potongan MDR (EDC/QRIS) — kalau ada, Kas/Bank yang kecatet cuma
+  // yang BERSIH masuk rekening (sesuai mutasi bank beneran), dan
+  // selisihnya langsung kebaca sebagai Biaya Admin EDC di entry yang sama.
+  const fee = viaDeposit ? 0 : Math.max(0, Math.min(amt, Number(mdrAmount) || 0));
+  const netAmt = amt - fee;
+  const lines = [];
+  if (viaDeposit) {
+    lines.push(glLine(ACC.UTANG_DEPOSIT_JAMAAH, amt, 0));
+  } else {
+    lines.push(glLine(ACC.KAS_BANK, netAmt, 0, { accountId, accountName }));
+    if (fee > 0) {
+      lines.push(glLine(ACC.OPEX, fee, 0, { category: 'Biaya Admin EDC' }));
+    }
+  }
+  lines.push(glLine(ACC.PIUTANG_JAMAAH, 0, amt));
   const params = {
     date, description: `Setoran - ${bookingCode || paymentId}`,
     source: 'income_payment', sourceDocId: paymentId, reference: bookingCode || '',
-    lines: [debitLine, glLine(ACC.PIUTANG_JAMAAH, 0, amt)],
+    lines,
     createdByUid, createdByName
   };
   if (batch) return setJournalEntryInBatch(batch, doc(collection(db, 'journal_entries')), params);
