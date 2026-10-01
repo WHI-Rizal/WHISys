@@ -342,6 +342,9 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [packagesList, setPackagesList] = useState([]);
   const [jamaahList, setJamaahList] = useState([]);
   const [financialAccounts, setFinancialAccounts] = useState([]);
+  // Daftar metode EDC/QRIS terdaftar (dikelola dari Pengaturan) — dipakai buat
+  // dropdown metode pembayaran & potongan MDR otomatis, lihat findEdcMethod.
+  const [edcMethods, setEdcMethods] = useState([]);
   // Daftar TC/Sales internal (Data Master TC/Sales di modul Jamaah) & Mitra/Agen
   // eksternal (modul Mitra & Agen) — dipakai buat dropdown "Sumber Closing"
   // pas registrasi booking, biar kecatat dari TC siapa/mitra mana closing-nya.
@@ -689,6 +692,9 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
 
       const accSnap = await getDocs(collection(db, 'financial_accounts'));
       setFinancialAccounts(accSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      const edcSnap = await getDocs(collection(db, 'edc_methods'));
+      setEdcMethods(edcSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.name || '').localeCompare(b.name || '')));
 
       const bkSnap = await getDocs(collection(db, 'bookings'));
       setBookings(bkSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -1130,11 +1136,18 @@ Terimakasih🙏`;
     }
     setSavingPaymentEdit(true);
     try {
+      const newEdcMatchForDoc = findEdcMethod(paymentEditForm.paymentMethod);
+      const mdrAmountForDoc = newEdcMatchForDoc ? computeEdcMdrAmount(Number(paymentEditForm.amount), newEdcMatchForDoc.mdrPercent) : 0;
       await updateDoc(doc(db, 'payments_income', payId), {
         amount: Number(paymentEditForm.amount),
         paymentMethod: paymentEditForm.paymentMethod,
         notes: paymentEditForm.notes,
         ...(paymentEditForm.paymentMethod !== 'Saldo Deposit' ? { accountId: paymentEditForm.accountId, accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '' } : {}),
+        // EDC: kalau metode baru match edc_methods, simpen MDR-nya; kalau
+        // pindah KELUAR dari EDC, field2 ini di-reset biar nggak nyangkut.
+        mdrAmount: mdrAmountForDoc,
+        mdrPercent: newEdcMatchForDoc ? newEdcMatchForDoc.mdrPercent : 0,
+        edcMethodId: newEdcMatchForDoc ? newEdcMatchForDoc.id : null,
         // Kalau field tanggalnya dikosongin, biarin createdAt lama (jangan
         // dipaksa ke waktu sekarang) — cuma di-update kalau staff emang
         // sengaja ganti tanggalnya.
@@ -1155,22 +1168,39 @@ Terimakasih🙏`;
       // tanggal lama.
       const resolvedNewDate = paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : oldPay?.createdAt;
       const paymentAccountChanged = oldPay?.accountId && paymentEditForm.accountId && paymentEditForm.accountId !== oldPay.accountId;
+      // EDC: method lama/baru dicocokin ke daftar edc_methods — kalau salah
+      // satunya match, nominal yang kecatat di baris mutasi (account_mutations)
+      // harus NET (dikurangi potongan MDR), bukan gross, biar sama kayak yang
+      // beneran masuk ke rekening.
+      const oldEdcMatch = findEdcMethod(oldPay?.paymentMethod);
+      const newEdcMatch = findEdcMethod(paymentEditForm.paymentMethod);
+      const isOrWasEdc = !!oldEdcMatch || !!newEdcMatch;
+      const mdrAmount = newEdcMatch ? computeEdcMdrAmount(Number(paymentEditForm.amount), newEdcMatch.mdrPercent) : 0;
       if (oldPay?.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
-        if (paymentAccountChanged) {
+        if (paymentAccountChanged || (isOrWasEdc && !oldPay.groupTransactionId)) {
           // (Transaksi grup gabungan udah diblok di validasi awal — titik
           // ini cuma kejalanin buat setoran non-grup, aman dipindah penuh.)
-          await removeAccountMutationBySource(oldPay.accountId, payId, -(Number(oldPay.amount) || 0));
-          await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount), {
+          // EDC (match lama/baru): delta GROSS nggak valid buat baris mutasi
+          // (isinya NET setelah MDR), jadi diganti total (hapus+tulis ulang)
+          // kayak pindah akun, bukan delta — reversal pakai NET lama
+          // (oldPay.amount - oldPay.mdrAmount), kredit baru pakai NET baru.
+          await removeAccountMutationBySource(oldPay.accountId, payId, -((Number(oldPay.amount) || 0) - (Number(oldPay.mdrAmount) || 0)));
+          await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount) - mdrAmount, {
             description: paymentEditForm.notes || selectedBookingForHistory?.bookingCode || '-',
             source: 'income_payment',
             sourceDocId: payId,
             date: resolvedNewDate
           });
         } else {
-          const delta = Number(paymentEditForm.amount) - (Number(oldPay.amount) || 0);
           if (oldPay.groupTransactionId) {
-            await adjustGroupMutationShare(oldPay.accountId, oldPay.groupTransactionId, delta, resolvedNewDate);
+            // Porsi EDC dari setoran grup gabungan (akun nggak berubah,
+            // diblok di validasi awal) — delta dihitung dari selisih
+            // NOMINAL BERSIH (gross - MDR), bukan gross, biar baris mutasi
+            // gabungan (isinya net) tetap akurat.
+            const deltaNet = (Number(paymentEditForm.amount) - mdrAmount) - ((Number(oldPay.amount) || 0) - (Number(oldPay.mdrAmount) || 0));
+            await adjustGroupMutationShare(oldPay.accountId, oldPay.groupTransactionId, deltaNet, resolvedNewDate);
           } else {
+            const delta = Number(paymentEditForm.amount) - (Number(oldPay.amount) || 0);
             await updateAccountMutationAmount(oldPay.accountId, payId, Number(paymentEditForm.amount), delta, resolvedNewDate);
           }
         }
@@ -1179,7 +1209,7 @@ Terimakasih🙏`;
         // lawas/nggak lengkap) tapi sekarang staf ngisi akunnya lewat edit —
         // catat sebagai mutasi baru di akun itu (belum pernah ada mutasi
         // buat dokumen ini sama sekali).
-        await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount), {
+        await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount) - mdrAmount, {
           description: paymentEditForm.notes || selectedBookingForHistory?.bookingCode || '-',
           source: 'income_payment',
           sourceDocId: payId,
@@ -1196,6 +1226,7 @@ Terimakasih🙏`;
         paymentId: payId,
         bookingCode: selectedBookingForHistory?.bookingCode,
         amount: Number(paymentEditForm.amount),
+        mdrAmount,
         paymentMethod: paymentEditForm.paymentMethod,
         accountId: paymentEditForm.accountId,
         accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '',
@@ -1204,6 +1235,13 @@ Terimakasih🙏`;
       }).catch(err => {
         console.error('Gagal posting ulang jurnal edit setoran:', err);
         alert(`Setoran berhasil diedit, TAPI jurnal koreksinya GAGAL diposting ulang (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk setoran ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+      });
+      await syncEdcAdminFeeExpense(payId, {
+        mdrAmount,
+        accountId: newEdcMatch ? newEdcMatch.accountId : paymentEditForm.accountId,
+        accountName: newEdcMatch ? newEdcMatch.name : (financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || ''),
+        date: paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : oldPay?.createdAt,
+        bookingCode: selectedBookingForHistory?.bookingCode
       });
 
       setEditingPaymentId(null);
@@ -1903,6 +1941,56 @@ Terimakasih🙏`;
     }
   };
 
+  const EDC_MDR_CATEGORY = 'Biaya Admin EDC';
+
+  // Cari method EDC yang namanya cocok sama paymentMethod yang dipilih staf.
+  const findEdcMethod = (paymentMethodValue) => edcMethods.find(m => m.name === paymentMethodValue) || null;
+
+  // Hitung potongan MDR, dibulatkan ke rupiah terdekat.
+  const computeEdcMdrAmount = (amount, mdrPercent) => {
+    const amt = Number(amount) || 0;
+    const pct = Number(mdrPercent) || 0;
+    if (amt <= 0 || pct <= 0) return 0;
+    return Math.round((amt * pct) / 100);
+  };
+
+  // Sinkronkan (create/update/delete) record biaya admin EDC di expenses_operational
+  // yang nempel ke 1 payment tertentu (sourceDocId = paymentId), supaya kalo
+  // setoran-nya diedit/dihapus, biaya MDR-nya ikut ke-update/kehapus juga.
+  const syncEdcAdminFeeExpense = async (paymentId, { mdrAmount, accountId, accountName, date, bookingCode }) => {
+    try {
+      const q = query(
+        collection(db, 'expenses_operational'),
+        where('source', '==', 'income_payment_mdr'),
+        where('sourceDocId', '==', paymentId)
+      );
+      const snap = await getDocs(q);
+      const fee = Number(mdrAmount) || 0;
+      if (fee > 0) {
+        const payload = {
+          category: EDC_MDR_CATEGORY,
+          amount: fee,
+          accountId: accountId || null,
+          accountName: accountName || '-',
+          date: date || new Date().toISOString(),
+          description: `Potongan MDR EDC - ${bookingCode || paymentId}`,
+          source: 'income_payment_mdr',
+          sourceDocId: paymentId,
+          updatedAt: new Date().toISOString()
+        };
+        if (!snap.empty) {
+          await updateDoc(doc(db, 'expenses_operational', snap.docs[0].id), payload);
+        } else {
+          await addDoc(collection(db, 'expenses_operational'), { ...payload, createdAt: new Date().toISOString() });
+        }
+      } else if (!snap.empty) {
+        await Promise.all(snap.docs.map(d => deleteDoc(doc(db, 'expenses_operational', d.id))));
+      }
+    } catch (err) {
+      console.error('Gagal sinkron biaya admin EDC:', err);
+    }
+  };
+
   // Balikin stok perlengkapan (equipment_distribution) yang statusnya udah
   // "given" buat booking-booking ini — dipakai pas booking BATAL/RESCHEDULE
   // (bukan dihapus). Booking-nya sendiri masih ada, cuma nggak aktif lagi,
@@ -2363,6 +2451,16 @@ Terimakasih🙏`;
       const baseShare = Math.floor(amount / paxCount);
       const remainder = amount - (baseShare * paxCount);
 
+      // EDC: potongan MDR dihitung SEKALI dari total nominal setoran grup,
+      // terus dibagi rata ke tiap pax pakai pola bagi-rata yang sama kayak
+      // paxShare (sisa pembagian masuk ke pax pertama) — biar tiap baris
+      // jurnal per-pax tetap konsisten sama total yang beneran kepotong di
+      // rekening.
+      const groupEdcMatch = findEdcMethod(groupPaymentForm.paymentMethod);
+      const groupMdrAmount = groupEdcMatch ? computeEdcMdrAmount(amount, groupEdcMatch.mdrPercent) : 0;
+      const mdrBaseShare = Math.floor(groupMdrAmount / paxCount);
+      const mdrRemainder = groupMdrAmount - (mdrBaseShare * paxCount);
+
       // Semua dokumen payments_income yang lahir dari 1 kali submit setoran
       // grup ini ditandai groupTransactionId yang SAMA, biar nanti bisa
       // digabung balik jadi 1 baris transaksi pas ditampilkan di modal
@@ -2373,6 +2471,7 @@ Terimakasih🙏`;
       for (let i = 0; i < groupItems.length; i++) {
         const item = groupItems[i];
         const paxShare = baseShare + (i === 0 ? remainder : 0);
+        const mdrShare = groupMdrAmount > 0 ? (mdrBaseShare + (i === 0 ? mdrRemainder : 0)) : 0;
 
         if (paxShare > 0) {
           const gPayRef = await addDoc(collection(db, 'payments_income'), {
@@ -2386,10 +2485,14 @@ Terimakasih🙏`;
             ...(groupPaymentForm.paymentMethod !== 'Saldo Deposit' ? { accountId: groupPaymentForm.accountId, accountName: groupPaymentAccount?.name || '' } : {}),
             notes: `${groupPaymentForm.notes} (Grup ${groupPaymentTarget.code})`,
             createdAt: resolvePaymentCreatedAt(groupPaymentForm.date),
-            groupTransactionId
+            groupTransactionId,
+            mdrAmount: mdrShare,
+            mdrPercent: groupEdcMatch ? groupEdcMatch.mdrPercent : 0,
+            edcMethodId: groupEdcMatch ? groupEdcMatch.id : null
           });
           await postIncomePayment({
             paymentId: gPayRef.id, bookingCode: item.bookingCode, amount: paxShare,
+            mdrAmount: mdrShare,
             paymentMethod: groupPaymentForm.paymentMethod,
             accountId: groupPaymentForm.accountId, accountName: groupPaymentAccount?.name || '',
             date: resolvePaymentCreatedAt(groupPaymentForm.date),
@@ -2413,12 +2516,23 @@ Terimakasih🙏`;
       // handleDeleteMergedGroupPayment). Rincian per-peserta tetap ada di
       // payments_income, dicari lewat groupTransactionId yang sama.
       if (groupPaymentForm.paymentMethod !== 'Saldo Deposit' && amount > 0) {
-        await adjustAccountBalance(groupPaymentForm.accountId, amount, {
+        await adjustAccountBalance(groupPaymentForm.accountId, amount - groupMdrAmount, {
           description: `Setoran Grup ${groupPaymentTarget.code} (${paxCount} peserta)`,
           reference: groupPaymentTarget.code,
           source: 'group_payment',
           date: resolvePaymentCreatedAt(groupPaymentForm.date),
           sourceDocId: groupTransactionId
+        });
+        // Biaya admin EDC dicatat SATU KALI per transaksi grup (nempel ke
+        // groupTransactionId, sama kayak baris mutasinya), bukan per-pax —
+        // dipanggil tetap walau groupMdrAmount 0, buat bersihin record MDR
+        // basi kalau sebelumnya pernah EDC.
+        await syncEdcAdminFeeExpense(groupTransactionId, {
+          mdrAmount: groupMdrAmount,
+          accountId: groupPaymentForm.accountId,
+          accountName: groupEdcMatch ? groupEdcMatch.name : (groupPaymentAccount?.name || ''),
+          date: resolvePaymentCreatedAt(groupPaymentForm.date),
+          bookingCode: groupPaymentTarget.code
         });
       }
 
@@ -2539,11 +2653,22 @@ Terimakasih🙏`;
     if (savingPaymentEdit) return;
     setSavingPaymentEdit(true);
     try {
+      // EDC: method lama/baru dicocokin ke daftar edc_methods — kalau salah
+      // satunya match, nominal yang kecatat di baris mutasi harus NET
+      // (dikurangi potongan MDR), bukan gross.
+      const oldEdcMatch = findEdcMethod(pay?.paymentMethod);
+      const newEdcMatch = findEdcMethod(paymentEditForm.paymentMethod);
+      const isOrWasEdc = !!oldEdcMatch || !!newEdcMatch;
+      const mdrAmount = newEdcMatch ? computeEdcMdrAmount(Number(paymentEditForm.amount), newEdcMatch.mdrPercent) : 0;
+
       await updateDoc(doc(db, 'payments_income', pay.id), {
         amount: Number(paymentEditForm.amount),
         paymentMethod: paymentEditForm.paymentMethod,
         notes: paymentEditForm.notes,
         ...(paymentEditForm.paymentMethod !== 'Saldo Deposit' ? { accountId: paymentEditForm.accountId, accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '' } : {}),
+        mdrAmount,
+        mdrPercent: newEdcMatch ? newEdcMatch.mdrPercent : 0,
+        edcMethodId: newEdcMatch ? newEdcMatch.id : null,
         ...(paymentEditForm.date ? { createdAt: resolvePaymentCreatedAt(paymentEditForm.date) } : {})
       });
 
@@ -2556,9 +2681,12 @@ Terimakasih🙏`;
       const resolvedNewDate = paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : pay?.createdAt;
       const groupPaymentAccountChanged = pay.accountId && paymentEditForm.accountId && paymentEditForm.accountId !== pay.accountId;
       if (pay.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
-        if (groupPaymentAccountChanged) {
-          await removeAccountMutationBySource(pay.accountId, pay.id, -(Number(pay.amount) || 0));
-          await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount), {
+        if (groupPaymentAccountChanged || isOrWasEdc) {
+          // EDC (match lama/baru): delta GROSS nggak valid buat baris mutasi
+          // (isinya NET setelah MDR), jadi diganti total (hapus+tulis ulang)
+          // kayak pindah akun, bukan delta.
+          await removeAccountMutationBySource(pay.accountId, pay.id, -((Number(pay.amount) || 0) - (Number(pay.mdrAmount) || 0)));
+          await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount) - mdrAmount, {
             description: paymentEditForm.notes || pay.bookingCode || '-',
             source: 'income_payment',
             sourceDocId: pay.id,
@@ -2569,7 +2697,7 @@ Terimakasih🙏`;
           await updateAccountMutationAmount(pay.accountId, pay.id, Number(paymentEditForm.amount), delta, resolvedNewDate);
         }
       } else if (!pay.accountId && paymentEditForm.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
-        await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount), {
+        await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount) - mdrAmount, {
           description: paymentEditForm.notes || pay.bookingCode || '-',
           source: 'income_payment',
           sourceDocId: pay.id,
@@ -2587,6 +2715,7 @@ Terimakasih🙏`;
         paymentId: pay.id,
         bookingCode: bookingItem?.bookingCode || pay.bookingCode,
         amount: Number(paymentEditForm.amount),
+        mdrAmount,
         paymentMethod: paymentEditForm.paymentMethod,
         accountId: paymentEditForm.accountId,
         accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '',
@@ -2595,6 +2724,13 @@ Terimakasih🙏`;
       }).catch(err => {
         console.error('Gagal posting ulang jurnal edit setoran grup:', err);
         alert(`Setoran berhasil diedit, TAPI jurnal koreksinya GAGAL diposting ulang (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk setoran ini belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+      });
+      await syncEdcAdminFeeExpense(pay.id, {
+        mdrAmount,
+        accountId: newEdcMatch ? newEdcMatch.accountId : paymentEditForm.accountId,
+        accountName: newEdcMatch ? newEdcMatch.name : (financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || ''),
+        date: paymentEditForm.date ? resolvePaymentCreatedAt(paymentEditForm.date) : pay?.createdAt,
+        bookingCode: bookingItem?.bookingCode || pay.bookingCode
       });
 
       setEditingGroupPaymentId(null);
@@ -3076,6 +3212,13 @@ Terimakasih🙏`;
         });
         const baseShare = Math.floor(addAmount / sortedActive.length);
         const remainder = addAmount - (baseShare * sortedActive.length);
+        // EDC: potongan MDR dihitung sekali dari total setoran, dibagi rata
+        // ke tiap pax pakai pola bagi-rata yang sama kayak baseShare/remainder
+        // — sama persis dengan handleGroupPaymentSubmit.
+        const addEdcMatch = findEdcMethod(groupEditForm.addPaymentMethod);
+        const addMdrAmount = addEdcMatch ? computeEdcMdrAmount(addAmount, addEdcMatch.mdrPercent) : 0;
+        const mdrBaseShare = Math.floor(addMdrAmount / sortedActive.length);
+        const mdrRemainder = addMdrAmount - (mdrBaseShare * sortedActive.length);
         // Sama kayak handleGroupPaymentSubmit — tandai seluruh dokumen split
         // dari 1 kali submit setoran ini dgn groupTransactionId yang sama,
         // biar bisa digabung balik jadi 1 baris di modal Riwayat Pembayaran.
@@ -3084,6 +3227,7 @@ Terimakasih🙏`;
         for (let i = 0; i < sortedActive.length; i++) {
           const item = sortedActive[i];
           const share = baseShare + (i === 0 ? remainder : 0);
+          const mdrShare = addMdrAmount > 0 ? (mdrBaseShare + (i === 0 ? mdrRemainder : 0)) : 0;
           if (share > 0) {
             const geIncomeRef = await addDoc(collection(db, 'payments_income'), {
               bookingId: item.id,
@@ -3096,10 +3240,14 @@ Terimakasih🙏`;
               ...(groupEditForm.addPaymentMethod !== 'Saldo Deposit' ? { accountId: groupEditForm.addAccountId, accountName: groupEditAccount?.name || '' } : {}),
               notes: `${groupEditForm.addPaymentNotes} (Grup ${groupEditTarget.code})`,
               createdAt: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
-              groupTransactionId
+              groupTransactionId,
+              mdrAmount: mdrShare,
+              mdrPercent: addEdcMatch ? addEdcMatch.mdrPercent : 0,
+              edcMethodId: addEdcMatch ? addEdcMatch.id : null
             });
             await postIncomePayment({
               paymentId: geIncomeRef.id, bookingCode: item.bookingCode, amount: share,
+              mdrAmount: mdrShare,
               paymentMethod: groupEditForm.addPaymentMethod,
               accountId: groupEditForm.addAccountId, accountName: groupEditAccount?.name || '',
               date: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
@@ -3115,12 +3263,19 @@ Terimakasih🙏`;
         // per pecahan pax) — pola sama persis dengan setoran grup lainnya,
         // biar "Riwayat Mutasi" persis sama jumlah uang yang beneran masuk.
         if (groupEditForm.addPaymentMethod !== 'Saldo Deposit' && addAmount > 0) {
-          await adjustAccountBalance(groupEditForm.addAccountId, addAmount, {
+          await adjustAccountBalance(groupEditForm.addAccountId, addAmount - addMdrAmount, {
             description: `Setoran Grup (Edit) ${groupEditTarget.code} (${sortedActive.length} peserta)`,
             reference: groupEditTarget.code,
             source: 'group_edit_payment',
             date: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
             sourceDocId: groupTransactionId
+          });
+          await syncEdcAdminFeeExpense(groupTransactionId, {
+            mdrAmount: addMdrAmount,
+            accountId: groupEditForm.addAccountId,
+            accountName: addEdcMatch ? addEdcMatch.name : (groupEditAccount?.name || ''),
+            date: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
+            bookingCode: groupEditTarget.code
           });
         }
 
@@ -4668,6 +4823,8 @@ Terimakasih🙏`;
         }
 
         if (paymentVal > 0) {
+          const editPayEdcMatch = findEdcMethod(formData.paymentMethod);
+          const editPayMdrAmount = editPayEdcMatch ? computeEdcMdrAmount(paymentVal, editPayEdcMatch.mdrPercent) : 0;
           const payRef = await addDoc(collection(db, 'payments_income'), {
             bookingId: editingBookingId,
             bookingCode: currentBooking.bookingCode,
@@ -4678,10 +4835,14 @@ Terimakasih🙏`;
             paymentMethod: formData.paymentMethod,
             ...(formData.paymentMethod !== 'Saldo Deposit' ? { accountId: formData.accountId, accountName: payAccount?.name || '' } : {}),
             notes: formData.paymentNotes,
-            createdAt: resolvePaymentCreatedAt(formData.paymentDate)
+            createdAt: resolvePaymentCreatedAt(formData.paymentDate),
+            mdrAmount: editPayMdrAmount,
+            mdrPercent: editPayEdcMatch ? editPayEdcMatch.mdrPercent : 0,
+            edcMethodId: editPayEdcMatch ? editPayEdcMatch.id : null
           });
           await postIncomePayment({
             paymentId: payRef.id, bookingCode: currentBooking.bookingCode, amount: paymentVal,
+            mdrAmount: editPayMdrAmount,
             paymentMethod: formData.paymentMethod, accountId: formData.accountId, accountName: payAccount?.name || '',
             date: resolvePaymentCreatedAt(formData.paymentDate),
             createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
@@ -4692,12 +4853,19 @@ Terimakasih🙏`;
           if (formData.paymentMethod === 'Saldo Deposit') {
             await adjustDepositBalance(ordererId, ordererName, -paymentVal, 'usage', `Bayar setoran booking ${currentBooking.bookingCode}`, currentBooking.bookingCode);
           } else {
-            await adjustAccountBalance(formData.accountId, paymentVal, {
+            await adjustAccountBalance(formData.accountId, paymentVal - editPayMdrAmount, {
               description: `Setoran Booking ${currentBooking.bookingCode} - an. ${selectedJamaah.fullName || '-'}`,
               reference: currentBooking.bookingCode,
               source: 'booking_edit_payment',
               date: resolvePaymentCreatedAt(formData.paymentDate),
               sourceDocId: payRef.id
+            });
+            await syncEdcAdminFeeExpense(payRef.id, {
+              mdrAmount: editPayMdrAmount,
+              accountId: editPayEdcMatch ? editPayEdcMatch.accountId : formData.accountId,
+              accountName: editPayEdcMatch ? editPayEdcMatch.name : (payAccount?.name || ''),
+              date: resolvePaymentCreatedAt(formData.paymentDate),
+              bookingCode: currentBooking.bookingCode
             });
           }
         }
@@ -4799,6 +4967,8 @@ Terimakasih🙏`;
           });
 
           let payRef = null;
+          const singleDpEdcMatch = findEdcMethod(formData.paymentMethod);
+          const singleDpMdrAmount = singleDpEdcMatch ? computeEdcMdrAmount(paymentVal, singleDpEdcMatch.mdrPercent) : 0;
           if (paymentVal > 0) {
             payRef = doc(collection(db, 'payments_income'));
             bookingBatch.set(payRef, {
@@ -4811,10 +4981,14 @@ Terimakasih🙏`;
               paymentMethod: formData.paymentMethod,
               ...(formData.paymentMethod !== 'Saldo Deposit' ? { accountId: formData.accountId, accountName: payAccount?.name || '' } : {}),
               notes: formData.paymentNotes,
-              createdAt: resolvePaymentCreatedAt(formData.paymentDate)
+              createdAt: resolvePaymentCreatedAt(formData.paymentDate),
+              mdrAmount: singleDpMdrAmount,
+              mdrPercent: singleDpEdcMatch ? singleDpEdcMatch.mdrPercent : 0,
+              edcMethodId: singleDpEdcMatch ? singleDpEdcMatch.id : null
             });
             await postIncomePayment({
               paymentId: payRef.id, bookingCode, amount: paymentVal,
+              mdrAmount: singleDpMdrAmount,
               paymentMethod: formData.paymentMethod, accountId: formData.accountId, accountName: payAccount?.name || '',
               date: resolvePaymentCreatedAt(formData.paymentDate),
               createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email,
@@ -4833,12 +5007,19 @@ Terimakasih🙏`;
             if (formData.paymentMethod === 'Saldo Deposit') {
               await adjustDepositBalance(ordererId, ordererName, -paymentVal, 'usage', `Bayar DP booking ${bookingCode}`, bookingCode);
             } else {
-              await adjustAccountBalance(formData.accountId, paymentVal, {
+              await adjustAccountBalance(formData.accountId, paymentVal - singleDpMdrAmount, {
                 description: `DP Booking ${bookingCode} - an. ${selectedJamaah.fullName || '-'}`,
                 reference: bookingCode,
                 source: 'booking_new_payment',
                 date: resolvePaymentCreatedAt(formData.paymentDate),
                 sourceDocId: payRef.id
+              });
+              await syncEdcAdminFeeExpense(payRef.id, {
+                mdrAmount: singleDpMdrAmount,
+                accountId: singleDpEdcMatch ? singleDpEdcMatch.accountId : formData.accountId,
+                accountName: singleDpEdcMatch ? singleDpEdcMatch.name : (payAccount?.name || ''),
+                date: resolvePaymentCreatedAt(formData.paymentDate),
+                bookingCode
               });
             }
           }
@@ -4865,6 +5046,12 @@ Terimakasih🙏`;
           // Bagi rata setoran awal ke semua pax (sisa pembagian masuk ke pax pertama)
           const baseShare = Math.floor(paymentVal / paxCount);
           const remainder = paymentVal - (baseShare * paxCount);
+          // EDC: potongan MDR dihitung sekali dari total DP awal grup, dibagi
+          // rata ke tiap pax pakai pola bagi-rata yang sama kayak baseShare.
+          const groupDpEdcMatch = findEdcMethod(formData.paymentMethod);
+          const groupDpMdrAmount = groupDpEdcMatch ? computeEdcMdrAmount(paymentVal, groupDpEdcMatch.mdrPercent) : 0;
+          const groupDpMdrBaseShare = Math.floor(groupDpMdrAmount / paxCount);
+          const groupDpMdrRemainder = groupDpMdrAmount - (groupDpMdrBaseShare * paxCount);
           // Tandai seluruh dokumen payments_income hasil split DP awal grup ini
           // dgn groupTransactionId yang sama, biar bisa digabung balik jadi 1
           // baris transaksi pas ditampilkan di modal Riwayat Pembayaran.
@@ -4943,6 +5130,7 @@ Terimakasih🙏`;
             });
 
             if (paxShare > 0) {
+              const paxMdrShare = groupDpMdrAmount > 0 ? (groupDpMdrBaseShare + (i === 0 ? groupDpMdrRemainder : 0)) : 0;
               const groupNewPayRef = doc(collection(db, 'payments_income'));
               groupBatch.set(groupNewPayRef, {
                 bookingId: newBookingRef.id,
@@ -4955,10 +5143,14 @@ Terimakasih🙏`;
                 ...(formData.paymentMethod !== 'Saldo Deposit' ? { accountId: formData.accountId, accountName: payAccount?.name || '' } : {}),
                 notes: `${formData.paymentNotes} (Grup ${groupBookingCode}, ${paxCount} pax)`,
                 createdAt: resolvePaymentCreatedAt(formData.paymentDate),
-                groupTransactionId
+                groupTransactionId,
+                mdrAmount: paxMdrShare,
+                mdrPercent: groupDpEdcMatch ? groupDpEdcMatch.mdrPercent : 0,
+                edcMethodId: groupDpEdcMatch ? groupDpEdcMatch.id : null
               });
               await postIncomePayment({
                 paymentId: groupNewPayRef.id, bookingCode, amount: paxShare,
+                mdrAmount: paxMdrShare,
                 paymentMethod: formData.paymentMethod, accountId: formData.accountId, accountName: payAccount?.name || '',
                 date: resolvePaymentCreatedAt(formData.paymentDate),
                 createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email,
@@ -4981,12 +5173,19 @@ Terimakasih🙏`;
           // payments_income, dicari lewat groupTransactionId yang sama —
           // dipakai juga pas transaksinya dihapus (handleDeleteMergedGroupPayment).
           if (formData.paymentMethod !== 'Saldo Deposit' && paymentVal > 0) {
-            await adjustAccountBalance(formData.accountId, paymentVal, {
+            await adjustAccountBalance(formData.accountId, paymentVal - groupDpMdrAmount, {
               description: `DP Booking Grup ${groupBookingCode} (${paxCount} peserta)`,
               reference: groupBookingCode,
               source: 'booking_group_new_payment',
               date: resolvePaymentCreatedAt(formData.paymentDate),
               sourceDocId: groupTransactionId
+            });
+            await syncEdcAdminFeeExpense(groupTransactionId, {
+              mdrAmount: groupDpMdrAmount,
+              accountId: formData.accountId,
+              accountName: groupDpEdcMatch ? groupDpEdcMatch.name : (payAccount?.name || ''),
+              date: resolvePaymentCreatedAt(formData.paymentDate),
+              bookingCode: groupBookingCode
             });
           }
 
@@ -6567,11 +6766,23 @@ Terimakasih🙏`;
                         <select
                           className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                           value={formData.paymentMethod}
-                          onChange={e => setFormData({ ...formData, paymentMethod: e.target.value })}
+                          onChange={e => {
+                            const val = e.target.value;
+                            const edcMatch = edcMethods.find(m => m.name === val);
+                            setFormData({ ...formData, paymentMethod: val, accountId: edcMatch ? edcMatch.accountId : formData.accountId });
+                          }}
                         >
                           <option value="Transfer Bank">Transfer Bank</option>
                           <option value="Cash / Tunai">Cash / Tunai</option>
-                          <option value="EDC / Kartu">EDC / Kartu</option>
+                          {edcMethods.length > 0 ? (
+                            <optgroup label="EDC / Kartu (MDR Otomatis)">
+                              {edcMethods.map(m => (
+                                <option key={m.id} value={m.name}>{m.name} (MDR {m.mdrPercent}%)</option>
+                              ))}
+                            </optgroup>
+                          ) : (
+                            <option value="EDC / Kartu">EDC / Kartu</option>
+                          )}
                           <option value="Saldo Deposit">Saldo Deposit</option>
                         </select>
                       </div>
@@ -6592,6 +6803,16 @@ Terimakasih🙏`;
                         {financialAccounts.length === 0 && (
                           <p className="text-[10px] mt-1 text-amber-500">Belum ada akun Kas/Bank. Tambahkan dulu lewat tab "Kas & Bank" di menu Keuangan.</p>
                         )}
+                        {(() => {
+                          const edcMatch = findEdcMethod(formData.paymentMethod);
+                          if (!edcMatch) return null;
+                          const mdr = computeEdcMdrAmount(formData.initialPayment, edcMatch.mdrPercent);
+                          return (
+                            <p className="text-[11px] mt-1 text-amber-500">
+                              Potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')} — Bersih masuk rekening: Rp {(Number(formData.initialPayment || 0) - mdr).toLocaleString('id-ID')}
+                            </p>
+                          );
+                        })()}
                       </div>
                     )}
                     {formData.paymentMethod === 'Saldo Deposit' && (() => {
@@ -6695,11 +6916,23 @@ Terimakasih🙏`;
                                   <select
                                     className={`${styles.inputBg} p-1.5 rounded w-1/2`}
                                     value={paymentEditForm.paymentMethod}
-                                    onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentMethod: e.target.value })}
+                                    onChange={e => {
+                                      const val = e.target.value;
+                                      const edcMatch = edcMethods.find(m => m.name === val);
+                                      setPaymentEditForm({ ...paymentEditForm, paymentMethod: val, accountId: edcMatch ? edcMatch.accountId : paymentEditForm.accountId });
+                                    }}
                                   >
                                     <option value="Transfer Bank">Transfer Bank</option>
                                     <option value="Cash / Tunai">Cash / Tunai</option>
-                                    <option value="EDC / Kartu">EDC / Kartu</option>
+                                    {edcMethods.length > 0 ? (
+                                      <optgroup label="EDC / Kartu (MDR Otomatis)">
+                                        {edcMethods.map(m => (
+                                          <option key={m.id} value={m.name}>{m.name} (MDR {m.mdrPercent}%)</option>
+                                        ))}
+                                      </optgroup>
+                                    ) : (
+                                      <option value="EDC / Kartu">EDC / Kartu</option>
+                                    )}
                                   </select>
                                   <input
                                     type="text"
@@ -6729,6 +6962,16 @@ Terimakasih🙏`;
                                   ))}
                                 </select>
                               )}
+                              {(() => {
+                                const edcMatch = findEdcMethod(paymentEditForm.paymentMethod);
+                                if (!edcMatch) return null;
+                                const mdr = computeEdcMdrAmount(paymentEditForm.amount, edcMatch.mdrPercent);
+                                return (
+                                  <p className="text-[10px] mt-1 text-amber-500">
+                                    Potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')} — Bersih: Rp {(Number(paymentEditForm.amount || 0) - mdr).toLocaleString('id-ID')}
+                                  </p>
+                                );
+                              })()}
                             </td>
                             <td className="p-2 text-center">
                               <button onClick={() => handleSavePaymentEdit(pay.id)} disabled={savingPaymentEdit} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded mr-1 disabled:opacity-60">
@@ -6798,11 +7041,23 @@ Terimakasih🙏`;
                           <select
                             className={`${styles.inputBg} p-1.5 rounded w-1/2`}
                             value={paymentEditForm.paymentMethod}
-                            onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentMethod: e.target.value })}
+                            onChange={e => {
+                              const val = e.target.value;
+                              const edcMatch = edcMethods.find(m => m.name === val);
+                              setPaymentEditForm({ ...paymentEditForm, paymentMethod: val, accountId: edcMatch ? edcMatch.accountId : paymentEditForm.accountId });
+                            }}
                           >
                             <option value="Transfer Bank">Transfer Bank</option>
                             <option value="Cash / Tunai">Cash / Tunai</option>
-                            <option value="EDC / Kartu">EDC / Kartu</option>
+                            {edcMethods.length > 0 ? (
+                              <optgroup label="EDC / Kartu (MDR Otomatis)">
+                                {edcMethods.map(m => (
+                                  <option key={m.id} value={m.name}>{m.name} (MDR {m.mdrPercent}%)</option>
+                                ))}
+                              </optgroup>
+                            ) : (
+                              <option value="EDC / Kartu">EDC / Kartu</option>
+                            )}
                           </select>
                           <input
                             type="text"
@@ -6831,6 +7086,16 @@ Terimakasih🙏`;
                             ))}
                           </select>
                         )}
+                        {(() => {
+                          const edcMatch = findEdcMethod(paymentEditForm.paymentMethod);
+                          if (!edcMatch) return null;
+                          const mdr = computeEdcMdrAmount(paymentEditForm.amount, edcMatch.mdrPercent);
+                          return (
+                            <p className="text-[10px] text-amber-500">
+                              Potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')} — Bersih: Rp {(Number(paymentEditForm.amount || 0) - mdr).toLocaleString('id-ID')}
+                            </p>
+                          );
+                        })()}
                         <div className="flex flex-wrap gap-2 pt-1">
                           <button onClick={() => handleSavePaymentEdit(pay.id)} disabled={savingPaymentEdit} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded disabled:opacity-60">
                             {savingPaymentEdit ? 'Menyimpan...' : 'Simpan'}
@@ -7085,11 +7350,23 @@ Terimakasih🙏`;
                   <select
                     className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                     value={groupPaymentForm.paymentMethod}
-                    onChange={e => setGroupPaymentForm({ ...groupPaymentForm, paymentMethod: e.target.value })}
+                    onChange={e => {
+                      const val = e.target.value;
+                      const edcMatch = edcMethods.find(m => m.name === val);
+                      setGroupPaymentForm({ ...groupPaymentForm, paymentMethod: val, accountId: edcMatch ? edcMatch.accountId : groupPaymentForm.accountId });
+                    }}
                   >
                     <option value="Transfer Bank">Transfer Bank</option>
                     <option value="Cash / Tunai">Cash / Tunai</option>
-                    <option value="EDC / Kartu">EDC / Kartu</option>
+                    {edcMethods.length > 0 ? (
+                      <optgroup label="EDC / Kartu (MDR Otomatis)">
+                        {edcMethods.map(m => (
+                          <option key={m.id} value={m.name}>{m.name} (MDR {m.mdrPercent}%)</option>
+                        ))}
+                      </optgroup>
+                    ) : (
+                      <option value="EDC / Kartu">EDC / Kartu</option>
+                    )}
                     <option value="Saldo Deposit">Saldo Deposit</option>
                   </select>
                 </div>
@@ -7107,6 +7384,16 @@ Terimakasih🙏`;
                       <option key={a.id} value={a.id}>{a.name} (Saldo: Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
                     ))}
                   </select>
+                  {(() => {
+                    const edcMatch = findEdcMethod(groupPaymentForm.paymentMethod);
+                    if (!edcMatch) return null;
+                    const mdr = computeEdcMdrAmount(groupPaymentForm.amount, edcMatch.mdrPercent);
+                    return (
+                      <p className="text-[11px] mt-1 text-amber-500">
+                        Potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')} — Bersih masuk rekening: Rp {(Number(groupPaymentForm.amount || 0) - mdr).toLocaleString('id-ID')}
+                      </p>
+                    );
+                  })()}
                 </div>
               )}
               {groupPaymentForm.paymentMethod === 'Saldo Deposit' && (() => {
@@ -7207,11 +7494,23 @@ Terimakasih🙏`;
                                     <select
                                       className={`${styles.inputBg} p-1.5 rounded w-1/2`}
                                       value={paymentEditForm.paymentMethod}
-                                      onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentMethod: e.target.value })}
+                                      onChange={e => {
+                                        const val = e.target.value;
+                                        const edcMatch = edcMethods.find(m => m.name === val);
+                                        setPaymentEditForm({ ...paymentEditForm, paymentMethod: val, accountId: edcMatch ? edcMatch.accountId : paymentEditForm.accountId });
+                                      }}
                                     >
                                       <option value="Transfer Bank">Transfer Bank</option>
                                       <option value="Cash / Tunai">Cash / Tunai</option>
-                                      <option value="EDC / Kartu">EDC / Kartu</option>
+                                      {edcMethods.length > 0 ? (
+                                        <optgroup label="EDC / Kartu (MDR Otomatis)">
+                                          {edcMethods.map(m => (
+                                            <option key={m.id} value={m.name}>{m.name} (MDR {m.mdrPercent}%)</option>
+                                          ))}
+                                        </optgroup>
+                                      ) : (
+                                        <option value="EDC / Kartu">EDC / Kartu</option>
+                                      )}
                                     </select>
                                     <input
                                       type="text"
@@ -7241,6 +7540,16 @@ Terimakasih🙏`;
                                     ))}
                                   </select>
                                 )}
+                                {(() => {
+                                  const edcMatch = findEdcMethod(paymentEditForm.paymentMethod);
+                                  if (!edcMatch) return null;
+                                  const mdr = computeEdcMdrAmount(paymentEditForm.amount, edcMatch.mdrPercent);
+                                  return (
+                                    <p className="text-[10px] mt-1 text-amber-500">
+                                      Potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')} — Bersih: Rp {(Number(paymentEditForm.amount || 0) - mdr).toLocaleString('id-ID')}
+                                    </p>
+                                  );
+                                })()}
                               </td>
                               <td className="p-2 text-center">
                                 <button onClick={() => handleSaveGroupPaymentEdit(singlePay)} disabled={savingPaymentEdit} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded mr-1 disabled:opacity-60">
@@ -7322,11 +7631,23 @@ Terimakasih🙏`;
                             <select
                               className={`${styles.inputBg} p-1.5 rounded w-1/2`}
                               value={paymentEditForm.paymentMethod}
-                              onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentMethod: e.target.value })}
+                              onChange={e => {
+                                const val = e.target.value;
+                                const edcMatch = edcMethods.find(m => m.name === val);
+                                setPaymentEditForm({ ...paymentEditForm, paymentMethod: val, accountId: edcMatch ? edcMatch.accountId : paymentEditForm.accountId });
+                              }}
                             >
                               <option value="Transfer Bank">Transfer Bank</option>
                               <option value="Cash / Tunai">Cash / Tunai</option>
-                              <option value="EDC / Kartu">EDC / Kartu</option>
+                              {edcMethods.length > 0 ? (
+                                <optgroup label="EDC / Kartu (MDR Otomatis)">
+                                  {edcMethods.map(m => (
+                                    <option key={m.id} value={m.name}>{m.name} (MDR {m.mdrPercent}%)</option>
+                                  ))}
+                                </optgroup>
+                              ) : (
+                                <option value="EDC / Kartu">EDC / Kartu</option>
+                              )}
                             </select>
                             <input
                               type="text"
@@ -7355,6 +7676,16 @@ Terimakasih🙏`;
                               ))}
                             </select>
                           )}
+                          {(() => {
+                            const edcMatch = findEdcMethod(paymentEditForm.paymentMethod);
+                            if (!edcMatch) return null;
+                            const mdr = computeEdcMdrAmount(paymentEditForm.amount, edcMatch.mdrPercent);
+                            return (
+                              <p className="text-[10px] text-amber-500">
+                                Potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')} — Bersih: Rp {(Number(paymentEditForm.amount || 0) - mdr).toLocaleString('id-ID')}
+                              </p>
+                            );
+                          })()}
                           <div className="flex flex-wrap gap-2 pt-1">
                             <button onClick={() => handleSaveGroupPaymentEdit(singlePay)} disabled={savingPaymentEdit} className="px-2 py-1 bg-emerald-600 text-white text-[10px] rounded disabled:opacity-60">
                               {savingPaymentEdit ? 'Menyimpan...' : 'Simpan'}
@@ -7868,11 +8199,23 @@ Terimakasih🙏`;
                     <select
                       className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                       value={groupEditForm.addPaymentMethod}
-                      onChange={e => setGroupEditForm({ ...groupEditForm, addPaymentMethod: e.target.value })}
+                      onChange={e => {
+                        const val = e.target.value;
+                        const edcMatch = edcMethods.find(m => m.name === val);
+                        setGroupEditForm({ ...groupEditForm, addPaymentMethod: val, addAccountId: edcMatch ? edcMatch.accountId : groupEditForm.addAccountId });
+                      }}
                     >
                       <option value="Transfer Bank">Transfer Bank</option>
                       <option value="Cash / Tunai">Cash / Tunai</option>
-                      <option value="EDC / Kartu">EDC / Kartu</option>
+                      {edcMethods.length > 0 ? (
+                        <optgroup label="EDC / Kartu (MDR Otomatis)">
+                          {edcMethods.map(m => (
+                            <option key={m.id} value={m.name}>{m.name} (MDR {m.mdrPercent}%)</option>
+                          ))}
+                        </optgroup>
+                      ) : (
+                        <option value="EDC / Kartu">EDC / Kartu</option>
+                      )}
                       <option value="Saldo Deposit">Saldo Deposit</option>
                     </select>
                   </div>
@@ -7890,6 +8233,16 @@ Terimakasih🙏`;
                         <option key={a.id} value={a.id}>{a.name} (Saldo: Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
                       ))}
                     </select>
+                    {(() => {
+                      const edcMatch = findEdcMethod(groupEditForm.addPaymentMethod);
+                      if (!edcMatch) return null;
+                      const mdr = computeEdcMdrAmount(groupEditForm.addPaymentAmount, edcMatch.mdrPercent);
+                      return (
+                        <p className="text-[11px] mt-1 text-amber-500">
+                          Potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')} — Bersih masuk rekening: Rp {(Number(groupEditForm.addPaymentAmount || 0) - mdr).toLocaleString('id-ID')}
+                        </p>
+                      );
+                    })()}
                   </div>
                 )}
                 {groupEditForm.addPaymentMethod === 'Saldo Deposit' && (() => {
