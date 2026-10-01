@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { db, auth } from '@/lib/firebase';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, getDocs, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, addDoc, updateDoc, collection, getDocs, deleteDoc } from 'firebase/firestore';
 import { logActivity } from '../../lib/activityLog';
 import {
   Building2,
@@ -23,7 +23,10 @@ import {
   Trash2,
   Lock,
   ShieldCheck,
-  Plus
+  Plus,
+  Pencil,
+  Search,
+  Landmark
 } from 'lucide-react';
 
 export default function SettingsModule({ theme = 'dark', currentUser = null }) {
@@ -88,6 +91,37 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
     defaultTheme: 'dark',
     autoBackup: true
   });
+
+  // State Pengaturan EDC — daftar metode EDC/QRIS yang terdaftar, tiap
+  // metode nempel ke 1 akun bank & punya persentase MDR default sendiri.
+  // Dipakai di BookingsModule.jsx buat dropdown metode bayar + potongan
+  // MDR otomatis pas setoran via EDC dicatat.
+  const [edcMethods, setEdcMethods] = useState([]);
+  const [loadingEdc, setLoadingEdc] = useState(false);
+  const [financialAccountsList, setFinancialAccountsList] = useState([]);
+  const [edcSearchTerm, setEdcSearchTerm] = useState('');
+  const [showEdcModal, setShowEdcModal] = useState(false);
+  const [editingEdcId, setEditingEdcId] = useState(null);
+  const [savingEdc, setSavingEdc] = useState(false);
+  const [edcForm, setEdcForm] = useState({ name: '', accountId: '', mdrPercent: '' });
+
+  const fetchEdcMethods = async () => {
+    setLoadingEdc(true);
+    try {
+      const [edcSnap, accSnap] = await Promise.all([
+        getDocs(collection(db, 'edc_methods')),
+        getDocs(collection(db, 'financial_accounts'))
+      ]);
+      const accounts = accSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setFinancialAccountsList(accounts);
+      const list = edcSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      setEdcMethods(list);
+    } catch (err) {
+      console.error('Gagal memuat Pengaturan EDC:', err);
+    }
+    setLoadingEdc(false);
+  };
 
   // 1. Cek Role Admin Aktif & Load Data Users
   const fetchUsersAndRole = async () => {
@@ -157,7 +191,111 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
 
     fetchSettings();
     fetchUsersAndRole();
+    fetchEdcMethods();
   }, []);
+
+  // 2c. Kelola Pengaturan EDC (metode EDC/QRIS + akun bank + MDR default)
+  const isFinanceOrAdminRole = currentUserRole.toLowerCase().includes('super')
+    || currentUserRole.toLowerCase() === 'admin'
+    || currentUserRole.toLowerCase() === 'finance';
+
+  const openAddEdcModal = () => {
+    setEditingEdcId(null);
+    setEdcForm({ name: '', accountId: financialAccountsList[0]?.id || '', mdrPercent: '' });
+    setShowEdcModal(true);
+  };
+
+  const openEditEdcModal = (row) => {
+    setEditingEdcId(row.id);
+    setEdcForm({ name: row.name || '', accountId: row.accountId || '', mdrPercent: row.mdrPercent ?? '' });
+    setShowEdcModal(true);
+  };
+
+  const handleSaveEdcMethod = async (e) => {
+    if (e) e.preventDefault();
+    if (!isFinanceOrAdminRole) {
+      alert('Akses Ditolak: Hanya Finance/Super Admin yang bisa mengelola Pengaturan EDC.');
+      return;
+    }
+    const name = edcForm.name.trim();
+    const accountId = edcForm.accountId;
+    const mdrPercent = Number(edcForm.mdrPercent);
+    if (!name) { alert('Nama EDC wajib diisi.'); return; }
+    if (!accountId) { alert('Akun Bank wajib dipilih.'); return; }
+    if (Number.isNaN(mdrPercent) || mdrPercent < 0) { alert('MDR Default harus berupa angka >= 0.'); return; }
+    const dupe = edcMethods.find(m => m.id !== editingEdcId && (m.name || '').toLowerCase() === name.toLowerCase());
+    if (dupe) { alert(`Nama EDC "${name}" sudah dipakai, pakai nama lain ya.`); return; }
+
+    setSavingEdc(true);
+    try {
+      const acc = financialAccountsList.find(a => a.id === accountId);
+      const payload = {
+        name,
+        accountId,
+        accountName: acc?.name || '-',
+        mdrPercent,
+        updatedAt: new Date().toISOString()
+      };
+      if (editingEdcId) {
+        await updateDoc(doc(db, 'edc_methods', editingEdcId), payload);
+        logActivity({
+          userId: currentUser?.uid || auth.currentUser?.uid,
+          userName: currentUser?.fullName || auth.currentUser?.email,
+          userRole: currentUser?.role || '-',
+          action: 'update',
+          module: 'Pengaturan - EDC',
+          targetLabel: name,
+          details: `Mengubah metode EDC "${name}" (Akun: ${payload.accountName}, MDR: ${mdrPercent}%).`
+        });
+      } else {
+        await addDoc(collection(db, 'edc_methods'), { ...payload, createdAt: new Date().toISOString() });
+        logActivity({
+          userId: currentUser?.uid || auth.currentUser?.uid,
+          userName: currentUser?.fullName || auth.currentUser?.email,
+          userRole: currentUser?.role || '-',
+          action: 'create',
+          module: 'Pengaturan - EDC',
+          targetLabel: name,
+          details: `Menambahkan metode EDC baru "${name}" (Akun: ${payload.accountName}, MDR: ${mdrPercent}%).`
+        });
+      }
+      setShowEdcModal(false);
+      fetchEdcMethods();
+    } catch (err) {
+      console.error('Gagal menyimpan Pengaturan EDC:', err);
+      alert('Gagal menyimpan: ' + err.message);
+    }
+    setSavingEdc(false);
+  };
+
+  const handleDeleteEdcMethod = async (row) => {
+    if (!isFinanceOrAdminRole) {
+      alert('Akses Ditolak: Hanya Finance/Super Admin yang bisa menghapus Pengaturan EDC.');
+      return;
+    }
+    if (!confirm(`Hapus metode EDC "${row.name}"? Setoran yang sudah tercatat pakai metode ini TIDAK ikut terhapus/berubah, cuma pilihannya aja yang hilang dari form setoran baru.`)) return;
+    try {
+      await deleteDoc(doc(db, 'edc_methods', row.id));
+      logActivity({
+        userId: currentUser?.uid || auth.currentUser?.uid,
+        userName: currentUser?.fullName || auth.currentUser?.email,
+        userRole: currentUser?.role || '-',
+        action: 'delete',
+        module: 'Pengaturan - EDC',
+        targetLabel: row.name,
+        details: `Menghapus metode EDC "${row.name}".`
+      });
+      fetchEdcMethods();
+    } catch (err) {
+      alert('Gagal menghapus: ' + err.message);
+    }
+  };
+
+  const filteredEdcMethods = edcMethods.filter(m => {
+    const term = edcSearchTerm.trim().toLowerCase();
+    if (!term) return true;
+    return (m.name || '').toLowerCase().includes(term) || (m.accountName || '').toLowerCase().includes(term);
+  });
 
   // 2b. Kelola Daftar Rekening Pembayaran (bisa lebih dari 1)
   const handleAddBankAccount = () => {
@@ -359,6 +497,13 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
           className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${activeTab === 'preferences' ? styles.tabActive : styles.tabInactive}`}
         >
           <Sliders className="w-4 h-4" /> Master Preferences
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('edc')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${activeTab === 'edc' ? styles.tabActive : styles.tabInactive}`}
+        >
+          <CreditCard className="w-4 h-4" /> Pengaturan EDC
         </button>
       </div>
 
@@ -696,6 +841,137 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
           </div>
         )}
 
+        {/* 5. PENGATURAN EDC */}
+        {activeTab === 'edc' && (
+          <div className={`${styles.cardBg} p-6 rounded-xl border space-y-5 animate-in fade-in duration-200`}>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-800 pb-3">
+              <div>
+                <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2`}>
+                  <CreditCard className="w-4 h-4 text-emerald-400" /> Pengaturan EDC
+                </h4>
+                <p className={`text-xs ${styles.textSub}`}>
+                  Daftarkan metode EDC/QRIS beserta akun bank tujuan & persentase MDR default-nya.
+                  Pas staf catat setoran customer via EDC, sistem otomatis motong MDR dan cuma nyatet
+                  jumlah bersih yang masuk ke rekening — potongannya langsung kebukukan sebagai Biaya Admin EDC.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isFinanceOrAdminRole) {
+                    alert('Akses Ditolak: Hanya Finance/Super Admin yang bisa menambah Pengaturan EDC.');
+                    return;
+                  }
+                  if (financialAccountsList.length === 0) {
+                    alert('Belum ada akun Kas/Bank. Tambahkan dulu lewat tab "Kas & Bank" di Laporan Keuangan.');
+                    return;
+                  }
+                  openAddEdcModal();
+                }}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 ${
+                  isFinanceOrAdminRole
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg'
+                    : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                }`}
+                title={isFinanceOrAdminRole ? 'Tambah Metode EDC Baru' : 'Hanya Finance/Super Admin yang bisa menambah'}
+              >
+                {isFinanceOrAdminRole ? <Plus className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                Tambah Data
+              </button>
+            </div>
+
+            <div className="flex justify-end">
+              <div className="relative w-full sm:w-64">
+                <Search className={`w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 ${styles.textSub}`} />
+                <input
+                  type="text"
+                  placeholder="Cari..."
+                  value={edcSearchTerm}
+                  onChange={(e) => setEdcSearchTerm(e.target.value)}
+                  className={`w-full ${styles.inputBg} pl-9 pr-3 py-2 rounded-xl text-xs focus:outline-none focus:border-emerald-500`}
+                />
+              </div>
+            </div>
+
+            {loadingEdc ? (
+              <p className={`text-xs ${styles.textSub} py-6 text-center`}>Memuat Pengaturan EDC...</p>
+            ) : filteredEdcMethods.length === 0 ? (
+              <div className={`p-6 text-center ${styles.textSub} text-xs border border-dashed border-slate-800 rounded-xl flex flex-col items-center gap-2`}>
+                <Landmark className="w-5 h-5" />
+                {edcMethods.length === 0 ? 'Belum ada metode EDC terdaftar.' : 'Nggak ada yang cocok sama pencarian.'}
+              </div>
+            ) : (
+              <>
+                {/* Tabel desktop */}
+                <div className="hidden sm:block overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className={`${styles.textSub} border-b border-slate-800 text-left`}>
+                        <th className="py-2 pr-3 font-semibold">No</th>
+                        <th className="py-2 pr-3 font-semibold">Nama EDC</th>
+                        <th className="py-2 pr-3 font-semibold">Akun Bank</th>
+                        <th className="py-2 pr-3 font-semibold text-right">MDR Default</th>
+                        <th className="py-2 pr-3 font-semibold text-right">Opsi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredEdcMethods.map((row, idx) => (
+                        <tr key={row.id} className="border-b border-slate-800/60">
+                          <td className={`py-3 pr-3 ${styles.textSub}`}>{idx + 1}</td>
+                          <td className={`py-3 pr-3 font-semibold ${styles.textTitle}`}>{row.name}</td>
+                          <td className={`py-3 pr-3 ${styles.textSub}`}>{row.accountName || '-'}</td>
+                          <td className={`py-3 pr-3 text-right ${styles.textTitle}`}>{Number(row.mdrPercent) || 0}%</td>
+                          <td className="py-3 pr-3">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => isFinanceOrAdminRole ? openEditEdcModal(row) : alert('Akses Ditolak: Hanya Finance/Super Admin yang bisa mengubah.')}
+                                className="p-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 rounded-lg transition-colors"
+                                title="Edit"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteEdcMethod(row)}
+                                className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 rounded-lg transition-colors"
+                                title="Hapus"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Kartu mobile */}
+                <div className="sm:hidden space-y-3">
+                  {filteredEdcMethods.map((row) => (
+                    <div key={row.id} className={`p-3 rounded-xl border ${styles.innerBg}`}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <h5 className={`text-xs font-bold ${styles.textTitle}`}>{row.name}</h5>
+                        <div className="flex items-center gap-1.5">
+                          <button type="button" onClick={() => isFinanceOrAdminRole ? openEditEdcModal(row) : alert('Akses Ditolak: Hanya Finance/Super Admin yang bisa mengubah.')} className="p-1.5 bg-amber-500/10 text-amber-500 rounded-lg">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button type="button" onClick={() => handleDeleteEdcMethod(row)} className="p-1.5 bg-rose-500/10 text-rose-500 rounded-lg">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                      <p className={`text-[11px] ${styles.textSub}`}>{row.accountName || '-'}</p>
+                      <p className={`text-[11px] ${styles.textSub}`}>MDR Default: <span className={styles.textTitle}>{Number(row.mdrPercent) || 0}%</span></p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
       </form>
 
       {/* MODAL DIALOG TAMBAH USER BARU */}
@@ -786,6 +1062,90 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
               </div>
             </form>
 
+          </div>
+        </div>
+      )}
+
+      {/* MODAL TAMBAH/EDIT METODE EDC */}
+      {showEdcModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative shadow-2xl max-h-[90vh] overflow-y-auto`}>
+            <button
+              type="button"
+              onClick={() => setShowEdcModal(false)}
+              className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <CreditCard className="w-5 h-5 text-emerald-400" /> {editingEdcId ? 'Edit Metode EDC' : 'Tambah Metode EDC'}
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-5`}>
+              Begitu disimpan, metode ini langsung muncul di dropdown metode bayar pas staf catat setoran.
+            </p>
+
+            <form onSubmit={handleSaveEdcMethod} className="space-y-4 text-xs">
+              <div>
+                <label className={`block font-medium ${styles.textSub} mb-1.5`}>Nama EDC</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: EDC BCA / QRIS BSI"
+                  value={edcForm.name}
+                  onChange={(e) => setEdcForm({ ...edcForm, name: e.target.value })}
+                  className={`w-full ${styles.inputBg} p-3 rounded-xl text-xs focus:outline-none focus:border-emerald-500`}
+                />
+              </div>
+
+              <div>
+                <label className={`block font-medium ${styles.textSub} mb-1.5`}>Akun Bank Tujuan</label>
+                <select
+                  required
+                  value={edcForm.accountId}
+                  onChange={(e) => setEdcForm({ ...edcForm, accountId: e.target.value })}
+                  className={`w-full ${styles.inputBg} p-3 rounded-xl text-xs focus:outline-none focus:border-emerald-500`}
+                >
+                  <option value="">Pilih akun...</option>
+                  {financialAccountsList.map(acc => (
+                    <option key={acc.id} value={acc.id}>{acc.name}</option>
+                  ))}
+                </select>
+                <p className={`text-[11px] ${styles.textSub} mt-1`}>Rekening yang bakal nerima dana bersih (setelah dipotong MDR) dari EDC ini.</p>
+              </div>
+
+              <div>
+                <label className={`block font-medium ${styles.textSub} mb-1.5`}>MDR Default (%)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  required
+                  placeholder="Contoh: 0.15"
+                  value={edcForm.mdrPercent}
+                  onChange={(e) => setEdcForm({ ...edcForm, mdrPercent: e.target.value })}
+                  className={`w-full ${styles.inputBg} p-3 rounded-xl text-xs focus:outline-none focus:border-emerald-500`}
+                />
+                <p className={`text-[11px] ${styles.textSub} mt-1`}>Persentase potongan bank dari tiap transaksi, sesuai ketentuan masing-masing bank/penyedia EDC.</p>
+              </div>
+
+              <div className="pt-4 flex justify-end gap-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowEdcModal(false)}
+                  className="px-4 py-2.5 bg-slate-800 text-slate-300 rounded-xl font-medium hover:bg-slate-700 transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEdc}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-emerald-900/20 flex items-center gap-2"
+                >
+                  {savingEdc ? 'Menyimpan...' : editingEdcId ? 'Simpan Perubahan' : 'Simpan Metode EDC'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
