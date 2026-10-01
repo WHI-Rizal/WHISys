@@ -159,6 +159,11 @@ const getPeriodKey = (dateString) => {
 
 const formatPeriodLabel = (periodKey) => {
   if (!periodKey || periodKey === '-') return '-';
+  // Kasus "all" (Semua Periode) kelewat dulu — `'all'.split('-')` ngasih
+  // `['all']` (nggak ada karakter '-'), jadi `m` jadi `undefined` dan hasil
+  // akhirnya kebaca literal "undefined all" di UI (lihat label di atas tabel
+  // Analisis Margin P&L). Ditangkep eksplisit sebelum coba di-parse sebagai bulan-tahun.
+  if (periodKey === 'all') return 'Semua Periode';
   const [y, m] = periodKey.split('-');
   const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
   return `${months[Number(m) - 1] || m} ${y}`;
@@ -1999,6 +2004,16 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
     .filter(vp => !vp.convertedToDeposit)
     .map(vp => (vp.invoiceCorrected ? { ...vp, amount: Number(vp.correctedAmount ?? vp.amount) || 0 } : vp));
   const [plPeriod, setPlPeriod] = useState('all');
+  // Filter KHUSUS tabel "Analisis Margin Laba Operasional per Program Paket"
+  // di bawah, independen dari plPeriod di atas — plPeriod nyaring berdasar
+  // kapan paketnya "Diakui Pendapatan" (dan SENGAJA nggak nyaring paket yang
+  // belum diakui sama sekali, biar nggak ke-hide sebagai action item), jadi
+  // paket yang keberangkatannya masih jauh ke depan & belum diakui tetap
+  // numpuk terus di tabel itu walau plPeriod diganti-ganti. Filter ini
+  // nyaring berdasar TANGGAL KEBERANGKATAN paket, berlaku ke SEMUA paket
+  // (udah diakui ataupun belum) — biar staf bisa nyembunyiin dulu paket yang
+  // keberangkatannya masih lama.
+  const [marginDepartureFilter, setMarginDepartureFilter] = useState('all');
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [companyProfile, setCompanyProfile] = useState(DEFAULT_COMPANY_PROFILE);
 
@@ -2167,7 +2182,23 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
     if (!pkg.revenueRecognized) return true;
     if (plPeriod === 'all') return true;
     return getPeriodKey(pkg.recognizedAt) === plPeriod;
+  }).filter(pkg => {
+    // Filter tambahan khusus tabel ini (lihat marginDepartureFilter di atas)
+    // — berdasar bulan KEBERANGKATAN, berlaku ke paket yang udah maupun
+    // belum diakui pendapatannya, biar paket yang keberangkatannya masih
+    // jauh ke depan bisa disembunyikan dulu.
+    if (marginDepartureFilter === 'all') return true;
+    return getPeriodKey(pkg.departureDate) === marginDepartureFilter;
   });
+
+  // Daftar bulan keberangkatan yang tersedia buat dropdown filter di atas —
+  // diambil dari SELURUH paket (bukan cuma yang lolos filter plPeriod),
+  // diurutin KRONOLOGIS MAJU (beda dari availablePeriods punya plPeriod yang
+  // diurutin terbaru-dulu) soalnya ini soal jadwal keberangkatan ke depan,
+  // bukan riwayat transaksi ke belakang.
+  const availableDeparturePeriods = Array.from(new Set(
+    packagesList.map(pkg => getPeriodKey(pkg.departureDate)).filter(Boolean)
+  )).sort();
 
   const openRecognizeModal = (pkg) => {
     const parsedDeparture = pkg.departureDate ? new Date(pkg.departureDate) : null;
@@ -2520,12 +2551,27 @@ function ProfitLossTab({ styles, isDark, currentUser, transactions, vendorPaymen
       </div>
 
       <div className={`${styles.cardBg} border rounded-xl overflow-hidden p-4`}>
-        <h4 className={`text-sm font-bold ${styles.textTitle} mb-2 flex items-center gap-2`}>
-          <BarChart3 className="w-4 h-4 text-amber-500" /> Analisis Margin Laba Operasional per Program Paket
-        </h4>
+        <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-3 mb-2">
+          <h4 className={`text-sm font-bold ${styles.textTitle} flex items-center gap-2`}>
+            <BarChart3 className="w-4 h-4 text-amber-500" /> Analisis Margin Laba Operasional per Program Paket
+          </h4>
+          <div>
+            <label className={`block text-[10px] font-medium mb-1 ${styles.textSub}`}>Filter Tanggal Keberangkatan</label>
+            <select
+              className={`${styles.inputBg} rounded-lg p-2 text-xs border`}
+              value={marginDepartureFilter}
+              onChange={e => setMarginDepartureFilter(e.target.value)}
+            >
+              <option value="all">Semua Keberangkatan</option>
+              {availableDeparturePeriods.map(p => (
+                <option key={p} value={p}>{formatPeriodLabel(p)}</option>
+              ))}
+            </select>
+          </div>
+        </div>
         <p className={`text-xs ${styles.textSub} mb-4`}>
           Membandingkan total setoran jamaah yang masuk (Omset Real) terhadap realisasi pembayaran biaya vendor (HPP). Klik <strong>Akui Pendapatan</strong> pada paket yang jasanya sudah terealisasi (mis. jamaah sudah berangkat) biar omset & HPP-nya masuk ke Laporan P&L. Sebelum diklik, nilainya tercatat sebagai Pendapatan/Biaya Dibayar Dimuka.
-          Mengikuti filter periode <strong>{formatPeriodLabel(plPeriod)}</strong> di atas (paket yang belum diakui pendapatannya tetap ditampilkan di semua periode selama masih jadi action item).
+          Mengikuti filter periode <strong>{formatPeriodLabel(plPeriod)}</strong> di atas (paket yang belum diakui pendapatannya tetap ditampilkan di semua periode selama masih jadi action item), DITAMBAH filter Tanggal Keberangkatan <strong>{marginDepartureFilter === 'all' ? 'Semua Keberangkatan' : formatPeriodLabel(marginDepartureFilter)}</strong> di samping judul — filter keberangkatan ini berlaku ke SEMUA paket termasuk yang belum diakui, biar paket yang jadwalnya masih jauh ke depan bisa disembunyikan dulu.
         </p>
 
         <div className="hidden md:block overflow-x-auto">
