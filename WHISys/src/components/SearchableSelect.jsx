@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Search, X } from 'lucide-react';
 
 // ============================================================================
@@ -53,6 +54,10 @@ export default function SearchableSelect({
   const [query, setQuery] = useState('');
   const wrapperRef = useRef(null);
   const inputRef = useRef(null);
+  const panelRef = useRef(null);
+  // Posisi panel dropdown (position: fixed, dirender lewat portal ke <body>)
+  // biar NGGAK kepotong overflow modal/kontainer scroll di sekitarnya.
+  const [pos, setPos] = useState(null);
 
   const selected = useMemo(
     () =>
@@ -66,9 +71,41 @@ export default function SearchableSelect({
     if (!open) setQuery('');
   }, [open]);
 
+  const updatePos = () => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const margin = 8;
+    const spaceBelow = window.innerHeight - r.bottom - margin;
+    const spaceAbove = r.top - margin;
+    // Buka ke atas kalau ruang bawah sempit dan ruang atas lebih lega.
+    const openUp = spaceBelow < 260 && spaceAbove > spaceBelow;
+    const avail = Math.max(160, openUp ? spaceAbove : spaceBelow);
+    setPos({
+      left: r.left,
+      width: r.width,
+      top: openUp ? undefined : r.bottom + 4,
+      bottom: openUp ? window.innerHeight - r.top + 4 : undefined,
+      maxHeight: Math.min(avail, 380),
+    });
+  };
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePos();
+    window.addEventListener('resize', updatePos);
+    window.addEventListener('scroll', updatePos, true);
+    return () => {
+      window.removeEventListener('resize', updatePos);
+      window.removeEventListener('scroll', updatePos, true);
+    };
+  }, [open]);
+
   useEffect(() => {
     function handleClickOutside(e) {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+      const inWrapper = wrapperRef.current && wrapperRef.current.contains(e.target);
+      const inPanel = panelRef.current && panelRef.current.contains(e.target);
+      if (!inWrapper && !inPanel) {
         setOpen(false);
       }
     }
@@ -109,9 +146,19 @@ export default function SearchableSelect({
         <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {open && !disabled && (
+      {open && !disabled && pos && typeof document !== 'undefined' && createPortal(
         <div
-          className={`absolute z-30 mt-1 w-full rounded-lg border shadow-lg overflow-hidden ${
+          ref={panelRef}
+          style={{
+            position: 'fixed',
+            left: pos.left,
+            width: pos.width,
+            top: pos.top,
+            bottom: pos.bottom,
+            maxHeight: pos.maxHeight,
+            zIndex: 9999,
+          }}
+          className={`flex flex-col rounded-lg border shadow-xl overflow-hidden ${
             isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
           }`}
         >
@@ -132,7 +179,7 @@ export default function SearchableSelect({
             )}
           </div>
 
-          <div className="max-h-56 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto">
             {(pinnedOptions || []).map((o) => (
               <button
                 key={o.value}
@@ -200,7 +247,8 @@ export default function SearchableSelect({
               </button>
             ))}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
