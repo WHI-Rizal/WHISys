@@ -215,13 +215,13 @@ export default function DashboardPage() {
     localStorage.setItem('whisys_theme', newTheme);
   };
 
-  // LOGIKA IDLE TIMEOUT AUTO LOGOUT (30 MENIT)
+  // LOGIKA IDLE TIMEOUT AUTO LOGOUT (60 MENIT)
   useEffect(() => {
-    const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 Menit
+    const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 60 Menit
     let idleTimer;
 
     const handleAutoLogout = async () => {
-      alert("Sesi Anda telah berakhir karena tidak ada aktivitas selama 30 menit. Silakan login kembali demi keamanan.");
+      alert("Sesi Anda telah berakhir karena tidak ada aktivitas selama 60 menit. Silakan login kembali demi keamanan.");
       try {
         // Catat SEBELUM signOut — begitu signOut jalan, isLoggedIn() di
         // Firestore Rules langsung false, jadi tulisan log sesudahnya bakal
@@ -235,7 +235,7 @@ export default function DashboardPage() {
             action: 'logout',
             module: 'Autentikasi',
             targetLabel: profile?.fullName || auth.currentUser.email,
-            details: 'Logout otomatis karena tidak ada aktivitas selama 30 menit.'
+            details: 'Logout otomatis karena tidak ada aktivitas selama 60 menit.'
           });
         }
         await signOut(auth);
@@ -467,7 +467,7 @@ export default function DashboardPage() {
           <div
             className={`p-1.5 ${currentTheme.accentBg} rounded-lg text-white shrink-0 whisys-plane-trigger`}
             onClick={flyThePlane}
-            title="Jalan Lebih Tenang"
+            title="Klik dulu deh, hehe"
           >
             <Plane className={`w-4 h-4 ${planeFlying ? 'whisys-plane-flying' : ''}`} onAnimationEnd={() => setPlaneFlying(false)} />
           </div>
@@ -535,7 +535,7 @@ export default function DashboardPage() {
             <div
               className={`p-2 ${currentTheme.accentBg} rounded-lg text-white shrink-0 whisys-plane-trigger`}
               onClick={flyThePlane}
-              title="Jalan Lebih Tenang"
+              title="Klik dulu deh, hehe"
             >
               <Plane className={`w-6 h-6 ${planeFlying ? 'whisys-plane-flying' : ''}`} onAnimationEnd={() => setPlaneFlying(false)} />
             </div>
