@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { db, auth } from '@/lib/firebase';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc, setDoc, addDoc, updateDoc, collection, getDocs, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, addDoc, updateDoc, collection, getDocs, deleteDoc, deleteField } from 'firebase/firestore';
 import { logActivity } from '../../lib/activityLog';
 import {
   Building2,
@@ -83,8 +83,10 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
     // Key asli hanya hidup sebagai server-side env var (GEMINI_API_KEY di Vercel)
     // dan dipakai lewat /api/ai-chat — tidak pernah dikirim ke browser atau
     // disimpan ke Firestore.
-    waGatewayUrl: 'https://api.fonnte.com/send',
-    waToken: '••••••••••••••••'
+    // Token WA Gateway TIDAK disimpan di Firestore/browser. Token asli cuma hidup
+    // sebagai env var WA_GATEWAY_TOKEN di Vercel (server-side). Yang disimpan di
+    // sini cuma URL endpoint (bukan rahasia).
+    waGatewayUrl: 'https://api.fonnte.com/send'
   });
 
   const [systemPref, setSystemPref] = useState({
@@ -181,7 +183,7 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
             }
             setCompanyData(prev => ({ ...prev, ...migratedCompany }));
           }
-          if (data.api) setApiData(data.api);
+          if (data.api) setApiData({ waGatewayUrl: data.api.waGatewayUrl || 'https://api.fonnte.com/send' });
           if (data.preferences) setSystemPref(data.preferences);
         }
       } catch (err) {
@@ -330,7 +332,8 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
     try {
       await setDoc(doc(db, 'settings', 'company_profile'), {
         company: companyData,
-        api: apiData,
+        // waToken lama (kalau masih ada di dokumen) ikut dihapus permanen.
+        api: { waGatewayUrl: apiData.waGatewayUrl, waToken: deleteField() },
         preferences: systemPref,
         updatedAt: new Date().toISOString()
       }, { merge: true });
@@ -679,13 +682,9 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
                     onChange={(e) => setApiData({...apiData, waGatewayUrl: e.target.value})}
                     className={`w-full ${styles.inputBg} p-2.5 rounded-lg text-xs font-mono focus:outline-none focus:border-emerald-500`}
                   />
-                  <input
-                    type="password"
-                    placeholder="Token API WA Gateway"
-                    value={apiData.waToken}
-                    onChange={(e) => setApiData({...apiData, waToken: e.target.value})}
-                    className={`w-full ${styles.inputBg} p-2.5 rounded-lg text-xs font-mono focus:outline-none focus:border-emerald-500`}
-                  />
+                  <div className={`w-full ${styles.inputBg} p-2.5 rounded-lg text-[11px] ${styles.textSub}`}>
+                    Token diatur lewat Environment Variable <code>WA_GATEWAY_TOKEN</code> di Vercel, tidak bisa dilihat/diubah dari sini.
+                  </div>
                 </div>
                 <p className={`text-[11px] ${styles.textSub}`}>Digunakan untuk pengiriman otomatis kwitansi & pengingat dokumen pelunasan via WhatsApp.</p>
               </div>
