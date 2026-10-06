@@ -128,6 +128,24 @@ const resolvePaymentCreatedAt = (dateStr) => {
   return isNaN(combined.getTime()) ? now.toISOString() : combined.toISOString();
 };
 
+// Tahap pembayaran (DP Awal -> DP 2 -> Pelunasan). Setoran lama tanpa
+// paymentStage ditebak dari urutan waktu (pertama = DP Awal, kedua = DP 2,
+// sisanya = Pelunasan). Salinan logika yang sama dengan modul Booking.
+const PAYMENT_STAGES = ['DP Awal', 'DP 2', 'Pelunasan'];
+const resolveEffectiveStages = (payments) => {
+  const sorted = [...(payments || [])].sort((a, b) => String(a?.createdAt || '').localeCompare(String(b?.createdAt || '')));
+  return sorted.map((p, idx) => ({ payment: p, stage: PAYMENT_STAGES.includes(p?.paymentStage) ? p.paymentStage : (idx === 0 ? 'DP Awal' : idx === 1 ? 'DP 2' : 'Pelunasan') }));
+};
+const computeStageFlags = (payments) => {
+  const eff = resolveEffectiveStages(payments);
+  return { dp2Paid: eff.some(e => e.stage === 'DP 2' || e.stage === 'Pelunasan'), pelunasanPaid: eff.some(e => e.stage === 'Pelunasan') };
+};
+
+// Biaya operasional otomatis dari setoran EDC (potongan MDR) — hanya catatan,
+// sudah masuk jurnal setoran; tidak boleh diedit/dihapus/digerakkan saldonya.
+const MDR_EXPENSE_SOURCE = 'income_payment_mdr';
+const MDR_BLOCK_MSG = 'Biaya ini terbentuk otomatis dari setoran EDC. Ubah/hapus lewat setoran aslinya di modul Booking.';
+
 // Bungkus 1 baris "transaksi setoran" hasil gabungan sejumlah dokumen
 // payments_income yang lahir dari 1x setoran yang sama tapi kesplit ke
 // beberapa peserta dalam 1 grup booking (lihat groupTransactionId).
@@ -665,6 +683,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       const q = query(collection(db, 'payments_income'), where('bookingId', '==', bookingId));
       const snap = await getDocs(q);
       const totalPaidReal = snap.docs.reduce((acc, curr) => acc + (Number(curr.data().amount) || 0), 0);
+      const stageFlags = computeStageFlags(snap.docs.map(d => d.data()));
 
       const bkSnap = await getDocs(collection(db, 'bookings'));
       const targetBk = bkSnap.docs.find(d => d.id === bookingId);
@@ -678,7 +697,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
         await updateDoc(doc(db, 'bookings', bookingId), {
           totalPaid: totalPaidReal,
-          paymentStatus: status
+          paymentStatus: status,
+          dp2Paid: stageFlags.dp2Paid,
+          pelunasanPaid: stageFlags.pelunasanPaid
         });
       }
     } catch (err) {
@@ -1099,7 +1120,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       // nama lama itu, biar data existing tetap konsisten sama daftar terbaru.
       const renames = opexCategoryDraft.filter(c => c.original && c.value.trim() && c.value.trim() !== c.original);
       for (const r of renames) {
-        const affected = operationalExpenses.filter(o => o.category === r.original);
+        const affected = operationalExpenses.filter(o => o.category === r.original && o.source !== MDR_EXPENSE_SOURCE);
         await Promise.all(affected.map(o => updateDoc(doc(db, 'expenses_operational', o.id), { category: r.value.trim() })));
       }
 
@@ -1704,6 +1725,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const handleDeleteOperationalExpense = async (op) => {
     if (blockIfNotFinanceRole()) return;
+    if (op?.source === MDR_EXPENSE_SOURCE) {
+      alert(MDR_BLOCK_MSG);
+      return;
+    }
     if (op.accountId && await isAccountMutationReconciled(op.accountId, [op.id])) {
       alert(RECON_BLOCK_MSG);
       return;
@@ -1726,6 +1751,17 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     } catch (err) {
       alert("Gagal menghapus biaya operasional: " + err.message);
     }
+  };
+
+  // Tahap default setoran: belum ada setoran -> DP Awal; sudah ada tapi
+  // booking belum dp2Paid -> DP 2; selain itu Pelunasan.
+  const computeDefaultStage = (bookingId) => {
+    if (!bookingId) return 'DP Awal';
+    const existing = transactions.filter(t => t.bookingId === bookingId);
+    if (existing.length === 0) return 'DP Awal';
+    const bk = bookingsList.find(b => b.id === bookingId);
+    const flags = bk && bk.dp2Paid !== undefined ? { dp2Paid: !!bk.dp2Paid } : computeStageFlags(existing);
+    return flags.dp2Paid ? 'Pelunasan' : 'DP 2';
   };
 
   const handleIncomeSubmit = async (e) => {
@@ -1811,6 +1847,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           ...(incomeForm.paymentMethod !== 'Saldo Deposit' ? { accountId: incomeForm.accountId, accountName: incomeAccount?.name || '' } : {}),
           notes: isGroup ? `${incomeForm.notes} (Grup ${incomeForm.groupCode})` : incomeForm.notes,
           createdAt: resolvePaymentCreatedAt(incomeForm.date),
+          paymentStage: incomeForm.paymentStage || computeDefaultStage(item.id),
           ...(isGroup ? { groupTransactionId } : {})
         });
         if (!firstPayRefId) firstPayRefId = payRef.id;
@@ -1905,6 +1942,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     }
     if (!confirm(confirmMsg)) return;
     try {
+      // Rekening dikredit NET (gross - potongan MDR EDC) saat setoran dicatat,
+      // jadi yang dibalik juga NET. Data non-EDC mdrAmount = 0 -> sama dengan gross.
+      const rowMdrTotal = row.docs.reduce((acc, d) => acc + (Number(d.mdrAmount) || 0), 0);
+      const rowNetAmount = (Number(row.amount) || 0) - rowMdrTotal;
       await Promise.all(row.docs.map(d => deleteDoc(doc(db, 'payments_income', d.id))));
       await Promise.all(row.docs.map(d => deleteJournalEntriesBySource('income_payment', d.id)));
       // Uang yang beneran masuk ke Kas/Bank dicatat SATU baris mutasi per
@@ -1927,13 +1968,46 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           // Transaksi baru (pasca perbaikan) — cuma 1 baris mutasi buat
           // seluruh transaksi, hapus baris itu & kurangi saldo sekali.
           await Promise.all(mutSnap.docs.map(d => deleteDoc(d.ref)));
-          await updateDoc(doc(db, 'financial_accounts', mutationAccountId), { balance: increment(-(Number(row.amount) || 0)) });
+          await updateDoc(doc(db, 'financial_accounts', mutationAccountId), { balance: increment(-rowNetAmount) });
         } else {
           // Transaksi grup lama (dibuat sebelum perbaikan ini) — tiap
           // pecahan pax masih punya baris mutasinya sendiri-sendiri, jadi
           // dicari & dihapus satu-satu lewat id doc payments_income aslinya.
-          await Promise.all(row.docs.map(d => d.accountId ? removeAccountMutationBySource(d.accountId, d.id, -(Number(d.amount) || 0)) : Promise.resolve()));
+          await Promise.all(row.docs.map(d => d.accountId ? removeAccountMutationBySource(d.accountId, d.id, -((Number(d.amount) || 0) - (Number(d.mdrAmount) || 0))) : Promise.resolve()));
         }
+      }
+      // Bersihkan catatan biaya admin EDC (MDR) otomatis yang terkait setoran
+      // ini. Cuma catatan — fee-nya sudah ada di jurnal setoran (sudah dihapus
+      // di atas), jadi TIDAK ada pergerakan saldo/jurnal di sini.
+      try {
+        const mdrSourceIds = new Set(row.docs.map(d => d.id));
+        const gtxIds = Array.from(new Set(row.docs.map(d => d.groupTransactionId).filter(Boolean)));
+        const mdrDocs = new Map();
+        const idList = Array.from(mdrSourceIds);
+        for (const sid of [...idList, ...gtxIds]) {
+          const mq = query(collection(db, 'expenses_operational'), where('source', '==', MDR_EXPENSE_SOURCE), where('sourceDocId', '==', sid));
+          const ms = await getDocs(mq);
+          ms.docs.forEach(m => mdrDocs.set(m.id, m));
+        }
+        for (const m of mdrDocs.values()) {
+          const sid = m.data().sourceDocId;
+          if (gtxIds.includes(sid)) {
+            // Fee grup: hapus kalau tak ada lagi setoran dengan groupTransactionId
+            // itu; kalau masih ada sisa, sesuaikan nominal ke jumlah mdrAmount sisa.
+            const remSnap = await getDocs(query(collection(db, 'payments_income'), where('groupTransactionId', '==', sid)));
+            if (remSnap.docs.length === 0) {
+              await deleteDoc(m.ref);
+            } else {
+              const remMdr = remSnap.docs.reduce((acc, d) => acc + (Number(d.data().mdrAmount) || 0), 0);
+              if (remMdr > 0) await updateDoc(m.ref, { amount: remMdr });
+              else await deleteDoc(m.ref);
+            }
+          } else {
+            await deleteDoc(m.ref);
+          }
+        }
+      } catch (mdrErr) {
+        console.error('Gagal membersihkan catatan biaya admin EDC:', mdrErr);
       }
       const affectedBookingIds = Array.from(new Set(row.docs.map(d => d.bookingId).filter(Boolean)));
       await Promise.all(affectedBookingIds.map(id => syncBookingTotalPaid(id)));
@@ -2214,6 +2288,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // salah pilih kategori/akun/nominal pas nyatet, jadi nggak perlu
   // hapus-lalu-catat-ulang manual.
   const handleEditOperationalExpense = (op) => {
+    if (op?.source === MDR_EXPENSE_SOURCE) {
+      alert(MDR_BLOCK_MSG);
+      return;
+    }
     setEditingOperationalId(op.id);
     setOperationalForm({
       category: op.category || operationalCategories[0],
@@ -2247,6 +2325,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         // pola yang sama kayak hapus-lalu-catat-ulang, cuma digabung jadi
         // 1 langkah biar user nggak perlu 2 aksi terpisah.
         const oldOp = operationalExpenses.find(o => o.id === editingOperationalId);
+        if (oldOp?.source === MDR_EXPENSE_SOURCE) {
+          alert(MDR_BLOCK_MSG);
+          return;
+        }
         if (oldOp?.accountId && await isAccountMutationReconciled(oldOp.accountId, [editingOperationalId])) {
           alert(RECON_BLOCK_MSG);
           setSavingOperational(false);
@@ -3397,6 +3479,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                         - Rp {Number(op.amount).toLocaleString('id-ID')}
                       </td>
                       <td className="p-4 text-center">
+                        {op.source === 'income_payment_mdr' ? (
+                          <span className="inline-block text-[10px] px-2 py-1 rounded-full bg-slate-500/10 text-slate-400 border border-slate-500/20">Otomatis (dari setoran EDC)</span>
+                        ) : (
                         <div className="flex items-center justify-center gap-1.5">
                           <button
                             onClick={() => handleEditOperationalExpense(op)}
@@ -3413,6 +3498,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -3442,6 +3528,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                     <span className="text-[10px] opacity-60 uppercase">Nominal Keluar</span>
                     <div className="font-bold text-amber-500">- Rp {Number(op.amount).toLocaleString('id-ID')}</div>
                   </div>
+                  {op.source === 'income_payment_mdr' ? (
+                    <div className="pt-1"><span className="inline-block text-[10px] px-2 py-1 rounded-full bg-slate-500/10 text-slate-400 border border-slate-500/20">Otomatis (dari setoran EDC)</span></div>
+                  ) : (
                   <div className="flex flex-wrap gap-2 pt-1">
                     <button
                       onClick={() => handleEditOperationalExpense(op)}
@@ -3458,6 +3547,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
+                  )}
                 </div>
               ))
             )}
@@ -4678,6 +4768,17 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                     </p>
                   )}
                 </div>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-medium">Tahap Pembayaran</label>
+                <select
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={incomeForm.paymentStage || computeDefaultStage(groupedBookingOptions.find(g => g.code === incomeForm.groupCode)?.primary?.id)}
+                  onChange={e => setIncomeForm({ ...incomeForm, paymentStage: e.target.value })}
+                >
+                  {PAYMENT_STAGES.map(st => <option key={st} value={st}>{st}</option>)}
+                </select>
               </div>
 
               {incomeForm.paymentMethod !== 'Saldo Deposit' && (
