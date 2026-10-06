@@ -101,12 +101,47 @@ const shiftDateByDays = (dateInput, days) => {
 };
 
 // Due Date Pelunasan = H-40 sebelum tanggal keberangkatan.
-const getDueDatePelunasan = (booking) => shiftDateByDays(booking?.departureDate, -40);
+const getDueDatePelunasan = (booking) => (booking?.pelunasanPaid ? null : shiftDateByDays(booking?.departureDate, -40));
 
 // Due Date DP 2 = H+30 setelah DP pertama. DP pertama dianggap sama
 // dengan tanggal booking ini pertama kali dicatat (createdAt booking selalu
 // diisi dari tanggal setoran DP awal, lihat komentar di alur handleSubmit).
-const getDueDateDP2 = (booking) => shiftDateByDays(booking?.createdAt, 30);
+// Hilang kalau sudah ada setoran tahap DP 2 / Pelunasan (booking.dp2Paid).
+const getDueDateDP2 = (booking) => (booking?.dp2Paid ? null : shiftDateByDays(booking?.createdAt, 30));
+
+// Tahap Pembayaran per setoran (payments_income.paymentStage).
+const PAYMENT_STAGES = ['DP Awal', 'DP 2', 'Pelunasan'];
+
+// payments = array dokumen payments_income untuk SATU booking. Setoran lama
+// yang belum punya paymentStage dikasih tahap berdasarkan urutan kronologis
+// (createdAt naik): 1 = DP Awal, 2 = DP 2, 3+ = Pelunasan.
+const resolveEffectiveStages = (payments) => {
+  const sorted = [...(payments || [])].sort((a, b) => String(a?.createdAt || '').localeCompare(String(b?.createdAt || '')));
+  return sorted.map((payment, idx) => ({
+    payment,
+    stage: PAYMENT_STAGES.includes(payment?.paymentStage)
+      ? payment.paymentStage
+      : (idx === 0 ? 'DP Awal' : idx === 1 ? 'DP 2' : 'Pelunasan'),
+  }));
+};
+
+const computeStageFlags = (payments) => {
+  const eff = resolveEffectiveStages(payments);
+  return {
+    dp2Paid: eff.some(e => e.stage === 'DP 2' || e.stage === 'Pelunasan'),
+    pelunasanPaid: eff.some(e => e.stage === 'Pelunasan'),
+  };
+};
+
+// Saran tahap untuk setoran BARU.
+const suggestPaymentStage = ({ totalAmount, totalPaid, dp2Paid, amount }) => {
+  const paid = Number(totalPaid) || 0;
+  if (paid <= 0) return 'DP Awal';
+  const remaining = (Number(totalAmount) || 0) - paid;
+  const amt = Number(amount) || 0;
+  if (amt > 0 && remaining > 0 && amt >= remaining) return 'Pelunasan';
+  return dp2Paid ? 'Pelunasan' : 'DP 2';
+};
 
 // true kalau tanggal due date (ISO 'YYYY-MM-DD') sudah lewat hari ini.
 const isOverdue = (dueDateStr) => {
@@ -476,6 +511,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     paxCount: 1,
     initialPayment: '',
     paymentMethod: 'Transfer Bank',
+    paymentStage: 'DP Awal',
     // Akun Kas/Bank yang nerima setoran ini — cuma kepake kalau paymentMethod
     // BUKAN "Saldo Deposit" (itu bukan uang baru masuk kas, cuma mindahin
     // saldo titipan customer).
@@ -533,6 +569,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [paymentEditForm, setPaymentEditForm] = useState({
     amount: '',
     paymentMethod: 'Transfer Bank',
+    paymentStage: 'DP Awal',
     accountId: '',
     notes: '',
     date: ''
@@ -573,6 +610,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [groupPaymentForm, setGroupPaymentForm] = useState({
     amount: '',
     paymentMethod: 'Transfer Bank',
+    paymentStage: 'DP Awal',
     accountId: '',
     notes: 'Setoran Tambahan',
     // Sama kayak formData.paymentDate — nilai awalnya di-inline (bukan
@@ -604,6 +642,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     // pax aktif di grup ini (pola sama persis kayak modal Setoran Grup).
     addPaymentAmount: '',
     addPaymentMethod: 'Transfer Bank',
+    addPaymentStage: 'DP Awal',
     addAccountId: '',
     addPaymentNotes: 'Setoran Tambahan',
     addPaymentDate: new Date().toISOString().slice(0, 10),
@@ -677,6 +716,36 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
     fetchCompanyInfo();
   }, []);
 
+  // Backfill flag dp2Paid/pelunasanPaid untuk booking lama (belum punya field
+  // itu). Non-blocking & best-effort: hasil dipatch ke state, tulis ke
+  // Firestore dibungkus try/catch (abaikan kalau gagal, mis. izin).
+  const backfillStageFlags = async (list) => {
+    try {
+      const targets = list.filter(b =>
+        (b.status || 'active') === 'active' &&
+        b.paymentStatus !== 'Full Payment' && b.dp2Paid === undefined
+      );
+      if (targets.length === 0) return;
+      const payMap = {};
+      for (let i = 0; i < targets.length; i += 10) {
+        const chunk = targets.slice(i, i + 10).map(b => b.id);
+        const snap = await getDocs(query(collection(db, 'payments_income'), where('bookingId', 'in', chunk)));
+        snap.docs.forEach(d => {
+          const data = d.data();
+          (payMap[data.bookingId] = payMap[data.bookingId] || []).push({ id: d.id, ...data });
+        });
+      }
+      const flagsById = {};
+      targets.forEach(b => { flagsById[b.id] = computeStageFlags(payMap[b.id] || []); });
+      setBookings(prev => prev.map(b => (flagsById[b.id] && b.dp2Paid === undefined) ? { ...b, ...flagsById[b.id] } : b));
+      for (const b of targets) {
+        try { await updateDoc(doc(db, 'bookings', b.id), flagsById[b.id]); } catch (e) { /* abaikan */ }
+      }
+    } catch (err) {
+      console.error('Backfill flag tahap pembayaran gagal:', err);
+    }
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -697,7 +766,9 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
       setEdcMethods(edcSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.name || '').localeCompare(b.name || '')));
 
       const bkSnap = await getDocs(collection(db, 'bookings'));
-      setBookings(bkSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const bkList = bkSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setBookings(bkList);
+      backfillStageFlags(bkList); // non-blocking
 
       const tcSnap = await getDocs(collection(db, 'tc_sales'));
       setTcList(tcSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -973,12 +1044,15 @@ Terimakasih🙏`;
       const snap = await getDocs(q);
       const totalPaidReal = snap.docs.reduce((acc, curr) => acc + (Number(curr.data().amount) || 0), 0);
       const status = resolvePaymentStatus(totalPaidReal, totalTagihan);
+      const { dp2Paid, pelunasanPaid } = computeStageFlags(snap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       await updateDoc(doc(db, 'bookings', bookingId), {
         totalPaid: totalPaidReal,
-        paymentStatus: status
+        paymentStatus: status,
+        dp2Paid,
+        pelunasanPaid
       });
-      return { totalPaidReal, status };
+      return { totalPaidReal, status, dp2Paid, pelunasanPaid };
     } catch (err) {
       console.error("Gagal sinkronisasi pembayaran:", err);
     }
@@ -1103,6 +1177,16 @@ Terimakasih🙏`;
     }
   };
 
+  // Tahap efektif 1 setoran (stored paymentStage atau fallback urutan) dari
+  // daftar setoran 1 booking.
+  const getEffectiveStageOf = (payId, payments) =>
+    resolveEffectiveStages(payments || []).find(e => e.payment.id === payId)?.stage || 'DP Awal';
+
+  // Badge kecil Tahap Pembayaran di baris Riwayat Pembayaran.
+  const renderStageBadge = (stage) => (
+    <span className="px-1.5 py-0.5 rounded text-[10px] mr-1 bg-emerald-500/15 text-emerald-500 font-semibold">{stage}</span>
+  );
+
   const handleSavePaymentEdit = async (payId) => {
     if (!canManagePayments) {
       alert("Cuma Finance & Super Admin yang boleh mengedit riwayat pembayaran.");
@@ -1141,6 +1225,7 @@ Terimakasih🙏`;
       await updateDoc(doc(db, 'payments_income', payId), {
         amount: Number(paymentEditForm.amount),
         paymentMethod: paymentEditForm.paymentMethod,
+        paymentStage: PAYMENT_STAGES.includes(paymentEditForm.paymentStage) ? paymentEditForm.paymentStage : getEffectiveStageOf(payId, paymentHistory),
         notes: paymentEditForm.notes,
         ...(paymentEditForm.paymentMethod !== 'Saldo Deposit' ? { accountId: paymentEditForm.accountId, accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '' } : {}),
         // EDC: kalau metode baru match edc_methods, simpen MDR-nya; kalau
@@ -1272,7 +1357,7 @@ Terimakasih🙏`;
     setFormData({
       packageId: '', ordererId: '', pesertaList: [emptyPesertaEntry()],
       roomType: 'Quad', busGroup: 'Bus 1', paxCount: 1,
-      initialPayment: '', paymentMethod: 'Transfer Bank', accountId: '', paymentNotes: 'DP Pendaftaran',
+      initialPayment: '', paymentMethod: 'Transfer Bank', paymentStage: 'DP Awal', accountId: '', paymentNotes: 'DP Pendaftaran',
       paymentDate: todayDateStr(),
       extraCharges: [], extraDiscounts: [],
       closingSourceType: '', closingSourceId: '', closingSourceName: '',
@@ -1323,6 +1408,7 @@ Terimakasih🙏`;
       paxCount: 1,
       initialPayment: '',
       paymentMethod: 'Transfer Bank',
+      paymentStage: suggestPaymentStage({ totalAmount: item.totalAmount, totalPaid: item.totalPaid, dp2Paid: item.dp2Paid, amount: 0 }),
       accountId: '',
       paymentNotes: 'Setoran Tambahan',
       paymentDate: todayDateStr(),
@@ -2398,7 +2484,16 @@ Terimakasih🙏`;
       return;
     }
     setGroupPaymentTarget(group);
-    setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', accountId: '', notes: 'Setoran Tambahan', date: todayDateStr() });
+    setGroupPaymentForm({
+      amount: '', paymentMethod: 'Transfer Bank',
+      paymentStage: suggestPaymentStage({
+        totalAmount: (group.items || []).reduce((a, b) => a + (Number(b.totalAmount) || 0), 0),
+        totalPaid: (group.items || []).reduce((a, b) => a + (Number(b.totalPaid) || 0), 0),
+        dp2Paid: (group.items || []).some(b => b.dp2Paid),
+        amount: 0
+      }),
+      accountId: '', notes: 'Setoran Tambahan', date: todayDateStr()
+    });
     setShowGroupPaymentModal(true);
   };
 
@@ -2445,6 +2540,14 @@ Terimakasih🙏`;
       });
       const paxCount = groupItems.length;
       const groupPaymentAccount = financialAccounts.find(a => a.id === groupPaymentForm.accountId);
+      const groupPaymentStageValue = PAYMENT_STAGES.includes(groupPaymentForm.paymentStage)
+        ? groupPaymentForm.paymentStage
+        : suggestPaymentStage({
+            totalAmount: groupItems.reduce((a, b) => a + (Number(b.totalAmount) || 0), 0),
+            totalPaid: groupItems.reduce((a, b) => a + (Number(b.totalPaid) || 0), 0),
+            dp2Paid: groupItems.some(b => b.dp2Paid),
+            amount
+          });
 
       // Bagi rata nominal setoran ke semua pax (sisa pembagian masuk ke pax pertama)
       // — pola yang sama persis dengan pembagian DP awal pas registrasi grup baru.
@@ -2482,6 +2585,7 @@ Terimakasih🙏`;
             packageName: item.packageName,
             amount: paxShare,
             paymentMethod: groupPaymentForm.paymentMethod,
+            paymentStage: groupPaymentStageValue,
             ...(groupPaymentForm.paymentMethod !== 'Saldo Deposit' ? { accountId: groupPaymentForm.accountId, accountName: groupPaymentAccount?.name || '' } : {}),
             notes: `${groupPaymentForm.notes} (Grup ${groupPaymentTarget.code})`,
             createdAt: resolvePaymentCreatedAt(groupPaymentForm.date),
@@ -2541,7 +2645,7 @@ Terimakasih🙏`;
       }
 
       setShowGroupPaymentModal(false);
-      setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', accountId: '', notes: 'Setoran Tambahan', date: todayDateStr() });
+      setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', paymentStage: 'DP Awal', accountId: '', notes: 'Setoran Tambahan', date: todayDateStr() });
       fetchData();
       logActivity({
         userId: currentUser?.uid,
@@ -2664,6 +2768,7 @@ Terimakasih🙏`;
       await updateDoc(doc(db, 'payments_income', pay.id), {
         amount: Number(paymentEditForm.amount),
         paymentMethod: paymentEditForm.paymentMethod,
+        paymentStage: PAYMENT_STAGES.includes(paymentEditForm.paymentStage) ? paymentEditForm.paymentStage : getEffectiveStageOf(pay.id, groupHistoryPayments[pay.bookingId] || []),
         notes: paymentEditForm.notes,
         ...(paymentEditForm.paymentMethod !== 'Saldo Deposit' ? { accountId: paymentEditForm.accountId, accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '' } : {}),
         mdrAmount,
@@ -2851,6 +2956,12 @@ Terimakasih🙏`;
       busGroup: group.primary?.busGroup || 'Bus 1',
       addPaymentAmount: '',
       addPaymentMethod: 'Transfer Bank',
+      addPaymentStage: suggestPaymentStage({
+        totalAmount: (group.items || []).reduce((a, b) => a + (Number(b.totalAmount) || 0), 0),
+        totalPaid: (group.items || []).reduce((a, b) => a + (Number(b.totalPaid) || 0), 0),
+        dp2Paid: (group.items || []).some(b => b.dp2Paid),
+        amount: 0
+      }),
       addAccountId: '',
       addPaymentNotes: 'Setoran Tambahan',
       addPaymentDate: todayDateStr(),
@@ -3206,6 +3317,14 @@ Terimakasih🙏`;
           return;
         }
         const groupEditAccount = financialAccounts.find(a => a.id === groupEditForm.addAccountId);
+        const groupEditStageValue = PAYMENT_STAGES.includes(groupEditForm.addPaymentStage)
+          ? groupEditForm.addPaymentStage
+          : suggestPaymentStage({
+              totalAmount: activeItems.reduce((a, b) => a + (Number(b.totalAmount) || 0), 0),
+              totalPaid: activeItems.reduce((a, b) => a + (Number(b.totalPaid) || 0), 0),
+              dp2Paid: activeItems.some(b => b.dp2Paid),
+              amount: addAmount
+            });
         const sortedActive = [...activeItems].sort((a, b) => {
           if (a.groupPaxIndex != null && b.groupPaxIndex != null) return a.groupPaxIndex - b.groupPaxIndex;
           return 0;
@@ -3237,6 +3356,7 @@ Terimakasih🙏`;
               packageName: newPkg.name,
               amount: share,
               paymentMethod: groupEditForm.addPaymentMethod,
+              paymentStage: groupEditStageValue,
               ...(groupEditForm.addPaymentMethod !== 'Saldo Deposit' ? { accountId: groupEditForm.addAccountId, accountName: groupEditAccount?.name || '' } : {}),
               notes: `${groupEditForm.addPaymentNotes} (Grup ${groupEditTarget.code})`,
               createdAt: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
@@ -4398,7 +4518,9 @@ Terimakasih🙏`;
             ${buildDueDatesHtml({
               departureDate: first.departureDate,
               createdAt: items.reduce((earliest, b) => (!earliest || new Date(b.createdAt) < new Date(earliest)) ? b.createdAt : earliest, null),
-              paymentStatus: isLunas ? 'Full Payment' : 'DP Paid'
+              paymentStatus: isLunas ? 'Full Payment' : 'DP Paid',
+              dp2Paid: items.some(b => b.dp2Paid),
+              pelunasanPaid: items.every(b => b.pelunasanPaid)
             })}
           </div>
         </div>
@@ -4825,6 +4947,9 @@ Terimakasih🙏`;
         if (paymentVal > 0) {
           const editPayEdcMatch = findEdcMethod(formData.paymentMethod);
           const editPayMdrAmount = editPayEdcMatch ? computeEdcMdrAmount(paymentVal, editPayEdcMatch.mdrPercent) : 0;
+          const formStageValue = PAYMENT_STAGES.includes(formData.paymentStage)
+            ? formData.paymentStage
+            : suggestPaymentStage({ totalAmount: editedTotalAmount, totalPaid: currentBooking?.totalPaid, dp2Paid: currentBooking?.dp2Paid, amount: paymentVal });
           const payRef = await addDoc(collection(db, 'payments_income'), {
             bookingId: editingBookingId,
             bookingCode: currentBooking.bookingCode,
@@ -4833,6 +4958,7 @@ Terimakasih🙏`;
             packageName: selectedPkg.name,
             amount: paymentVal,
             paymentMethod: formData.paymentMethod,
+            paymentStage: formStageValue,
             ...(formData.paymentMethod !== 'Saldo Deposit' ? { accountId: formData.accountId, accountName: payAccount?.name || '' } : {}),
             notes: formData.paymentNotes,
             createdAt: resolvePaymentCreatedAt(formData.paymentDate),
@@ -4979,6 +5105,7 @@ Terimakasih🙏`;
               packageName: selectedPkg.name,
               amount: paymentVal,
               paymentMethod: formData.paymentMethod,
+              paymentStage: PAYMENT_STAGES.includes(formData.paymentStage) ? formData.paymentStage : 'DP Awal',
               ...(formData.paymentMethod !== 'Saldo Deposit' ? { accountId: formData.accountId, accountName: payAccount?.name || '' } : {}),
               notes: formData.paymentNotes,
               createdAt: resolvePaymentCreatedAt(formData.paymentDate),
@@ -5140,6 +5267,7 @@ Terimakasih🙏`;
                 packageName: selectedPkg.name,
                 amount: paxShare,
                 paymentMethod: formData.paymentMethod,
+                paymentStage: PAYMENT_STAGES.includes(formData.paymentStage) ? formData.paymentStage : 'DP Awal',
                 ...(formData.paymentMethod !== 'Saldo Deposit' ? { accountId: formData.accountId, accountName: payAccount?.name || '' } : {}),
                 notes: `${formData.paymentNotes} (Grup ${groupBookingCode}, ${paxCount} pax)`,
                 createdAt: resolvePaymentCreatedAt(formData.paymentDate),
@@ -5913,7 +6041,7 @@ Terimakasih🙏`;
                     <td className={`p-4 ${styles.textSub}`}>{formatDateTimeID(group.earliestCreatedAt)}</td>
                     <td className="p-4">
                       {renderStatusBadge(group.primary)}
-                      {renderDueDates({ ...group.primary, createdAt: group.earliestCreatedAt })}
+                      {renderDueDates({ ...group.primary, createdAt: group.earliestCreatedAt, dp2Paid: group.items.some(i => i.dp2Paid), pelunasanPaid: group.items.every(i => i.pelunasanPaid) })}
                     </td>
                     <td className="p-4 text-right whitespace-nowrap">
                       <div className={`text-[10px] ${styles.textSub}`}>
@@ -5999,7 +6127,7 @@ Terimakasih🙏`;
                     <div className="flex items-center gap-1.5">
                       <span className="font-medium">Status:</span> {renderStatusBadge(group.primary)}
                     </div>
-                    <div>{renderDueDates({ ...group.primary, createdAt: group.earliestCreatedAt })}</div>
+                    <div>{renderDueDates({ ...group.primary, createdAt: group.earliestCreatedAt, dp2Paid: group.items.some(i => i.dp2Paid), pelunasanPaid: group.items.every(i => i.pelunasanPaid) })}</div>
                     <div><span className="font-medium">Tagihan:</span> Rp {Number(group.totalAmount || 0).toLocaleString('id-ID')}</div>
                     <div>
                       <span className="font-medium">Kekurangan:</span>{' '}
@@ -6786,6 +6914,16 @@ Terimakasih🙏`;
                           <option value="Saldo Deposit">Saldo Deposit</option>
                         </select>
                       </div>
+                      <div>
+                        <label className="block mb-1 font-medium">Tahap Pembayaran</label>
+                        <select
+                          className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                          value={formData.paymentStage}
+                          onChange={e => setFormData({ ...formData, paymentStage: e.target.value })}
+                        >
+                          {PAYMENT_STAGES.map(st => <option key={st} value={st}>{st}</option>)}
+                        </select>
+                      </div>
                     </div>
                     {formData.paymentMethod !== 'Saldo Deposit' && (
                       <div>
@@ -6942,6 +7080,13 @@ Terimakasih🙏`;
                                     onChange={e => setPaymentEditForm({ ...paymentEditForm, notes: e.target.value })}
                                   />
                                 </div>
+                                <select
+                                  className={`${styles.inputBg} p-1.5 rounded`}
+                                  value={paymentEditForm.paymentStage}
+                                  onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentStage: e.target.value })}
+                                >
+                                  {PAYMENT_STAGES.map(st => <option key={st} value={st}>Tahap: {st}</option>)}
+                                </select>
                                 <input
                                   type="number"
                                   placeholder="Nominal"
@@ -6989,6 +7134,7 @@ Terimakasih🙏`;
                             </td>
                             <td className="p-3">
                               <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{pay.paymentMethod}{pay.accountName ? ` - ${pay.accountName}` : ''}</span>
+                              {renderStageBadge(getEffectiveStageOf(pay.id, paymentHistory))}
                               <span className={styles.textSub}>{pay.notes}</span>
                             </td>
                             <td className="p-3 font-bold text-emerald-500">
@@ -7000,7 +7146,7 @@ Terimakasih🙏`;
                                   <button
                                     onClick={() => {
                                       setEditingPaymentId(pay.id);
-                                      setPaymentEditForm({ amount: pay.amount, paymentMethod: pay.paymentMethod, accountId: pay.accountId || '', notes: pay.notes, date: (pay.createdAt || '').slice(0, 10) });
+                                      setPaymentEditForm({ amount: pay.amount, paymentMethod: pay.paymentMethod, paymentStage: getEffectiveStageOf(pay.id, paymentHistory), accountId: pay.accountId || '', notes: pay.notes, date: (pay.createdAt || '').slice(0, 10) });
                                     }}
                                     className="text-emerald-500 hover:underline mr-2"
                                   >
@@ -7067,6 +7213,13 @@ Terimakasih🙏`;
                             onChange={e => setPaymentEditForm({ ...paymentEditForm, notes: e.target.value })}
                           />
                         </div>
+                        <select
+                          className={`${styles.inputBg} p-1.5 rounded`}
+                          value={paymentEditForm.paymentStage}
+                          onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentStage: e.target.value })}
+                        >
+                          {PAYMENT_STAGES.map(st => <option key={st} value={st}>Tahap: {st}</option>)}
+                        </select>
                         <input
                           type="number"
                           placeholder="Nominal"
@@ -7110,7 +7263,7 @@ Terimakasih🙏`;
                         <p className={`font-bold ${styles.textTitle}`}>Rp {Number(pay.amount).toLocaleString('id-ID')}</p>
                         <div className={`mt-1 space-y-0.5 ${styles.textSub}`}>
                           <p>Tanggal: {formatDateDDMMYYYY(pay.createdAt)}</p>
-                          <p>Metode: {pay.paymentMethod}{pay.accountName ? ` - ${pay.accountName}` : ''}</p>
+                          <p>Metode: {pay.paymentMethod}{pay.accountName ? ` - ${pay.accountName}` : ''} {renderStageBadge(getEffectiveStageOf(pay.id, paymentHistory))}</p>
                           {pay.notes && <p>Catatan: {pay.notes}</p>}
                         </div>
                         {canManagePayments && (
@@ -7118,7 +7271,7 @@ Terimakasih🙏`;
                             <button
                               onClick={() => {
                                 setEditingPaymentId(pay.id);
-                                setPaymentEditForm({ amount: pay.amount, paymentMethod: pay.paymentMethod, accountId: pay.accountId || '', notes: pay.notes, date: (pay.createdAt || '').slice(0, 10) });
+                                setPaymentEditForm({ amount: pay.amount, paymentMethod: pay.paymentMethod, paymentStage: getEffectiveStageOf(pay.id, paymentHistory), accountId: pay.accountId || '', notes: pay.notes, date: (pay.createdAt || '').slice(0, 10) });
                               }}
                               className="text-emerald-500 hover:underline"
                             >
@@ -7370,6 +7523,16 @@ Terimakasih🙏`;
                     <option value="Saldo Deposit">Saldo Deposit</option>
                   </select>
                 </div>
+                <div>
+                  <label className="block mb-1 font-medium">Tahap Pembayaran</label>
+                  <select
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={groupPaymentForm.paymentStage}
+                    onChange={e => setGroupPaymentForm({ ...groupPaymentForm, paymentStage: e.target.value })}
+                  >
+                    {PAYMENT_STAGES.map(st => <option key={st} value={st}>{st}</option>)}
+                  </select>
+                </div>
               </div>
               {groupPaymentForm.paymentMethod !== 'Saldo Deposit' && (
                 <div>
@@ -7520,6 +7683,13 @@ Terimakasih🙏`;
                                       onChange={e => setPaymentEditForm({ ...paymentEditForm, notes: e.target.value })}
                                     />
                                   </div>
+                                  <select
+                                    className={`${styles.inputBg} p-1.5 rounded`}
+                                    value={paymentEditForm.paymentStage}
+                                    onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentStage: e.target.value })}
+                                  >
+                                    {PAYMENT_STAGES.map(st => <option key={st} value={st}>Tahap: {st}</option>)}
+                                  </select>
                                   <input
                                     type="number"
                                     placeholder="Nominal"
@@ -7567,6 +7737,7 @@ Terimakasih🙏`;
                               </td>
                               <td className="p-3">
                                 <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{tx.paymentMethod}{tx.accountName ? ` - ${tx.accountName}` : ''}</span>
+                                {renderStageBadge(getEffectiveStageOf(tx.docs[0].id, groupHistoryPayments[tx.docs[0].bookingId] || []))}
                                 <span className={styles.textSub}>{tx.notes}</span>
                               </td>
                               <td className="p-3 font-bold text-emerald-500">
@@ -7585,7 +7756,7 @@ Terimakasih🙏`;
                                       <button
                                         onClick={() => {
                                           setEditingGroupPaymentId(singlePay.id);
-                                          setPaymentEditForm({ amount: singlePay.amount, paymentMethod: singlePay.paymentMethod, accountId: singlePay.accountId || '', notes: singlePay.notes, date: (singlePay.createdAt || '').slice(0, 10) });
+                                          setPaymentEditForm({ amount: singlePay.amount, paymentMethod: singlePay.paymentMethod, paymentStage: getEffectiveStageOf(singlePay.id, groupHistoryPayments[singlePay.bookingId] || []), accountId: singlePay.accountId || '', notes: singlePay.notes, date: (singlePay.createdAt || '').slice(0, 10) });
                                         }}
                                         className="text-emerald-500 hover:underline mr-2"
                                       >
@@ -7657,6 +7828,13 @@ Terimakasih🙏`;
                               onChange={e => setPaymentEditForm({ ...paymentEditForm, notes: e.target.value })}
                             />
                           </div>
+                          <select
+                            className={`${styles.inputBg} p-1.5 rounded`}
+                            value={paymentEditForm.paymentStage}
+                            onChange={e => setPaymentEditForm({ ...paymentEditForm, paymentStage: e.target.value })}
+                          >
+                            {PAYMENT_STAGES.map(st => <option key={st} value={st}>Tahap: {st}</option>)}
+                          </select>
                           <input
                             type="number"
                             placeholder="Nominal"
@@ -7700,7 +7878,7 @@ Terimakasih🙏`;
                           <p className={`font-bold ${styles.textTitle}`}>Rp {Number(tx.amount).toLocaleString('id-ID')}</p>
                           <div className={`mt-1 space-y-0.5 ${styles.textSub}`}>
                             <p>Tanggal: {formatDateDDMMYYYY(tx.createdAt)}</p>
-                            <p>Metode: {tx.paymentMethod}{tx.accountName ? ` - ${tx.accountName}` : ''}</p>
+                            <p>Metode: {tx.paymentMethod}{tx.accountName ? ` - ${tx.accountName}` : ''} {renderStageBadge(getEffectiveStageOf(tx.docs[0].id, groupHistoryPayments[tx.docs[0].bookingId] || []))}</p>
                             {tx.notes && <p>Catatan: {tx.notes}</p>}
                           </div>
                           {canManagePayments && (
@@ -7714,7 +7892,7 @@ Terimakasih🙏`;
                                   <button
                                     onClick={() => {
                                       setEditingGroupPaymentId(singlePay.id);
-                                      setPaymentEditForm({ amount: singlePay.amount, paymentMethod: singlePay.paymentMethod, accountId: singlePay.accountId || '', notes: singlePay.notes, date: (singlePay.createdAt || '').slice(0, 10) });
+                                      setPaymentEditForm({ amount: singlePay.amount, paymentMethod: singlePay.paymentMethod, paymentStage: getEffectiveStageOf(singlePay.id, groupHistoryPayments[singlePay.bookingId] || []), accountId: singlePay.accountId || '', notes: singlePay.notes, date: (singlePay.createdAt || '').slice(0, 10) });
                                     }}
                                     className="text-emerald-500 hover:underline"
                                   >
@@ -8217,6 +8395,16 @@ Terimakasih🙏`;
                         <option value="EDC / Kartu">EDC / Kartu</option>
                       )}
                       <option value="Saldo Deposit">Saldo Deposit</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block mb-1 font-medium">Tahap Pembayaran</label>
+                    <select
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={groupEditForm.addPaymentStage}
+                      onChange={e => setGroupEditForm({ ...groupEditForm, addPaymentStage: e.target.value })}
+                    >
+                      {PAYMENT_STAGES.map(st => <option key={st} value={st}>{st}</option>)}
                     </select>
                   </div>
                 </div>
