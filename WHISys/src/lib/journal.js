@@ -720,7 +720,8 @@ export const runInitialJournalMigration = async ({
   for (const p of (paymentsIncome || [])) {
     await safe(() => postIncomePayment({
       paymentId: p.id, bookingCode: p.bookingCode, amount: p.amount, paymentMethod: p.paymentMethod,
-      accountId: p.accountId, accountName: p.accountName, date: p.createdAt, createdByUid, createdByName
+      accountId: p.accountId, accountName: p.accountName, mdrAmount: p.mdrAmount || 0,
+      date: p.createdAt, createdByUid, createdByName
     }), `Setoran ${p.bookingCode || p.id}`);
   }
 
@@ -736,6 +737,9 @@ export const runInitialJournalMigration = async ({
 
   // 5. Semua biaya operasional
   for (const e of (operationalExpenses || [])) {
+    // Biaya MDR EDC otomatis sudah masuk di jurnal setoran (baris Biaya Admin
+    // EDC), jangan diposting lagi sebagai biaya operasional (jadi dobel).
+    if (e.source === 'income_payment_mdr') continue;
     await safe(() => postOperationalExpense({
       expenseId: e.id, category: e.category, amount: e.amount,
       accountId: e.accountId, accountName: e.accountName,
@@ -1039,6 +1043,9 @@ export const diagnoseMissingIncomePaymentJournals = ({ paymentsIncome, journalEn
       paymentId: p.id, bookingCode: p.bookingCode, jamaahName: p.jamaahName,
       amount: Number(p.amount || 0), paymentMethod: p.paymentMethod,
       accountId: p.accountId, accountName: p.accountName, createdAt: p.createdAt,
+      // Potongan MDR EDC (kalau ada) ikut dibawa biar jurnal yang diposting
+      // ulang tetap NET di Kas/Bank + ada baris Biaya Admin EDC-nya.
+      mdrAmount: Number(p.mdrAmount || 0),
     }));
   const totalAmount = affected.reduce((acc, p) => acc + p.amount, 0);
   return { affected, totalAmount, count: affected.length };
@@ -1058,6 +1065,7 @@ export const applyMissingIncomePaymentJournalsCorrection = async ({ affected, cr
       const posted = await postIncomePayment({
         paymentId: item.paymentId, bookingCode: item.bookingCode, amount: item.amount,
         paymentMethod: item.paymentMethod, accountId: item.accountId, accountName: item.accountName,
+        mdrAmount: item.mdrAmount || 0,
         date: item.createdAt || new Date().toISOString(), createdByUid, createdByName
       });
       if (posted) summary.corrected += 1; else summary.skipped += 1;
