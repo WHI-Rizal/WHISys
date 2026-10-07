@@ -322,6 +322,27 @@ export const postVendorPayment = async ({ paymentId, vendorName, amount, payMeth
   });
 };
 
+// 5a. Top Up Deposit Vendor — DP/uang muka yang DIBAYAR ke vendor tapi
+//     belum jelas bakal dipakai buat keberangkatan mana (kebalikan dari
+//     postDepositTopup yang itu titipan customer ke kita). Kas/Bank BENERAN
+//     keluar, tapi bukan biaya/HPP dulu: jadi aset "Piutang Deposit Vendor"
+//     (1301) sampai nanti dipakai bayar vendor lewat metode "Saldo Deposit
+//     Vendor" (lihat postVendorPayment, sisi kredit 1301). Biaya admin
+//     transfer-nya dijurnal TERPISAH lewat postOperationalExpense.
+export const postVendorDepositTopup = async ({ sourceDocId, vendorName, amount, accountId, accountName, date, createdByUid, createdByName }) => {
+  const amt = Number(amount) || 0;
+  if (amt <= 0) return null;
+  return postJournalEntry({
+    date, description: `Top Up Deposit Vendor - ${vendorName || '-'}`,
+    source: 'vendor_deposit_topup', sourceDocId, reference: vendorName || '',
+    lines: [
+      glLine(ACC.PIUTANG_DEPOSIT_VENDOR, amt, 0),
+      glLine(ACC.KAS_BANK, 0, amt, { accountId, accountName }),
+    ],
+    createdByUid, createdByName
+  });
+};
+
 // 5b. Konversi DP Vendor yang batal (trip cancel, tapi nggak hangus) jadi
 //     Saldo Deposit Vendor — misal tiket block seat yang udah dibayar penuh
 //     tapi keberangkatannya batal, sebagian nilainya di-roll-over jadi kredit
