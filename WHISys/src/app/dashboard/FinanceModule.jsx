@@ -423,6 +423,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // admin transfernya ikut tercatat otomatis.
   const [showVendorTopupModal, setShowVendorTopupModal] = useState(false);
   const [savingVendorTopup, setSavingVendorTopup] = useState(false);
+  const [deletingTopupId, setDeletingTopupId] = useState(null);
   const [vendorTopupForm, setVendorTopupForm] = useState({
     vendorId: '', amount: '', adminFee: '', accountId: '', date: todayISODate(),
     notes: 'DP ke vendor (belum ditentukan keberangkatan)'
@@ -1502,32 +1503,62 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   // Hapus 1 baris Top Up Deposit Vendor dari Riwayat — balikin semuanya:
   // saldo deposit vendor, saldo & mutasi Kas/Bank, jurnal, dan biaya admin.
+  // Langkah penjaga (saldo vendor + hapus ledger) dijalankan ATOMIK lewat
+  // transaction duluan, baru bersih-bersih sisanya. Nominal yang dikembalikan
+  // ke bank dihitung dari mutasi yang BENERAN ada (bukan dari angka di ledger),
+  // jadi kalau dulu biaya admin gagal tercatat, bank nggak kelebihan saldo.
   const handleDeleteVendorTopup = async (entry) => {
     if (blockIfNotFinanceRole()) return;
     if (entry?.type !== 'vendor_topup') return;
-    const vendor = vendorsList.find(v => v.id === entry.vendorId);
-    const amountVal = Number(entry.amount) || 0;
-    const feeVal = Number(entry.adminFee) || 0;
+    if (deletingTopupId) return;
     const feeExpenseId = `${entry.id}_fee`;
-    if (vendor && Number(vendor.depositBalance || 0) < amountVal) {
-      alert(`Saldo deposit vendor "${vendor.name}" sekarang cuma Rp ${Number(vendor.depositBalance || 0).toLocaleString('id-ID')}, lebih kecil dari top up ini (Rp ${amountVal.toLocaleString('id-ID')}). Sebagian sudah dipakai bayar vendor, jadi top up ini nggak bisa dihapus. Batalkan dulu pembayaran vendor yang memakai saldo ini.`);
-      return;
-    }
     if (entry.accountId && await isAccountMutationReconciled(entry.accountId, [entry.id, feeExpenseId])) {
       alert(RECON_BLOCK_MSG);
       return;
     }
-    if (!confirm(`Hapus Top Up Deposit Vendor Rp ${amountVal.toLocaleString('id-ID')}${feeVal > 0 ? ` (+ biaya admin Rp ${feeVal.toLocaleString('id-ID')})` : ''}? Saldo deposit vendor dikurangi dan uang dikembalikan ke saldo akun Kas/Bank.`)) return;
+    if (!confirm(`Hapus Top Up Deposit Vendor Rp ${(Number(entry.amount) || 0).toLocaleString('id-ID')}${Number(entry.adminFee) > 0 ? ` (+ biaya admin Rp ${Number(entry.adminFee).toLocaleString('id-ID')})` : ''}? Saldo deposit vendor dikurangi dan uang dikembalikan ke saldo akun Kas/Bank.`)) return;
+    setDeletingTopupId(entry.id);
     try {
-      await updateDoc(doc(db, 'vendors', entry.vendorId), { depositBalance: increment(-amountVal) });
-      await deleteDoc(doc(db, 'vendor_deposit_ledger', entry.id));
-      if (entry.accountId) await removeAccountMutationBySource(entry.accountId, entry.id, amountVal);
-      await deleteJournalEntriesBySource('vendor_deposit_topup', entry.id);
-      if (feeVal > 0) {
-        try { await deleteDoc(doc(db, 'expenses_operational', feeExpenseId)); } catch (e) { console.error(e); }
-        if (entry.accountId) await removeAccountMutationBySource(entry.accountId, feeExpenseId, feeVal);
-        await deleteJournalEntriesBySource('operational_expense', feeExpenseId);
+      let amountVal = 0;
+      await runTransaction(db, async (tx) => {
+        const ledgerRef = doc(db, 'vendor_deposit_ledger', entry.id);
+        const vendorRef = doc(db, 'vendors', entry.vendorId);
+        const [ledgerSnap, vendorSnap] = await Promise.all([tx.get(ledgerRef), tx.get(vendorRef)]);
+        if (!ledgerSnap.exists()) {
+          throw new Error('Top up ini sudah terhapus (mungkin diklik dua kali). Refresh halaman buat lihat kondisi terbaru.');
+        }
+        amountVal = Number(ledgerSnap.data().amount) || 0;
+        const currentBalance = Number(vendorSnap.exists() ? vendorSnap.data().depositBalance : 0) || 0;
+        if (currentBalance < amountVal) {
+          throw new Error(`Saldo deposit vendor sekarang cuma Rp ${currentBalance.toLocaleString('id-ID')}, lebih kecil dari top up ini (Rp ${amountVal.toLocaleString('id-ID')}). Sebagian sudah dipakai bayar vendor, jadi top up ini nggak bisa dihapus. Batalkan dulu pembayaran vendor yang memakai saldo ini.`);
+        }
+        tx.update(vendorRef, { depositBalance: currentBalance - amountVal });
+        tx.delete(ledgerRef);
+      });
+
+      // Hitung uang yang beneran perlu dikembalikan ke bank dari mutasi yang ada.
+      const sumMutations = async (accId, srcId) => {
+        const snap = await getDocs(query(collection(db, 'account_mutations'), where('accountId', '==', accId), where('sourceDocId', '==', srcId)));
+        return snap.docs.reduce((acc, d) => acc + (Number(d.data().amount) || 0), 0);
+      };
+      const problems = [];
+      if (entry.accountId) {
+        try {
+          const mainDelta = await sumMutations(entry.accountId, entry.id);
+          await removeAccountMutationBySource(entry.accountId, entry.id, mainDelta);
+        } catch (err) { problems.push('mutasi/saldo bank top up: ' + err.message); }
       }
+      try { await deleteJournalEntriesBySource('vendor_deposit_topup', entry.id); }
+      catch (err) { problems.push('jurnal top up: ' + err.message); }
+      try {
+        if (entry.accountId) {
+          const feeDelta = await sumMutations(entry.accountId, feeExpenseId);
+          await removeAccountMutationBySource(entry.accountId, feeExpenseId, feeDelta);
+        }
+        await deleteDoc(doc(db, 'expenses_operational', feeExpenseId));
+        await deleteJournalEntriesBySource('operational_expense', feeExpenseId);
+      } catch (err) { problems.push('biaya admin: ' + err.message); }
+
       logActivity({
         userId: currentUser?.uid,
         userName: currentUser?.fullName || currentUser?.email,
@@ -1535,13 +1566,18 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         action: 'delete',
         module: 'Vendor',
         targetLabel: entry.vendorName,
-        details: `Menghapus Top Up Deposit Vendor "${entry.vendorName}" Rp ${amountVal.toLocaleString('id-ID')}${feeVal > 0 ? ` + Biaya Admin Rp ${feeVal.toLocaleString('id-ID')}` : ''}`
+        details: `Menghapus Top Up Deposit Vendor "${entry.vendorName}" Rp ${amountVal.toLocaleString('id-ID')}`
       });
       setVendorLedgerEntries(prev => prev.filter(x => x.id !== entry.id));
       setLedgerVendor(prev => prev ? { ...prev, depositBalance: Number(prev.depositBalance || 0) - amountVal } : prev);
       fetchData();
+      if (problems.length > 0) {
+        alert(`Top up sudah dihapus dan saldo vendor dikurangi, TAPI sebagian pembersihan gagal: ${problems.join(' | ')}. Cek Kas & Bank, Jurnal Umum, dan Biaya Operasional, lalu lapor ke tim IT/Finance.`);
+      }
     } catch (err) {
-      alert("Gagal menghapus Top Up Deposit Vendor: " + err.message);
+      alert(err.message || "Gagal menghapus Top Up Deposit Vendor.");
+    } finally {
+      setDeletingTopupId(null);
     }
   };
 
@@ -4696,7 +4732,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                           <button
                             type="button"
                             onClick={() => handleDeleteVendorTopup(entry)}
-                            className="mt-1 p-1 text-rose-500 hover:bg-rose-500/10 rounded"
+                            disabled={deletingTopupId === entry.id}
+                            className="mt-1 p-1 text-rose-500 hover:bg-rose-500/10 disabled:opacity-40 rounded"
                             title="Hapus Top Up ini"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
