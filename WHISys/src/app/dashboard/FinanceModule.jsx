@@ -12,7 +12,7 @@ import { logActivity } from '../../lib/activityLog';
 import { calculatePPN } from '../../lib/ppn';
 import {
   postIncomePayment, postDepositTopup, postDepositWithdrawal, postVendorBillCreated, postVendorPayment,
-  postOperationalExpense, postVendorDepositConversion, postVendorInvoiceCorrection,
+  postOperationalExpense, postVendorDepositConversion, postVendorInvoiceCorrection, postVendorDepositTopup,
   deleteJournalEntriesBySource, ACC
 } from '../../lib/journal';
 
@@ -417,6 +417,17 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   const [adjustingVendor, setAdjustingVendor] = useState(null);
   const [vendorAdjustForm, setVendorAdjustForm] = useState({ amount: '', notes: 'Saldo awal (migrasi data lama)' });
 
+  // Modal "Top Up Deposit Vendor" — DP/uang muka yang dibayar ke vendor tapi
+  // belum jelas dipakai buat keberangkatan mana. Beda sama "Tambah/Koreksi
+  // Saldo" manual di atas: ini BENERAN motong Kas/Bank, terjurnal, dan biaya
+  // admin transfernya ikut tercatat otomatis.
+  const [showVendorTopupModal, setShowVendorTopupModal] = useState(false);
+  const [savingVendorTopup, setSavingVendorTopup] = useState(false);
+  const [vendorTopupForm, setVendorTopupForm] = useState({
+    vendorId: '', amount: '', adminFee: '', accountId: '', date: todayISODate(),
+    notes: 'DP ke vendor (belum ditentukan keberangkatan)'
+  });
+
   // Modal "Riwayat Mutasi Saldo Deposit Vendor" — collection
   // 'vendor_deposit_ledger' udah ditulis dari dulu (tiap kali saldo deposit
   // vendor nambah/kepake — lihat adjustVendorDepositBalance di atas), tapi
@@ -451,6 +462,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     refund_conversion: { label: 'Konversi DP Batal', color: 'text-blue-500' },
     invoice_correction: { label: 'Koreksi Invoice', color: 'text-amber-500' },
     manual_adjustment: { label: 'Koreksi Manual', color: 'text-slate-400' },
+    vendor_topup: { label: 'Top Up Deposit (DP ke Vendor)', color: 'text-emerald-500' },
     usage: { label: 'Dipakai Bayar Vendor', color: 'text-rose-500' },
     usage_reversal: { label: 'Batal Pakai (Hapus Transaksi)', color: 'text-emerald-500' },
   };
@@ -1368,6 +1380,168 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       fetchData();
     } catch (err) {
       alert("Gagal menyesuaikan saldo deposit vendor: " + err.message);
+    }
+  };
+
+  // ============ Top Up Deposit Vendor (DP ke vendor, belum ada keberangkatan) ============
+  const handleOpenVendorTopup = (v) => {
+    setVendorTopupForm({
+      vendorId: v?.id || '', amount: '', adminFee: '', accountId: '', date: todayISODate(),
+      notes: 'DP ke vendor (belum ditentukan keberangkatan)'
+    });
+    setShowVendorTopupModal(true);
+  };
+
+  const handleVendorTopupSubmit = async (e) => {
+    e.preventDefault();
+    if (blockIfNotFinanceRole()) return;
+    if (savingVendorTopup) return;
+    const vendor = vendorsList.find(v => v.id === vendorTopupForm.vendorId);
+    if (!vendor) { alert("Pilih vendornya dulu."); return; }
+    const amountVal = Number(vendorTopupForm.amount) || 0;
+    if (amountVal <= 0) { alert("Isi nominal DP yang valid (lebih dari 0)."); return; }
+    const feeVal = Number(vendorTopupForm.adminFee) || 0;
+    if (feeVal < 0) { alert("Biaya admin nggak boleh minus."); return; }
+    if (!vendorTopupForm.accountId) { alert("Pilih akun Kas/Bank yang dipakai bayar DP ini dulu."); return; }
+    const account = financialAccounts.find(a => a.id === vendorTopupForm.accountId);
+    setSavingVendorTopup(true);
+    try {
+      const dateResolved = resolvePaymentCreatedAt(vendorTopupForm.date);
+      // ID ledger & ID biaya admin DIPAKSA deterministik, biar pas dihapus
+      // mutasi bank + jurnalnya (sourceDocId sama) gampang ketemu.
+      const ledgerDocId = `vtopup_${vendor.id}_${Date.now()}`;
+      const feeExpenseId = `${ledgerDocId}_fee`;
+
+      await updateDoc(doc(db, 'vendors', vendor.id), { depositBalance: increment(amountVal) });
+      await setDoc(doc(db, 'vendor_deposit_ledger', ledgerDocId), {
+        vendorId: vendor.id,
+        vendorName: vendor.name || '-',
+        type: 'vendor_topup',
+        amount: amountVal,
+        notes: vendorTopupForm.notes || '',
+        reference: `Dibayar dari ${account?.name || '-'}`,
+        accountId: vendorTopupForm.accountId,
+        accountName: account?.name || '',
+        adminFee: feeVal,
+        createdAt: dateResolved
+      });
+
+      await adjustAccountBalance(vendorTopupForm.accountId, -amountVal, {
+        description: `Top Up Deposit Vendor - ${vendor.name}`,
+        reference: vendor.name,
+        source: 'vendor_deposit_topup',
+        date: dateResolved,
+        sourceDocId: ledgerDocId
+      });
+
+      await postVendorDepositTopup({
+        sourceDocId: ledgerDocId,
+        vendorName: vendor.name,
+        amount: amountVal,
+        accountId: vendorTopupForm.accountId,
+        accountName: account?.name || '',
+        date: dateResolved,
+        createdByUid: currentUser?.uid,
+        createdByName: currentUser?.fullName || currentUser?.email
+      }).catch(err => {
+        console.error('Gagal posting jurnal top up deposit vendor:', err);
+        alert(`Top Up Deposit Vendor tersimpan & saldo Kas/Bank sudah terpotong, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan (Neraca/Buku Besar) untuk transaksi ini belum akurat sampai dikoreksi, segera lapor ke tim IT/Finance.`);
+      });
+
+      if (feeVal > 0) {
+        try {
+          await setDoc(doc(db, 'expenses_operational', feeExpenseId), {
+            category: ADMIN_FEE_CATEGORY,
+            amount: feeVal,
+            accountId: vendorTopupForm.accountId,
+            accountName: account?.name || '',
+            notes: `Biaya admin transfer DP ke vendor - ${vendor.name}`,
+            expenseDate: vendorTopupForm.date || todayISODate(),
+            relatedVendorTopupId: ledgerDocId,
+            createdAt: dateResolved
+          });
+          await adjustAccountBalance(vendorTopupForm.accountId, -feeVal, {
+            description: `${ADMIN_FEE_CATEGORY} - DP Vendor ${vendor.name}`,
+            reference: vendor.name,
+            source: 'operational_expense',
+            date: dateResolved,
+            sourceDocId: feeExpenseId
+          });
+          await postOperationalExpense({
+            expenseId: feeExpenseId, category: ADMIN_FEE_CATEGORY, amount: feeVal,
+            accountId: vendorTopupForm.accountId, accountName: account?.name || '',
+            date: dateResolved,
+            createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+          }).catch(err => {
+            console.error('Gagal posting jurnal biaya admin (top up vendor):', err);
+            alert(`Biaya Admin Bank tersimpan & saldo Kas/Bank sudah terpotong, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan untuk biaya admin ini belum akurat sampai dikoreksi, segera lapor ke tim IT/Finance.`);
+          });
+        } catch (feeErr) {
+          console.error('Gagal mencatat biaya admin (top up vendor):', feeErr);
+          alert(`Top Up Deposit tersimpan, TAPI Biaya Admin Bank (Rp ${feeVal.toLocaleString('id-ID')}) GAGAL ikut tercatat (${feeErr.message}). Catat manual lewat "+ Biaya Operasional Kantor" kalau ini beneran ada potongannya.`);
+        }
+      }
+
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'create',
+        module: 'Vendor',
+        targetLabel: vendor.name,
+        details: `Top Up Deposit Vendor "${vendor.name}" Rp ${amountVal.toLocaleString('id-ID')} dari ${account?.name || '-'}${feeVal > 0 ? ` + Biaya Admin Bank Rp ${feeVal.toLocaleString('id-ID')}` : ''}`
+      });
+      setShowVendorTopupModal(false);
+      fetchData();
+    } catch (err) {
+      alert("Gagal mencatat Top Up Deposit Vendor: " + err.message);
+    } finally {
+      setSavingVendorTopup(false);
+    }
+  };
+
+  // Hapus 1 baris Top Up Deposit Vendor dari Riwayat — balikin semuanya:
+  // saldo deposit vendor, saldo & mutasi Kas/Bank, jurnal, dan biaya admin.
+  const handleDeleteVendorTopup = async (entry) => {
+    if (blockIfNotFinanceRole()) return;
+    if (entry?.type !== 'vendor_topup') return;
+    const vendor = vendorsList.find(v => v.id === entry.vendorId);
+    const amountVal = Number(entry.amount) || 0;
+    const feeVal = Number(entry.adminFee) || 0;
+    const feeExpenseId = `${entry.id}_fee`;
+    if (vendor && Number(vendor.depositBalance || 0) < amountVal) {
+      alert(`Saldo deposit vendor "${vendor.name}" sekarang cuma Rp ${Number(vendor.depositBalance || 0).toLocaleString('id-ID')}, lebih kecil dari top up ini (Rp ${amountVal.toLocaleString('id-ID')}). Sebagian sudah dipakai bayar vendor, jadi top up ini nggak bisa dihapus. Batalkan dulu pembayaran vendor yang memakai saldo ini.`);
+      return;
+    }
+    if (entry.accountId && await isAccountMutationReconciled(entry.accountId, [entry.id, feeExpenseId])) {
+      alert(RECON_BLOCK_MSG);
+      return;
+    }
+    if (!confirm(`Hapus Top Up Deposit Vendor Rp ${amountVal.toLocaleString('id-ID')}${feeVal > 0 ? ` (+ biaya admin Rp ${feeVal.toLocaleString('id-ID')})` : ''}? Saldo deposit vendor dikurangi dan uang dikembalikan ke saldo akun Kas/Bank.`)) return;
+    try {
+      await updateDoc(doc(db, 'vendors', entry.vendorId), { depositBalance: increment(-amountVal) });
+      await deleteDoc(doc(db, 'vendor_deposit_ledger', entry.id));
+      if (entry.accountId) await removeAccountMutationBySource(entry.accountId, entry.id, amountVal);
+      await deleteJournalEntriesBySource('vendor_deposit_topup', entry.id);
+      if (feeVal > 0) {
+        try { await deleteDoc(doc(db, 'expenses_operational', feeExpenseId)); } catch (e) { console.error(e); }
+        if (entry.accountId) await removeAccountMutationBySource(entry.accountId, feeExpenseId, feeVal);
+        await deleteJournalEntriesBySource('operational_expense', feeExpenseId);
+      }
+      logActivity({
+        userId: currentUser?.uid,
+        userName: currentUser?.fullName || currentUser?.email,
+        userRole: currentUser?.role,
+        action: 'delete',
+        module: 'Vendor',
+        targetLabel: entry.vendorName,
+        details: `Menghapus Top Up Deposit Vendor "${entry.vendorName}" Rp ${amountVal.toLocaleString('id-ID')}${feeVal > 0 ? ` + Biaya Admin Rp ${feeVal.toLocaleString('id-ID')}` : ''}`
+      });
+      setVendorLedgerEntries(prev => prev.filter(x => x.id !== entry.id));
+      setLedgerVendor(prev => prev ? { ...prev, depositBalance: Number(prev.depositBalance || 0) - amountVal } : prev);
+      fetchData();
+    } catch (err) {
+      alert("Gagal menghapus Top Up Deposit Vendor: " + err.message);
     }
   };
 
@@ -3685,6 +3859,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 Rp {vendorsList.reduce((acc, v) => acc + (Number(v.depositBalance) || 0), 0).toLocaleString('id-ID')}
               </p>
             </div>
+            <div className="flex flex-wrap gap-2 justify-end">
             <button
               onClick={() => {
                 setEditingVendorMasterId(null);
@@ -3695,10 +3870,17 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             >
               <Building2 className="w-4 h-4" /> + Tambah Vendor
             </button>
+            <button
+              onClick={() => handleOpenVendorTopup(null)}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
+            >
+              <Wallet className="w-4 h-4" /> + Top Up Deposit Vendor
+            </button>
+            </div>
           </div>
 
           <p className={`text-[10.5px] ${styles.textSub}`}>
-            Saldo Deposit Vendor nampung DP (misal block seat) yang batal (trip cancel) tapi nggak hangus — bisa dipakai lagi buat booking berikutnya ke vendor yang sama, lewat pilihan "Metode Bayar: Saldo Deposit Vendor" di form Bayar Vendor.
+            Saldo Deposit Vendor nampung DP yang belum ditentukan keberangkatannya (lewat tombol "Top Up Deposit Vendor") atau DP yang batal (trip cancel) tapi nggak hangus. Bisa dipakai lagi buat booking berikutnya ke vendor yang sama, lewat pilihan "Metode Bayar: Saldo Deposit Vendor" di form Bayar Vendor.
           </p>
 
           <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
@@ -3737,6 +3919,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                               title="Riwayat Mutasi Saldo Deposit"
                             >
                               <History className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleOpenVendorTopup(v)}
+                              className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                              title="Top Up Deposit (DP ke Vendor)"
+                            >
+                              <Plus className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleOpenVendorDepositAdjust(v)}
@@ -3795,6 +3984,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                         title="Riwayat Mutasi Saldo Deposit"
                       >
                         <History className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleOpenVendorTopup(v)}
+                        className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
+                        title="Top Up Deposit (DP ke Vendor)"
+                      >
+                        <Plus className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleOpenVendorDepositAdjust(v)}
@@ -4489,8 +4685,23 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                         )}
                         <p className="text-[10px] text-slate-400 mt-0.5">{formatDateDDMMYYYY(entry.createdAt)}</p>
                       </div>
-                      <div className={`font-bold whitespace-nowrap ${amt >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                        {amt >= 0 ? '+' : ''}Rp {amt.toLocaleString('id-ID')}
+                      <div className="text-right shrink-0">
+                        <div className={`font-bold whitespace-nowrap ${amt >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                          {amt >= 0 ? '+' : ''}Rp {amt.toLocaleString('id-ID')}
+                        </div>
+                        {entry.type === 'vendor_topup' && Number(entry.adminFee) > 0 && (
+                          <div className={`text-[10px] ${styles.textSub}`}>+ admin Rp {Number(entry.adminFee).toLocaleString('id-ID')}</div>
+                        )}
+                        {entry.type === 'vendor_topup' && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteVendorTopup(entry)}
+                            className="mt-1 p-1 text-rose-500 hover:bg-rose-500/10 rounded"
+                            title="Hapus Top Up ini"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -4544,6 +4755,107 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 </button>
                 <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
                   Simpan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showVendorTopupModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowVendorTopupModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-2 flex items-center gap-2`}>
+              <Wallet className="w-5 h-5 text-emerald-500" /> Top Up Deposit Vendor
+            </h3>
+            <p className={`text-[10.5px] ${styles.textSub} mb-4`}>
+              Catat DP/uang muka yang sudah dibayar ke vendor tapi belum jelas dipakai buat keberangkatan mana. Saldo Kas/Bank berkurang, saldo deposit vendor bertambah, dan jurnalnya otomatis. Nanti dipakai lewat Metode Bayar "Saldo Deposit Vendor" di form Bayar Vendor.
+            </p>
+            <form onSubmit={handleVendorTopupSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div>
+                <label className="block mb-1 font-medium">Vendor</label>
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                  placeholder="-- Pilih Vendor --"
+                  value={vendorTopupForm.vendorId}
+                  onChange={(val) => setVendorTopupForm({ ...vendorTopupForm, vendorId: val })}
+                  options={vendorsList.map(v => ({
+                    value: v.id,
+                    label: v.name,
+                    sublabel: `Saldo deposit: Rp ${Number(v.depositBalance || 0).toLocaleString('id-ID')}`,
+                  }))}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1 font-medium">Nominal DP (Rp)</label>
+                  <input
+                    type="number" required placeholder="50000000"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={vendorTopupForm.amount}
+                    onChange={e => setVendorTopupForm({ ...vendorTopupForm, amount: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Biaya Admin Bank <span className="font-normal text-[10px]">(opsional)</span></label>
+                  <input
+                    type="number" placeholder="6500"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={vendorTopupForm.adminFee}
+                    onChange={e => setVendorTopupForm({ ...vendorTopupForm, adminFee: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1 font-medium">Tanggal Bayar</label>
+                  <DateFieldID
+                    required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={vendorTopupForm.date}
+                    onChange={(val) => setVendorTopupForm({ ...vendorTopupForm, date: val })}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Keluar dari Akun Kas/Bank</label>
+                  <select
+                    required
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={vendorTopupForm.accountId}
+                    onChange={e => setVendorTopupForm({ ...vendorTopupForm, accountId: e.target.value })}
+                  >
+                    <option value="">-- Pilih Akun --</option>
+                    {financialAccounts.map(a => (
+                      <option key={a.id} value={a.id}>{a.name} (Saldo: Rp {Number(a.balance || 0).toLocaleString('id-ID')})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block mb-1 font-medium">Catatan</label>
+                <input
+                  type="text"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={vendorTopupForm.notes}
+                  onChange={e => setVendorTopupForm({ ...vendorTopupForm, notes: e.target.value })}
+                />
+              </div>
+              {Number(vendorTopupForm.amount) > 0 && (
+                <div className={`${styles.innerBg} border rounded-lg p-3 text-[11px] space-y-0.5`}>
+                  <div>Saldo deposit vendor bertambah <strong className="text-emerald-500">Rp {Number(vendorTopupForm.amount).toLocaleString('id-ID')}</strong></div>
+                  <div>Total keluar dari bank <strong className={styles.textTitle}>Rp {(Number(vendorTopupForm.amount) + (Number(vendorTopupForm.adminFee) || 0)).toLocaleString('id-ID')}</strong>{Number(vendorTopupForm.adminFee) > 0 ? ' (termasuk biaya admin)' : ''}</div>
+                </div>
+              )}
+              <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowVendorTopupModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" disabled={savingVendorTopup} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded-lg font-medium">
+                  {savingVendorTopup ? 'Menyimpan...' : 'Simpan Top Up'}
                 </button>
               </div>
             </form>
