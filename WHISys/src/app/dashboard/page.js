@@ -27,7 +27,8 @@ import {
   History,
   KeyRound,
   Eye,
-  EyeOff
+  EyeOff,
+  RefreshCw
 } from 'lucide-react';
 import { auth, db } from '../../lib/firebase';
 import {
@@ -341,30 +342,36 @@ export default function DashboardPage() {
       const bkSnap = await getDocs(collection(db, 'bookings'));
       const bookingsList = bkSnap.docs.map(doc => doc.data());
 
-      const pkgQuery = query(collection(db, 'packages'), orderBy('departureDate', 'asc'), limit(5));
-      const pkgSnap = await getDocs(pkgQuery);
+      // "Program Keberangkatan Mendatang": paket AKTIF yang tanggal berangkatnya
+      // hari ini atau ke depan (paket yang berangkat hari ini tetap tampil, baru
+      // hilang begitu harinya lewat), diurut dari yang paling dekat, ambil 5.
+      // Difilter di sisi browser (jumlah paket kecil) supaya format tanggal yang
+      // nggak seragam atau dokumen tanpa tanggal nggak bikin query gagal.
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const todayStr = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`;
+      const pkgSnap = await getDocs(collection(db, 'packages'));
 
-      const pkgList = pkgSnap.docs.map(docSnap => {
-        const pkgData = docSnap.data();
-        const pkgId = docSnap.id;
+      const upcomingAll = pkgSnap.docs
+        .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
+        .filter(p => p.isActive !== false && String(p.departureDate || '').slice(0, 10) >= todayStr)
+        .sort((a, b) => String(a.departureDate).slice(0, 10).localeCompare(String(b.departureDate).slice(0, 10)));
 
+      const pkgList = upcomingAll.slice(0, 5).map(pkgData => {
+        // Sisa seat: kuota total dikurangi booking AKTIF saja (yang batal atau
+        // di-reschedule sudah dikembalikan kuotanya), sama dengan modul Paket.
         const bookedCount = bookingsList.filter(
-          b => b.packageId === pkgId || b.packageName === pkgData.name
+          b => (b.packageId === pkgData.id || b.packageName === pkgData.name) && (b.status || 'active') === 'active'
         ).length;
-
         const totalQuota = Number(pkgData.quotaTotal) || 0;
-        const realRemaining = Math.max(0, totalQuota - bookedCount);
-
         return {
-          id: pkgId,
           ...pkgData,
-          computedRemaining: realRemaining
+          computedRemaining: Math.max(0, totalQuota - bookedCount)
         };
       });
 
       setRealStats({
         totalJamaah: jamaahSnap.size,
-        totalPackages: pkgSnap.size,
+        totalPackages: upcomingAll.length,
         expiringPassportsCount: expiringCount,
       });
 
@@ -785,7 +792,7 @@ export default function DashboardPage() {
 
               <div className={`${currentTheme.card} p-5 rounded-xl flex items-center justify-between border transition-colors`}>
                 <div>
-                  <p className={`text-xs font-medium ${currentTheme.subText} mb-1`}>Group & Paket Keberangkatan</p>
+                  <p className={`text-xs font-medium ${currentTheme.subText} mb-1`}>Paket Keberangkatan Mendatang</p>
                   <h3 className={`text-2xl font-bold ${currentTheme.accentText}`}>{realStats.totalPackages} Program</h3>
                 </div>
                 <div className={`p-3 rounded-lg bg-emerald-500/10 ${currentTheme.accentText}`}>
@@ -823,15 +830,20 @@ export default function DashboardPage() {
                     </h3>
                     <p className={`text-xs ${currentTheme.subText}`}>Data terhubung langsung dari modul Paket Travel</p>
                   </div>
-                  <button onClick={() => changeMenu('packages')} className={`text-xs ${currentTheme.accentText} hover:underline`}>
-                    + Buat Paket Baru
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => fetchDashboardData()} title="Segarkan data" className={`${currentTheme.subText} hover:opacity-80`}>
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => changeMenu('packages')} className={`text-xs ${currentTheme.accentText} hover:underline`}>
+                      + Buat Paket Baru
+                    </button>
+                  </div>
                 </div>
 
                 <div className="overflow-x-auto">
                   {upcomingPackages.length === 0 ? (
                     <div className={`p-8 text-center ${currentTheme.subText} text-xs border border-dashed ${currentTheme.border} rounded-lg`}>
-                      Belum ada paket travel terdaftar di database.
+                      Belum ada paket aktif yang akan berangkat hari ini atau ke depan.
                     </div>
                   ) : (
                     <table className={`w-full text-left text-sm ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
