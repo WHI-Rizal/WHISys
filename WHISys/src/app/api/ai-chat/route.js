@@ -11,6 +11,8 @@ import { getAdminAuth } from '../../../lib/firebaseAdmin';
 // var `GEMINI_MODEL` tanpa ubah kode. Kalau muncul error "prepayment credits
 // are depleted", itu saldo/billing project Google AI Studio-nya, bukan kode.
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+// Model cadangan kalau model utama lagi penuh/sibuk. Bisa diganti lewat env var GEMINI_FALLBACK_MODEL.
+const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || 'gemini-flash-latest';
 
 // Perbaikan 18 Sep 2026 (temuan audit MEDIUM, 9 Sep & 17 Sep) — endpoint
 // ini sebelumnya nerima `promptText` dan langsung manggil Gemini API tanpa
@@ -83,21 +85,35 @@ export async function POST(req) {
       );
     }
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
-        },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: promptText }] }],
-        }),
-      }
-    );
+    // Panggil Gemini. Kalau model lagi "high demand" (503) atau kena batas
+    // sementara (429), coba lagi sekali di model yang sama, lalu pindah ke
+    // model cadangan. Error lain (key salah, saldo habis, dll) langsung
+    // dikembalikan apa adanya.
+    const callGemini = async (model) => {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+          body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: promptText }] }] }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      return { res, data };
+    };
+    const isBusy = (r) => r.res.status === 503 || r.res.status === 429;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-    const geminiData = await geminiRes.json();
+    let result = await callGemini(GEMINI_MODEL);
+    if (!result.res.ok && isBusy(result)) {
+      await sleep(1500);
+      result = await callGemini(GEMINI_MODEL);
+    }
+    if (!result.res.ok && isBusy(result) && GEMINI_FALLBACK_MODEL && GEMINI_FALLBACK_MODEL !== GEMINI_MODEL) {
+      result = await callGemini(GEMINI_FALLBACK_MODEL);
+    }
+    const geminiRes = result.res;
+    const geminiData = result.data;
 
     if (!geminiRes.ok) {
       // Format error Gemini: { error: { code, message, status } }
