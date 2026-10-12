@@ -2451,6 +2451,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         alert("Pilih paket keberangkatan terkait dulu. Kalau ini biaya kantor yang bukan buat trip tertentu, catat lewat tombol \"Biaya Operasional Kantor\", bukan di sini.");
         return;
       }
+      // Blok pembayaran ke paket yang omzet & HPP-nya sudah "Diakui". Jurnal HPP
+      // cuma diposting sekali saat "Akui Pendapatan", jadi pembayaran susulan
+      // bikin Laporan P&L dan Neraca selisih. Konsisten sama blok hapus
+      // pembayaran/setoran di paket yang sudah diakui.
+      if (selectedPkg.revenueRecognized) {
+        alert(`Pembayaran vendor tidak bisa dicatat ke paket "${selectedPkg.name}" karena omzet & HPP-nya sudah "Diakui" dan sudah masuk Laporan P&L.\n\nBatalkan dulu pengakuan pendapatan paket ini lewat tombol "Batalkan Pengakuan" di Laporan Keuangan, catat pembayarannya, lalu akui pendapatannya lagi.`);
+        return;
+      }
       const selectedVendor = vendorsList.find(v => v.id === vendorForm.vendorId);
       if (!selectedVendor) {
         alert("Pilih vendornya dulu dari Data Master Vendor. Kalau belum ada, tambahkan dulu lewat tab \"Data Vendor\".");
