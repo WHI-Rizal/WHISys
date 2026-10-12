@@ -312,7 +312,7 @@ const REQUIRED_DOCUMENTS = [
   { key: 'ticket', label: 'Tiket Pesawat (Penerbitan Issued)' }
 ];
 
-export default function BookingsModule({ targetBookingId, theme = 'dark', userRole = '', currentUser = null }) {
+export default function BookingsModule({ targetBookingId, theme = 'dark', userRole = '', currentUser = null, onOpenJamaah = null }) {
   // Sinkron sama Firestore Rules: cuma Finance & Super Admin yang boleh edit/hapus
   // riwayat setoran yang udah tercatat. Semua staf tetap boleh lihat & catat DP baru.
   const roleLower = (userRole || '').toLowerCase();
@@ -9120,7 +9120,7 @@ Terimakasih🙏`;
               <>
                 <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                   <p className={`text-[11px] ${styles.textSub}`}>
-                    {roomingBookingsForPackage.length} jamaah aktif. Lengkapi data paspor di tabel, lalu export ke Excel.
+                    {roomingBookingsForPackage.length} jamaah aktif. Klik nama jamaah buat edit lengkap di Data Master Jamaah, atau isi cepat langsung di tabel, lalu export ke Excel.
                   </p>
                   <button
                     onClick={() => handleExportManifest(roomingBookingsForPackage, roomingPackage)}
@@ -9177,7 +9177,16 @@ Terimakasih🙏`;
                             <tr key={b.id}>
                               <td className="p-2">{i + 1}</td>
                               <td className={`p-2 font-mono text-[10px] ${styles.textSub}`}>{b.groupBookingCode || b.bookingCode || '-'}</td>
-                              <td className={`p-2 font-medium whitespace-nowrap ${styles.textTitle}`}>{b.jamaahName}</td>
+                              <td className={`p-2 font-medium whitespace-nowrap ${styles.textTitle}`}>
+                                {onOpenJamaah && j.id ? (
+                                  <button
+                                    type="button"
+                                    title="Buka & edit di Data Master Jamaah"
+                                    onClick={() => { setShowRoomingModal(false); onOpenJamaah(j.id); }}
+                                    className="text-emerald-500 hover:underline text-left"
+                                  >{b.jamaahName}</button>
+                                ) : b.jamaahName}
+                              </td>
                               <td className="p-2">{txt('passportNumber', 'w-28')}</td>
                               <td className="p-2">{j.gender === 'P' ? 'F' : j.gender === 'L' ? 'M' : '-'}</td>
                               <td className="p-2">{txt('birthPlace', 'w-28')}</td>
