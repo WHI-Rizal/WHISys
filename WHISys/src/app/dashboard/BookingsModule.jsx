@@ -4080,11 +4080,22 @@ Terimakasih🙏`;
     }
   };
 
+  // Ubah tipe kamar dari Rooming List. Cuma ngubah field roomType, harga booking TIDAK dihitung ulang.
+  const handleSaveRoomType = async (bookingId, roomType) => {
+    try {
+      await updateDoc(doc(db, 'bookings', bookingId), { roomType });
+      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, roomType } : b));
+    } catch (err) {
+      alert("Gagal menyimpan tipe kamar: " + err.message);
+    }
+  };
+
   const handleAutoAssignRooms = async (roomingBookings) => {
     try {
       const byRoomType = {};
       roomingBookings.forEach(b => {
-        const rt = b.roomType || 'Quad';
+        const rt = b.roomType;
+        if (!rt || !ROOM_CAPACITY[rt]) return; // tipe kamar belum diatur, lewati
         if (!byRoomType[rt]) byRoomType[rt] = [];
         byRoomType[rt].push(b);
       });
@@ -4099,6 +4110,7 @@ Terimakasih🙏`;
         });
       });
 
+      if (updates.length === 0) { alert("Belum ada jamaah dengan tipe kamar. Atur dulu tipe kamarnya."); return; }
       await Promise.all(updates);
       fetchData();
     } catch (err) {
@@ -4119,7 +4131,7 @@ Terimakasih🙏`;
         <td style="padding:8px 12px;font-weight:700;border-bottom:1px solid #f1f5f9;">${label}</td>
         <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;">${members[0]?.roomType || '-'}</td>
         <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;">
-          ${members.map((m, i) => `${i + 1}. ${m.jamaahName} (${m.passportNumber || '-'})`).join('<br/>')}
+          ${members.map((m, i) => `${i + 1}. ${m.jamaahName} (${m.passportNumber || '-'}) <span style="color:#64748b;font-size:10px;">[${m.groupBookingCode || m.bookingCode || '-'}]</span>`).join('<br/>')}
         </td>
         <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;text-align:center;">${members.length}</td>
       </tr>
@@ -5568,9 +5580,15 @@ Terimakasih🙏`;
   // nentuin kapan tombol Reschedule/Batalkan Grup muncul & buat kuota math-nya.
   const activeGroupItems = activeGroupBookings.filter(b => (b.status || 'active') === 'active');
 
+  // Dikelompokkan per rombongan (kode booking), lalu urut pax di dalam rombongan
   const roomingBookingsForPackage = bookings.filter(
     b => b.packageId === roomingPackageId && (b.status || 'active') === 'active'
-  );
+  ).sort((a, b) => {
+    const ca = String(a.groupBookingCode || a.bookingCode || '');
+    const cb = String(b.groupBookingCode || b.bookingCode || '');
+    if (ca !== cb) return ca.localeCompare(cb);
+    return (Number(a.groupPaxIndex) || 0) - (Number(b.groupPaxIndex) || 0);
+  });
   const roomingPackage = packagesList.find(p => p.id === roomingPackageId);
 
   const bulkFeedbackBookings = bookings.filter(
@@ -8818,13 +8836,22 @@ Terimakasih🙏`;
                 <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                   <div className="text-[11px] flex flex-wrap gap-2">
                     {Object.entries(ROOM_CAPACITY).map(([rt, cap]) => {
-                      const count = roomingBookingsForPackage.filter(b => (b.roomType || 'Quad') === rt).length;
+                      const count = roomingBookingsForPackage.filter(b => b.roomType === rt).length;
+                      if (count === 0) return null;
                       return (
                         <span key={rt} className={`px-2.5 py-1 rounded-full ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}>
                           {rt}: {count} orang ({Math.ceil(count / cap)} kamar)
                         </span>
                       );
                     })}
+                    {(() => {
+                      const unset = roomingBookingsForPackage.filter(b => !ROOM_CAPACITY[b.roomType]).length;
+                      return unset > 0 ? (
+                        <span className="px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                          Belum diatur: {unset} orang
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
                   <div className="flex gap-2">
                     <button
@@ -8846,6 +8873,7 @@ Terimakasih🙏`;
                   <table className="w-full text-left text-xs">
                     <thead className={`${styles.tableHeaderBg} uppercase`}>
                       <tr>
+                        <th className="p-3">Kode Booking</th>
                         <th className="p-3">Jamaah</th>
                         <th className="p-3">Tipe Kamar</th>
                         <th className="p-3">No. Kamar</th>
@@ -8853,12 +8881,22 @@ Terimakasih🙏`;
                     </thead>
                     <tbody className={`divide-y ${styles.tableRowBorder}`}>
                       {roomingBookingsForPackage.length === 0 ? (
-                        <tr><td colSpan="3" className={`p-6 text-center ${styles.textSub}`}>Belum ada jamaah aktif di paket ini.</td></tr>
+                        <tr><td colSpan="4" className={`p-6 text-center ${styles.textSub}`}>Belum ada jamaah aktif di paket ini.</td></tr>
                       ) : (
                         roomingBookingsForPackage.map(b => (
                           <tr key={b.id}>
+                            <td className={`p-3 font-mono text-[11px] ${styles.textSub}`}>{b.groupBookingCode || b.bookingCode || '-'}</td>
                             <td className={`p-3 font-medium ${styles.textTitle}`}>{b.jamaahName}</td>
-                            <td className="p-3">{b.roomType}</td>
+                            <td className="p-3">
+                              <select
+                                value={ROOM_CAPACITY[b.roomType] ? b.roomType : ''}
+                                onChange={(e) => handleSaveRoomType(b.id, e.target.value)}
+                                className={`${styles.inputBg} rounded-lg p-1.5 text-xs`}
+                              >
+                                <option value="">Belum diatur</option>
+                                {Object.keys(ROOM_CAPACITY).map(rt => <option key={rt} value={rt}>{rt}</option>)}
+                              </select>
+                            </td>
                             <td className="p-3">
                               <input
                                 type="text"
@@ -8881,8 +8919,17 @@ Terimakasih🙏`;
                     roomingBookingsForPackage.map(b => (
                       <div key={b.id} className={`${styles.innerBg} border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg p-3 text-xs`}>
                         <p className={`font-bold ${styles.textTitle}`}>{b.jamaahName}</p>
-                        <div className={`mt-1 space-y-0.5 ${styles.textSub}`}>
-                          <p>Tipe Kamar: {b.roomType}</p>
+                        <p className={`font-mono text-[11px] ${styles.textSub}`}>Kode: {b.groupBookingCode || b.bookingCode || '-'}</p>
+                        <div className="mt-2">
+                          <label className="block mb-1 font-medium">Tipe Kamar</label>
+                          <select
+                                value={ROOM_CAPACITY[b.roomType] ? b.roomType : ''}
+                                onChange={(e) => handleSaveRoomType(b.id, e.target.value)}
+                                className={`${styles.inputBg} rounded-lg p-1.5 text-xs`}
+                              >
+                                <option value="">Belum diatur</option>
+                                {Object.keys(ROOM_CAPACITY).map(rt => <option key={rt} value={rt}>{rt}</option>)}
+                              </select>
                         </div>
                         <div className="mt-2">
                           <label className="block mb-1 font-medium">No. Kamar</label>
