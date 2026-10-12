@@ -7,10 +7,10 @@ import { getAdminAuth } from '../../../lib/firebaseAdmin';
 // nambah dependency npm (belajar dari bug `jose`/`jwks-rsa`).
 //
 // SETUP: env var `GEMINI_API_KEY` di Vercel (dari https://aistudio.google.com
-// -> Get API key). Model default `gemini-2.5-flash`, bisa diganti lewat env
+// -> Get API key). Model default `gemini-3.8-flash`, bisa diganti lewat env
 // var `GEMINI_MODEL` tanpa ubah kode. Kalau muncul error "prepayment credits
 // are depleted", itu saldo/billing project Google AI Studio-nya, bukan kode.
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 
 // Perbaikan 18 Sep 2026 (temuan audit MEDIUM, 9 Sep & 17 Sep) — endpoint
 // ini sebelumnya nerima `promptText` dan langsung manggil Gemini API tanpa
