@@ -322,6 +322,15 @@ export default function DashboardPage() {
       }
     };
     handleHashChange();
+    // Dibuka dari link "buka di tab baru" (mis. klik nama di Manifest): /dashboard?jamaah=ID#jamaah
+    try {
+      const jid = new URLSearchParams(window.location.search).get('jamaah');
+      if (jid) {
+        setSelectedJamaahForModal(jid);
+        setActiveMenu('jamaah');
+        window.history.replaceState(null, '', '/dashboard#jamaah');
+      }
+    } catch (e) { /* abaikan */ }
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
