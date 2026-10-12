@@ -708,6 +708,9 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [roomTypeDocs, setRoomTypeDocs] = useState([]);
   const [showRoomTypeManager, setShowRoomTypeManager] = useState(false);
   const [roomingTab, setRoomingTab] = useState('rooming'); // 'rooming' | 'manifest'
+  const [showTlPicker, setShowTlPicker] = useState(false);
+  const [tlPickId, setTlPickId] = useState('');
+  const [savingTl, setSavingTl] = useState(false);
   const [newRoomType, setNewRoomType] = useState({ name: '', capacity: '' });
   const [savingRoomType, setSavingRoomType] = useState(false);
   const ROOM_CAPACITY = roomTypeDocs.length > 0
@@ -4160,6 +4163,51 @@ Terimakasih🙏`;
     }
   };
 
+  // ===== TOUR LEADER (disimpan di dokumen paket: packages.tourLeaders = [{ jamaahId, name, roomLabel }]) =====
+  const saveTourLeaders = async (pkgId, list) => {
+    await updateDoc(doc(db, 'packages', pkgId), { tourLeaders: list });
+    setPackagesList(prev => prev.map(p => p.id === pkgId ? { ...p, tourLeaders: list } : p));
+  };
+
+  const handleAddTourLeader = async () => {
+    const pkg = packagesList.find(p => p.id === roomingPackageId);
+    const j = jamaahList.find(x => x.id === tlPickId);
+    if (!pkg || !j) { alert('Pilih orangnya dulu.'); return; }
+    const current = pkg.tourLeaders || [];
+    if (current.some(t => t.jamaahId === j.id)) { alert('Orang ini sudah jadi Tour Leader di paket ini.'); return; }
+    setSavingTl(true);
+    try {
+      await saveTourLeaders(pkg.id, [...current, { jamaahId: j.id, name: j.fullName || '', roomLabel: '' }]);
+      setTlPickId('');
+      setShowTlPicker(false);
+    } catch (err) {
+      alert('Gagal menambah Tour Leader: ' + err.message);
+    } finally {
+      setSavingTl(false);
+    }
+  };
+
+  const handleRemoveTourLeader = async (jamaahId) => {
+    const pkg = packagesList.find(p => p.id === roomingPackageId);
+    if (!pkg) return;
+    if (!confirm('Hapus Tour Leader ini dari manifest?')) return;
+    try {
+      await saveTourLeaders(pkg.id, (pkg.tourLeaders || []).filter(t => t.jamaahId !== jamaahId));
+    } catch (err) {
+      alert('Gagal menghapus Tour Leader: ' + err.message);
+    }
+  };
+
+  const handleSaveTlRoomLabel = async (jamaahId, roomLabel) => {
+    const pkg = packagesList.find(p => p.id === roomingPackageId);
+    if (!pkg) return;
+    try {
+      await saveTourLeaders(pkg.id, (pkg.tourLeaders || []).map(t => t.jamaahId === jamaahId ? { ...t, roomLabel } : t));
+    } catch (err) {
+      alert('Gagal menyimpan nomor kamar TL: ' + err.message);
+    }
+  };
+
   // ===== MANIFEST =====
   const calcAge = (birthDate) => {
     if (!birthDate) return '';
@@ -4188,7 +4236,7 @@ Terimakasih🙏`;
         const j = jamaahList.find(x => x.id === b.jamaahId || x.fullName === b.jamaahName) || {};
         return [
           i + 1,
-          String(b.jamaahName || j.fullName || '').trim().toUpperCase(),
+          String(b.jamaahName || j.fullName || '').trim().toUpperCase() + (b.isTL ? ' (TOUR LEADER)' : ''),
           j.passportNumber || (b.passportNumber && b.passportNumber !== '-' ? b.passportNumber : ''),
           j.gender === 'P' ? 'F' : j.gender === 'L' ? 'M' : '',
           String(j.birthPlace || '').toUpperCase(),
@@ -5740,6 +5788,14 @@ Terimakasih🙏`;
     return (Number(a.groupPaxIndex) || 0) - (Number(b.groupPaxIndex) || 0);
   });
   const roomingPackage = packagesList.find(p => p.id === roomingPackageId);
+  // Baris manifest: Tour Leader selalu paling atas, lalu jamaah (urut rombongan).
+  const manifestRows = [
+    ...((roomingPackage?.tourLeaders || []).map(t => {
+      const jm = jamaahList.find(x => x.id === t.jamaahId);
+      return { id: `tl_${t.jamaahId}`, isTL: true, jamaahId: t.jamaahId, jamaahName: jm?.fullName || t.name, roomType: '', roomLabel: t.roomLabel || '' };
+    })),
+    ...roomingBookingsForPackage,
+  ];
 
   const bulkFeedbackBookings = bookings.filter(
     b => b.packageId === bulkFeedbackPackageId && (b.status || 'active') === 'active'
@@ -9120,10 +9176,18 @@ Terimakasih🙏`;
               <>
                 <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                   <p className={`text-[11px] ${styles.textSub}`}>
-                    {roomingBookingsForPackage.length} jamaah aktif. Klik nama jamaah buat edit lengkap di Data Master Jamaah, atau isi cepat langsung di tabel, lalu export ke Excel.
+                    {roomingBookingsForPackage.length} jamaah aktif{(roomingPackage?.tourLeaders || []).length > 0 ? ` + ${(roomingPackage.tourLeaders).length} Tour Leader` : ''}. Klik nama jamaah buat edit lengkap di Data Master Jamaah, atau isi cepat langsung di tabel, lalu export ke Excel.
                   </p>
+                  {canManageRoomTypes && (
+                    <button
+                      onClick={() => setShowTlPicker(true)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} rounded-lg text-[11px] font-medium`}
+                    >
+                      <UserPlus className="w-3.5 h-3.5" /> Tambah Tour Leader
+                    </button>
+                  )}
                   <button
-                    onClick={() => handleExportManifest(roomingBookingsForPackage, roomingPackage)}
+                    onClick={() => handleExportManifest(manifestRows, roomingPackage)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium"
                   >
                     <Printer className="w-3.5 h-3.5" /> Export Excel
@@ -9149,10 +9213,10 @@ Terimakasih🙏`;
                       </tr>
                     </thead>
                     <tbody className={`divide-y ${styles.tableRowBorder}`}>
-                      {roomingBookingsForPackage.length === 0 ? (
+                      {manifestRows.length === 0 ? (
                         <tr><td colSpan="13" className={`p-6 text-center ${styles.textSub}`}>Belum ada jamaah aktif di paket ini.</td></tr>
                       ) : (
-                        roomingBookingsForPackage.map((b, i) => {
+                        manifestRows.map((b, i) => {
                           const j = jamaahList.find(x => x.id === b.jamaahId) || jamaahList.find(x => x.fullName === b.jamaahName) || {};
                           const cell = `w-full ${styles.inputBg} rounded p-1 text-[11px]`;
                           const txt = (field, w = '') => (
@@ -9176,7 +9240,16 @@ Terimakasih🙏`;
                           return (
                             <tr key={b.id}>
                               <td className="p-2">{i + 1}</td>
-                              <td className={`p-2 font-mono text-[10px] ${styles.textSub}`}>{b.groupBookingCode || b.bookingCode || '-'}</td>
+                              <td className={`p-2 font-mono text-[10px] ${styles.textSub}`}>
+                                {b.isTL ? (
+                                  <span className="inline-flex items-center gap-1">
+                                    <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20 font-sans font-semibold">TL</span>
+                                    {canManageRoomTypes && (
+                                      <button type="button" title="Hapus Tour Leader" onClick={() => handleRemoveTourLeader(b.jamaahId)} className="text-rose-500 hover:bg-rose-500/10 rounded p-0.5"><Trash2 className="w-3 h-3" /></button>
+                                    )}
+                                  </span>
+                                ) : (b.groupBookingCode || b.bookingCode || '-')}
+                              </td>
                               <td className={`p-2 font-medium whitespace-nowrap ${styles.textTitle}`}>
                                 {j.id ? (
                                   <a
@@ -9196,8 +9269,18 @@ Terimakasih🙏`;
                               <td className="p-2">{dt('passportIssueDate')}</td>
                               <td className="p-2">{dt('passportExpiry')}</td>
                               <td className="p-2">{txt('passportIssuingOffice', 'w-28')}</td>
-                              <td className="p-2 uppercase">{ROOM_CAPACITY[b.roomType] ? b.roomType : '-'}</td>
-                              <td className="p-2">{b.roomLabel || '-'}</td>
+                              <td className="p-2 uppercase">{b.isTL ? 'TL' : (ROOM_CAPACITY[b.roomType] ? b.roomType : '-')}</td>
+                              <td className="p-2">
+                                {b.isTL && canManageRoomTypes ? (
+                                  <input
+                                    type="text"
+                                    defaultValue={b.roomLabel || ''}
+                                    placeholder="-"
+                                    onBlur={(e) => { if (e.target.value !== (b.roomLabel || '')) handleSaveTlRoomLabel(b.jamaahId, e.target.value.trim()); }}
+                                    className={`w-16 ${styles.inputBg} rounded p-1 text-[11px]`}
+                                  />
+                                ) : (b.roomLabel || '-')}
+                              </td>
                             </tr>
                           );
                         })
@@ -9207,6 +9290,32 @@ Terimakasih🙏`;
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL TAMBAH TOUR LEADER */}
+      {showTlPicker && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+            <button onClick={() => setShowTlPicker(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
+            <h3 className="text-lg font-bold mb-1">Tambah Tour Leader</h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>Pilih dari Data Master Jamaah. Kalau belum ada, daftarkan dulu di menu Data Master Jamaah (data paspor ikut sinkron ke manifest).</p>
+            <label className="block mb-1 text-xs font-medium">Nama</label>
+            <SearchableSelect
+              isDark={isDark}
+              inputClassName={`${styles.inputBg} rounded-lg p-2.5 text-xs`}
+              placeholder="-- Cari nama / kode --"
+              value={tlPickId}
+              onChange={(val) => setTlPickId(val)}
+              options={jamaahList
+                .filter(j => !(roomingPackage?.tourLeaders || []).some(t => t.jamaahId === j.id))
+                .map(j => ({ value: j.id, label: j.fullName || '-', sublabel: j.customerCode || '' }))}
+            />
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setShowTlPicker(false)} className={`px-4 py-2 rounded-lg text-xs ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}>Batal</button>
+              <button onClick={handleAddTourLeader} disabled={savingTl || !tlPickId} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium">{savingTl ? 'Menyimpan...' : 'Tambahkan'}</button>
+            </div>
           </div>
         </div>
       )}
