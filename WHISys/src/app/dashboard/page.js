@@ -97,6 +97,7 @@ export default function DashboardPage() {
 
   // State untuk navigasi antar modul
   const [selectedBookingForModal, setSelectedBookingForModal] = useState(null);
+  const [selectedJamaahForModal, setSelectedJamaahForModal] = useState(null);
 
   // Sidebar bisa di-collapse jadi rail ikon doang, biar area konten utama
   // (tabel-tabel yang lebar kayak Booking & Manifest) dapet ruang lebih luas.
@@ -908,11 +909,11 @@ export default function DashboardPage() {
         {activeMenu === 'packages' && <PackagesModule theme={theme} userRole={userProfile?.role} currentUser={userProfile} />}
 
         {/* MODUL MASTER DATA JAMAAH */}
-        {activeMenu === 'jamaah' && <JamaahModule theme={theme} userRole={userProfile?.role} currentUser={userProfile} />}
+        {activeMenu === 'jamaah' && <JamaahModule theme={theme} userRole={userProfile?.role} currentUser={userProfile} targetJamaahId={selectedJamaahForModal} onTargetHandled={() => setSelectedJamaahForModal(null)} />}
 
         {/* MODUL BOOKING & MANIFEST */}
         {activeMenu === 'bookings' && (
-          <BookingsModule targetBookingId={selectedBookingForModal} theme={theme} userRole={userProfile?.role} currentUser={userProfile} />
+          <BookingsModule targetBookingId={selectedBookingForModal} theme={theme} userRole={userProfile?.role} currentUser={userProfile} onOpenJamaah={(id) => { setSelectedJamaahForModal(id); changeMenu('jamaah'); }} />
         )}
 
         {/* MODUL KEUANGAN & PELUNASAN — dibatasi Finance & Super Admin, sinkron sama Firestore Rules */}
