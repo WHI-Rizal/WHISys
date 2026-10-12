@@ -707,6 +707,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   // Kategori tipe kamar (bisa dikelola di Rooming List). Fallback ke default kalau belum ada data.
   const [roomTypeDocs, setRoomTypeDocs] = useState([]);
   const [showRoomTypeManager, setShowRoomTypeManager] = useState(false);
+  const [roomingTab, setRoomingTab] = useState('rooming'); // 'rooming' | 'manifest'
   const [newRoomType, setNewRoomType] = useState({ name: '', capacity: '' });
   const [savingRoomType, setSavingRoomType] = useState(false);
   const ROOM_CAPACITY = roomTypeDocs.length > 0
@@ -4156,6 +4157,74 @@ Terimakasih🙏`;
       setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, roomLabel } : b));
     } catch (err) {
       alert("Gagal menyimpan nomor kamar: " + err.message);
+    }
+  };
+
+  // ===== MANIFEST =====
+  const calcAge = (birthDate) => {
+    if (!birthDate) return '';
+    const d = new Date(birthDate);
+    if (isNaN(d)) return '';
+    return new Date().getFullYear() - d.getFullYear(); // sama kayak contoh manifest: YEAR(TODAY())-YEAR(lahir)
+  };
+
+  const handleSaveJamaahField = async (jamaahId, field, value) => {
+    if (!jamaahId) { alert('Data jamaah tidak ditemukan untuk baris ini.'); return; }
+    try {
+      await updateDoc(doc(db, 'jamaah', jamaahId), { [field]: value });
+      setJamaahList(prev => prev.map(j => j.id === jamaahId ? { ...j, [field]: value } : j));
+    } catch (err) {
+      alert('Gagal menyimpan data jamaah: ' + err.message);
+    }
+  };
+
+  const handleExportManifest = async (roomingBookings, pkg) => {
+    try {
+      const XLSX = await import('xlsx');
+      const toDate = (v) => { if (!v) return ''; const d = new Date(v); return isNaN(d) ? '' : d; };
+      const title = `${pkg?.name || ''} ${formatDateDDMMYYYY(pkg?.departureDate)}`.toUpperCase().trim();
+      const header = ['No', 'Name', 'Paspor No.', 'F/M', 'Place of Birth', 'Date of Birth', 'AGE', 'Date of Issue', 'Date of Expiry', 'Issuing Office', 'Room', 'NUMBER'];
+      const rows = roomingBookings.map((b, i) => {
+        const j = jamaahList.find(x => x.id === b.jamaahId || x.fullName === b.jamaahName) || {};
+        return [
+          i + 1,
+          String(b.jamaahName || j.fullName || '').trim().toUpperCase(),
+          j.passportNumber || (b.passportNumber && b.passportNumber !== '-' ? b.passportNumber : ''),
+          j.gender === 'P' ? 'F' : j.gender === 'L' ? 'M' : '',
+          String(j.birthPlace || '').toUpperCase(),
+          toDate(j.birthDate),
+          calcAge(j.birthDate),
+          toDate(j.passportIssueDate),
+          toDate(j.passportExpiry),
+          String(j.passportIssuingOffice || '').toUpperCase(),
+          ROOM_CAPACITY[b.roomType] ? String(b.roomType).toUpperCase() : '',
+          b.roomLabel || ''
+        ];
+      });
+      const countBy = (arr) => arr.reduce((m, k) => { if (k) m[k] = (m[k] || 0) + 1; return m; }, {});
+      const gCount = countBy(rows.map(r => r[3]));
+      const rCount = countBy(rows.map(r => r[10]));
+      const aoa = [[title], header, ...rows, [], ['', '', 'F', gCount.F || 0, '', 'ROOM', ''], ['', '', 'M', gCount.M || 0]];
+      Object.entries(rCount).forEach(([k, v], idx) => {
+        const rowIdx = rows.length + 3 + idx;
+        while (aoa.length <= rowIdx) aoa.push([]);
+        aoa[rowIdx][5] = k; aoa[rowIdx][6] = v;
+      });
+      aoa.push([]);
+      aoa.push(['', '', 'Grand Total', rows.length, '', 'Grand Total', Object.values(rCount).reduce((a, b) => a + b, 0)]);
+      const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true });
+      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 11 } }];
+      ws['!cols'] = [6, 30, 14, 6, 18, 14, 7, 14, 14, 16, 12, 10].map(w => ({ wch: w }));
+      Object.keys(ws).forEach(addr => {
+        if (addr[0] === '!') return;
+        if (ws[addr].t === 'd') ws[addr].z = 'dd-mmm-yyyy';
+      });
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'MANIFEST');
+      const safe = (pkg?.name || 'manifest').replace(/[^A-Za-z0-9]+/g, '_');
+      XLSX.writeFile(wb, `Manifest_${safe}_${pkg?.code || ''}.xlsx`);
+    } catch (err) {
+      alert('Gagal export manifest: ' + err.message);
     }
   };
 
@@ -8886,15 +8955,25 @@ Terimakasih🙏`;
       {/* MODAL ROOMING LIST */}
       {showRoomingModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-3xl p-6 relative max-h-[90vh] overflow-y-auto`}>
+          <div className={`${styles.cardBg} border rounded-2xl w-full ${roomingTab === 'manifest' ? 'max-w-7xl' : 'max-w-3xl'} p-6 relative max-h-[90vh] overflow-y-auto`}>
             <button onClick={() => setShowRoomingModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
 
             <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
-              <DoorOpen className="w-5 h-5 text-emerald-500" /> Rooming List
+              <DoorOpen className="w-5 h-5 text-emerald-500" /> Rooming List & Manifest
             </h3>
-            <p className={`text-xs ${styles.textSub} mb-4`}>Kelompokkan jamaah ke dalam kamar per program keberangkatan.</p>
+            <p className={`text-xs ${styles.textSub} mb-4`}>Kelompokkan jamaah ke dalam kamar dan siapkan manifest per program keberangkatan.</p>
+
+            <div className="flex gap-1 mb-4">
+              {[['rooming', 'Rooming List'], ['manifest', 'Manifest']].map(([k, label]) => (
+                <button
+                  key={k}
+                  onClick={() => setRoomingTab(k)}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-medium ${roomingTab === k ? 'bg-emerald-600 text-white' : (isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200')}`}
+                >{label}</button>
+              ))}
+            </div>
 
             <div className="mb-4">
               <label className="block mb-1 text-xs font-medium">Pilih Program Keberangkatan</label>
@@ -8912,7 +8991,7 @@ Terimakasih🙏`;
               />
             </div>
 
-            {roomingPackageId && (
+            {roomingPackageId && roomingTab === 'rooming' && (
               <>
                 <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                   <div className="text-[11px] flex flex-wrap gap-2">
@@ -9033,6 +9112,88 @@ Terimakasih🙏`;
                       </div>
                     ))
                   )}
+                </div>
+              </>
+            )}
+
+            {roomingPackageId && roomingTab === 'manifest' && (
+              <>
+                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                  <p className={`text-[11px] ${styles.textSub}`}>
+                    {roomingBookingsForPackage.length} jamaah aktif. Lengkapi data paspor di tabel, lalu export ke Excel.
+                  </p>
+                  <button
+                    onClick={() => handleExportManifest(roomingBookingsForPackage, roomingPackage)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium"
+                  >
+                    <Printer className="w-3.5 h-3.5" /> Export Excel
+                  </button>
+                </div>
+                <div className={`border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg overflow-x-auto`}>
+                  <table className="w-full text-left text-xs min-w-[1100px]">
+                    <thead className={`${styles.tableHeaderBg} uppercase`}>
+                      <tr>
+                        <th className="p-2">No</th>
+                        <th className="p-2">Kode</th>
+                        <th className="p-2">Name</th>
+                        <th className="p-2">Paspor No.</th>
+                        <th className="p-2">F/M</th>
+                        <th className="p-2">Place of Birth</th>
+                        <th className="p-2">Date of Birth</th>
+                        <th className="p-2">Age</th>
+                        <th className="p-2">Date of Issue</th>
+                        <th className="p-2">Date of Expiry</th>
+                        <th className="p-2">Issuing Office</th>
+                        <th className="p-2">Room</th>
+                        <th className="p-2">Number</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${styles.tableRowBorder}`}>
+                      {roomingBookingsForPackage.length === 0 ? (
+                        <tr><td colSpan="13" className={`p-6 text-center ${styles.textSub}`}>Belum ada jamaah aktif di paket ini.</td></tr>
+                      ) : (
+                        roomingBookingsForPackage.map((b, i) => {
+                          const j = jamaahList.find(x => x.id === b.jamaahId) || jamaahList.find(x => x.fullName === b.jamaahName) || {};
+                          const cell = `w-full ${styles.inputBg} rounded p-1 text-[11px]`;
+                          const txt = (field, w = '') => (
+                            <input
+                              type="text"
+                              key={`${j.id}-${field}-${j[field] || ''}`}
+                              defaultValue={j[field] || ''}
+                              onBlur={(e) => { if (e.target.value !== (j[field] || '')) handleSaveJamaahField(j.id, field, e.target.value.trim()); }}
+                              className={`${cell} ${w}`}
+                            />
+                          );
+                          const dt = (field) => (
+                            <input
+                              type="date"
+                              key={`${j.id}-${field}-${j[field] || ''}`}
+                              defaultValue={j[field] || ''}
+                              onBlur={(e) => { if (e.target.value !== (j[field] || '')) handleSaveJamaahField(j.id, field, e.target.value); }}
+                              className={cell}
+                            />
+                          );
+                          return (
+                            <tr key={b.id}>
+                              <td className="p-2">{i + 1}</td>
+                              <td className={`p-2 font-mono text-[10px] ${styles.textSub}`}>{b.groupBookingCode || b.bookingCode || '-'}</td>
+                              <td className={`p-2 font-medium whitespace-nowrap ${styles.textTitle}`}>{b.jamaahName}</td>
+                              <td className="p-2">{txt('passportNumber', 'w-28')}</td>
+                              <td className="p-2">{j.gender === 'P' ? 'F' : j.gender === 'L' ? 'M' : '-'}</td>
+                              <td className="p-2">{txt('birthPlace', 'w-28')}</td>
+                              <td className="p-2">{dt('birthDate')}</td>
+                              <td className="p-2">{calcAge(j.birthDate)}</td>
+                              <td className="p-2">{dt('passportIssueDate')}</td>
+                              <td className="p-2">{dt('passportExpiry')}</td>
+                              <td className="p-2">{txt('passportIssuingOffice', 'w-28')}</td>
+                              <td className="p-2 uppercase">{ROOM_CAPACITY[b.roomType] ? b.roomType : '-'}</td>
+                              <td className="p-2">{b.roomLabel || '-'}</td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </>
             )}
