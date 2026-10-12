@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, query, where, increment, runTransaction, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, setDoc, query, where, increment, runTransaction, writeBatch } from 'firebase/firestore';
 import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus, Eye, Link2, Upload, Loader2 } from 'lucide-react';
 import { validateUploadFile, uploadDocumentFile, ALLOWED_UPLOAD_TYPES } from '@/lib/documentUpload';
 import { logActivity } from '../../lib/activityLog';
@@ -259,7 +259,7 @@ const mergeExtraLists = (items, key) => {
 };
 
 // Kapasitas orang per tipe kamar (dipakai untuk Rooming List)
-const ROOM_CAPACITY = { Quad: 4, Triple: 3, Double: 2 };
+const DEFAULT_ROOM_CAPACITY = { Quad: 4, Triple: 3, Double: 2 };
 
 // Baca Tanggal Lahir (& jenis kelamin) dari 16 digit NIK KTP — dipakai di
 // SEMUA form "tambah jamaah cepat" (Pemesan Baru / Peserta Baru) di modul
@@ -704,6 +704,85 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   // State Modal Rooming List
   const [showRoomingModal, setShowRoomingModal] = useState(false);
   const [roomingPackageId, setRoomingPackageId] = useState('');
+  // Kategori tipe kamar (bisa dikelola di Rooming List). Fallback ke default kalau belum ada data.
+  const [roomTypeDocs, setRoomTypeDocs] = useState([]);
+  const [showRoomTypeManager, setShowRoomTypeManager] = useState(false);
+  const [newRoomType, setNewRoomType] = useState({ name: '', capacity: '' });
+  const [savingRoomType, setSavingRoomType] = useState(false);
+  const ROOM_CAPACITY = roomTypeDocs.length > 0
+    ? Object.fromEntries(roomTypeDocs.map(r => [r.name, Number(r.capacity) || 1]))
+    : DEFAULT_ROOM_CAPACITY;
+  const canManageRoomTypes = roleLower.includes('super') || roleLower === 'admin' || isOperational;
+
+  const fetchRoomTypes = async () => {
+    try {
+      const snap = await getDocs(collection(db, 'room_types'));
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (Number(b.capacity) || 0) - (Number(a.capacity) || 0) || String(a.name).localeCompare(String(b.name)));
+      setRoomTypeDocs(list);
+    } catch (err) {
+      console.error('Gagal memuat tipe kamar:', err);
+    }
+  };
+  useEffect(() => { fetchRoomTypes(); }, []);
+
+  const handleAddRoomType = async () => {
+    const name = newRoomType.name.trim();
+    const capacity = parseInt(newRoomType.capacity, 10);
+    if (!name || !capacity || capacity < 1 || capacity > 20) { alert('Isi nama tipe dan kapasitas (1-20 orang).'); return; }
+    if (Object.keys(ROOM_CAPACITY).some(n => n.toLowerCase() === name.toLowerCase())) { alert('Tipe kamar itu sudah ada.'); return; }
+    setSavingRoomType(true);
+    try {
+      // Kalau koleksi masih kosong, seed dulu tipe bawaan supaya nggak hilang dari dropdown.
+      if (roomTypeDocs.length === 0) {
+        for (const [n, c] of Object.entries(DEFAULT_ROOM_CAPACITY)) {
+          await setDoc(doc(db, 'room_types', n.toLowerCase()), { name: n, capacity: c });
+        }
+      }
+      await setDoc(doc(db, 'room_types', name.toLowerCase().replace(/[^a-z0-9]+/g, '_') || `t_${Date.now()}`), { name, capacity });
+      setNewRoomType({ name: '', capacity: '' });
+      await fetchRoomTypes();
+    } catch (err) {
+      alert('Gagal menambah tipe kamar: ' + err.message);
+    } finally {
+      setSavingRoomType(false);
+    }
+  };
+
+  const handleUpdateRoomTypeCapacity = async (rt, value) => {
+    const capacity = parseInt(value, 10);
+    if (!capacity || capacity < 1 || capacity > 20) { alert('Kapasitas harus 1-20 orang.'); fetchRoomTypes(); return; }
+    try {
+      if (roomTypeDocs.length === 0) {
+        for (const [n, c] of Object.entries(DEFAULT_ROOM_CAPACITY)) {
+          await setDoc(doc(db, 'room_types', n.toLowerCase()), { name: n, capacity: n === rt.name ? capacity : c });
+        }
+      } else {
+        await updateDoc(doc(db, 'room_types', rt.id), { capacity });
+      }
+      await fetchRoomTypes();
+    } catch (err) {
+      alert('Gagal mengubah kapasitas: ' + err.message);
+    }
+  };
+
+  const handleDeleteRoomType = async (rt) => {
+    const used = bookings.filter(b => b.roomType === rt.name && (b.status || 'active') === 'active').length;
+    if (used > 0) { alert(`Tipe "${rt.name}" masih dipakai ${used} jamaah aktif. Pindahkan dulu tipe kamar mereka.`); return; }
+    if (!confirm(`Hapus tipe kamar "${rt.name}"?`)) return;
+    try {
+      if (roomTypeDocs.length === 0) {
+        for (const [n, c] of Object.entries(DEFAULT_ROOM_CAPACITY)) {
+          if (n !== rt.name) await setDoc(doc(db, 'room_types', n.toLowerCase()), { name: n, capacity: c });
+        }
+      } else {
+        await deleteDoc(doc(db, 'room_types', rt.id));
+      }
+      await fetchRoomTypes();
+    } catch (err) {
+      alert('Gagal menghapus tipe kamar: ' + err.message);
+    }
+  };
 
   // State Modal Kirim Feedback Massal
   const [showBulkFeedbackModal, setShowBulkFeedbackModal] = useState(false);
@@ -4105,7 +4184,9 @@ Terimakasih🙏`;
         const capacity = ROOM_CAPACITY[roomType] || 4;
         list.forEach((b, idx) => {
           const roomNumber = Math.floor(idx / capacity) + 1;
-          const roomLabel = `${roomType.charAt(0)}${roomNumber}`;
+          const others = Object.keys(ROOM_CAPACITY).filter(n => n !== roomType && n.charAt(0).toUpperCase() === roomType.charAt(0).toUpperCase());
+          const prefix = others.length > 0 ? roomType.slice(0, 2) : roomType.charAt(0);
+          const roomLabel = `${prefix}${roomNumber}`;
           updates.push(updateDoc(doc(db, 'bookings', b.id), { roomLabel }));
         });
       });
@@ -8854,6 +8935,14 @@ Terimakasih🙏`;
                     })()}
                   </div>
                   <div className="flex gap-2">
+                    {canManageRoomTypes && (
+                      <button
+                        onClick={() => setShowRoomTypeManager(true)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} rounded-lg text-[11px] font-medium`}
+                      >
+                        <Edit className="w-3.5 h-3.5" /> Kelola Tipe Kamar
+                      </button>
+                    )}
                     <button
                       onClick={() => handleAutoAssignRooms(roomingBookingsForPackage)}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium"
@@ -8947,6 +9036,50 @@ Terimakasih🙏`;
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL KELOLA TIPE KAMAR */}
+      {showRoomTypeManager && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setShowRoomTypeManager(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
+            <h3 className="text-lg font-bold mb-1">Kelola Tipe Kamar</h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>Atur kategori kamar dan kapasitasnya. Ini yang muncul di dropdown Rooming List.</p>
+            <div className="space-y-2 mb-4">
+              {Object.entries(ROOM_CAPACITY).map(([name, cap]) => {
+                const rt = roomTypeDocs.find(r => r.name === name) || { id: name.toLowerCase(), name, capacity: cap };
+                return (
+                  <div key={name} className={`flex items-center gap-2 border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg p-2`}>
+                    <span className={`flex-1 text-xs font-medium ${styles.textTitle}`}>{name}</span>
+                    <input
+                      type="number" min="1" max="20"
+                      defaultValue={cap}
+                      key={`${name}-${cap}`}
+                      onBlur={(e) => { if (Number(e.target.value) !== cap) handleUpdateRoomTypeCapacity(rt, e.target.value); }}
+                      className={`w-16 ${styles.inputBg} rounded-lg p-1.5 text-xs`}
+                    />
+                    <span className={`text-[11px] ${styles.textSub}`}>orang</span>
+                    <button onClick={() => handleDeleteRoomType(rt)} className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-lg" title="Hapus"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <label className="block mb-1 text-xs font-medium">Tipe Baru</label>
+                <input type="text" value={newRoomType.name} onChange={(e) => setNewRoomType({ ...newRoomType, name: e.target.value })} placeholder="Cth: Single" className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`} />
+              </div>
+              <div className="w-20">
+                <label className="block mb-1 text-xs font-medium">Kapasitas</label>
+                <input type="number" min="1" max="20" value={newRoomType.capacity} onChange={(e) => setNewRoomType({ ...newRoomType, capacity: e.target.value })} placeholder="1" className={`w-full ${styles.inputBg} rounded-lg p-2 text-xs`} />
+              </div>
+              <button onClick={handleAddRoomType} disabled={savingRoomType} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium">
+                {savingRoomType ? '...' : 'Tambah'}
+              </button>
+            </div>
+            <p className={`text-[11px] ${styles.textSub} mt-3`}>Tipe yang masih dipakai jamaah aktif nggak bisa dihapus. Mengubah tipe di sini nggak mengubah harga booking.</p>
           </div>
         </div>
       )}
