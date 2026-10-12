@@ -295,7 +295,7 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
         hargaDouble: p.priceDouble
       })),
       // Data minimization: NIK, nomor paspor, dan nomor HP sengaja TIDAK
-      // dikirim ke API AI (pihak ketiga, saat ini Claude/Anthropic) — nomor
+      // dikirim ke API AI (pihak ketiga, saat ini Google Gemini) — nomor
       // identitas & kontak
       // itu nggak dibutuhkan buat jawab pertanyaan bisnis (omset, margin,
       // occupancy, dsb) dan termasuk data pribadi sensitif menurut UU PDP.
@@ -336,7 +336,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
       }
       const idToken = await auth.currentUser.getIdToken();
 
-      // Panggil API route server-side (/api/ai-chat) — API key Anthropic
+      // Panggil API route server-side (/api/ai-chat) — API key Gemini
       // aman tersimpan di server, tidak pernah terkirim/terekspos ke browser.
       const response = await fetch('/api/ai-chat', {
         method: 'POST',
@@ -389,7 +389,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className={`${styles.cardBg} p-4 rounded-xl border`}>
           <div className="flex items-center justify-between mb-2">
-            <span className={`text-xs ${styles.textSub}`}>Total Omset Real (Keberangkatan Bulan Ini)</span>
+            <span className={`text-xs ${styles.textSub}`}>Total Omset Real (Closing TC, Keberangkatan Bulan Ini)</span>
             <Wallet className="w-4 h-4 text-emerald-500" />
           </div>
           <h4 className="text-lg font-bold text-emerald-500">Rp {totalOmset.toLocaleString('id-ID')}</h4>
@@ -397,7 +397,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
 
         <div className={`${styles.cardBg} p-4 rounded-xl border`}>
           <div className="flex items-center justify-between mb-2">
-            <span className={`text-xs ${styles.textSub}`}>HPP Biaya Vendor</span>
+            <span className={`text-xs ${styles.textSub}`}>HPP Biaya Vendor (Planning, Keberangkatan Bulan Ini)</span>
             <Wallet className="w-4 h-4 text-rose-500" />
           </div>
           <h4 className="text-lg font-bold text-rose-500">Rp {totalVendorCost.toLocaleString('id-ID')}</h4>
@@ -488,7 +488,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
               ))}
               {analyzing && (
                 <div className={`p-2.5 rounded-xl ${styles.innerBg} text-emerald-400 italic text-[11px] animate-pulse`}>
-                  Claude AI sedang membaca database & menyusun jawaban...
+                  Gemini AI sedang membaca database & menyusun jawaban...
                 </div>
               )}
             </div>
@@ -583,7 +583,7 @@ Tugas Anda hanya memberikan kalimat balasan singkat dan langsung ke inti (maksim
               ))}
               {analyzing && (
                 <div className={`p-3 rounded-2xl ${styles.innerBg} text-emerald-400 italic text-xs animate-pulse border border-emerald-500/20`}>
-                  Claude AI sedang membaca seluruh database & menyusun laporan...
+                  Gemini AI sedang membaca seluruh database & menyusun laporan...
                 </div>
               )}
             </div>
