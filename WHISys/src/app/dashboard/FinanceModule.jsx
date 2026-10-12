@@ -603,6 +603,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // compatible) — pilih tagihan itu OPSIONAL.
   const [vendorBills, setVendorBills] = useState([]);
   const [showVendorBillModal, setShowVendorBillModal] = useState(false);
+  const [editingVendorBill, setEditingVendorBill] = useState(null); // bill yang lagi diedit (null = mode tambah baru)
   const [vendorBillForm, setVendorBillForm] = useState({
     vendorId: '',
     packageId: '',
@@ -2236,6 +2237,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     if (savingVendorBill) return; // cegah double-submit
     setSavingVendorBill(true);
     try {
+      if (editingVendorBill) {
+        await handleVendorBillUpdate();
+        closeVendorBillModal();
+        fetchData();
+        return;
+      }
       const selectedVendor = vendorsList.find(v => v.id === vendorBillForm.vendorId);
       if (!selectedVendor) {
         alert("Pilih vendornya dulu dari Data Master Vendor.");
@@ -2296,6 +2303,111 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     } finally {
       setSavingVendorBill(false);
     }
+  };
+
+  const closeVendorBillModal = () => {
+    setShowVendorBillModal(false);
+    setEditingVendorBill(null);
+    setVendorBillForm({ vendorId: '', packageId: '', billNumber: '', category: vendorCategories[0], amount: '', billDate: todayISODate(), dueDate: '', notes: '' });
+  };
+
+  const handleOpenNewVendorBill = () => {
+    setEditingVendorBill(null);
+    setVendorBillForm({ vendorId: '', packageId: '', billNumber: '', category: vendorCategories[0], amount: '', billDate: todayISODate(), dueDate: '', notes: '' });
+    setShowVendorBillModal(true);
+  };
+
+  // Edit Tagihan Vendor. Aturan akuntansinya:
+  // - Jurnal tagihan (Dr Biaya Dibayar Dimuka / Cr Hutang Vendor) di-update
+  //   dengan pola hapus + posting ulang (journal_entries nggak bisa di-update).
+  // - Vendor TIDAK boleh diganti kalau udah ada pembayaran yang nempel (nama
+  //   vendor nempel di pembayaran & saldo deposit).
+  // - Nominal TIDAK boleh lebih kecil dari yang udah dibayar.
+  // - Paket di tagihan cuma label/info. HPP paket dihitung dari PEMBAYARAN
+  //   vendor (payments_vendor) yang dipilih paketnya pas bayar, jadi ganti
+  //   paket di sini nggak ngubah jurnal HPP.
+  const handleOpenEditVendorBill = (bill) => {
+    if (blockIfNotFinanceRole()) return;
+    setEditingVendorBill(bill);
+    setVendorBillForm({
+      vendorId: bill.vendorId || '',
+      packageId: bill.packageId || '',
+      billNumber: bill.billNumber || '',
+      category: bill.category || vendorCategories[0],
+      amount: String(bill.amount ?? ''),
+      billDate: (bill.billDate || '').slice(0, 10) || todayISODate(),
+      dueDate: (bill.dueDate || '').slice(0, 10),
+      notes: bill.notes || ''
+    });
+    setShowVendorBillModal(true);
+  };
+
+  const handleVendorBillUpdate = async () => {
+    const bill = editingVendorBill;
+    if (!bill) return;
+    const selectedVendor = vendorsList.find(v => v.id === vendorBillForm.vendorId);
+    if (!selectedVendor) { alert("Pilih vendornya dulu."); return; }
+    const newAmount = Number(vendorBillForm.amount);
+    if (!newAmount || newAmount <= 0) { alert("Isi nominal tagihan yang valid."); return; }
+    const alreadyPaid = Number(bill.amountPaid || 0);
+    if (alreadyPaid > 0 && selectedVendor.id !== bill.vendorId) {
+      alert("Tagihan ini sudah ada pembayarannya, jadi vendornya nggak bisa diganti. Hapus dulu pembayaran vendor yang terkait kalau memang salah vendor.");
+      return;
+    }
+    if (newAmount < alreadyPaid - 1) {
+      alert(`Nominal baru (Rp ${newAmount.toLocaleString('id-ID')}) lebih kecil dari yang sudah dibayar (Rp ${alreadyPaid.toLocaleString('id-ID')}). Hapus/koreksi pembayarannya dulu.`);
+      return;
+    }
+    const selectedPkg = packagesList.find(p => p.id === vendorBillForm.packageId);
+    const billDateResolved = resolvePaymentCreatedAt(vendorBillForm.billDate);
+    const newStatus = alreadyPaid >= newAmount - 1 ? 'paid' : (alreadyPaid > 0 ? 'partial' : 'unpaid');
+    const journalChanged =
+      newAmount !== Number(bill.amount) ||
+      selectedVendor.id !== bill.vendorId ||
+      String(billDateResolved).slice(0, 10) !== String(bill.createdAt || bill.billDate || '').slice(0, 10);
+
+    await updateDoc(doc(db, 'vendor_bills', bill.id), {
+      vendorId: selectedVendor.id,
+      vendorName: selectedVendor.name,
+      packageId: selectedPkg?.id || '',
+      packageName: selectedPkg?.name || '',
+      billNumber: vendorBillForm.billNumber || '',
+      category: vendorBillForm.category,
+      amount: newAmount,
+      status: newStatus,
+      billDate: vendorBillForm.billDate || todayISODate(),
+      dueDate: vendorBillForm.dueDate || '',
+      notes: vendorBillForm.notes || '',
+      createdAt: billDateResolved,
+      updatedAt: new Date().toISOString()
+    });
+
+    if (journalChanged) {
+      try {
+        await deleteJournalEntriesBySource('vendor_bill_created', bill.id);
+        await postVendorBillCreated({
+          billId: bill.id,
+          vendorName: selectedVendor.name,
+          amount: newAmount,
+          date: billDateResolved,
+          createdByUid: currentUser?.uid,
+          createdByName: currentUser?.fullName || currentUser?.email
+        });
+      } catch (jErr) {
+        console.error('Gagal memperbarui jurnal tagihan vendor:', jErr);
+        alert(`Tagihan tersimpan, TAPI jurnalnya GAGAL diperbarui (${jErr.message}). Hutang Vendor di Neraca belum akurat sampai dikoreksi — segera lapor ke tim IT/Finance.`);
+      }
+    }
+
+    logActivity({
+      userId: currentUser?.uid,
+      userName: currentUser?.fullName || currentUser?.email,
+      userRole: currentUser?.role,
+      action: 'update',
+      module: 'Tagihan Vendor',
+      targetLabel: selectedVendor.name,
+      details: `Mengedit tagihan vendor "${selectedVendor.name}" (${vendorBillForm.category}), nominal Rp ${Number(bill.amount).toLocaleString('id-ID')} jadi Rp ${newAmount.toLocaleString('id-ID')}${selectedPkg ? `, paket: ${selectedPkg.name}` : ', tanpa paket'}`
+    });
   };
 
   // Hapus Tagihan Vendor — CUMA boleh kalau belum ada pembayaran yang
@@ -3536,7 +3648,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
           <div className="p-4 flex justify-end">
             <button
-              onClick={() => setShowVendorBillModal(true)}
+              onClick={handleOpenNewVendorBill}
               className="flex items-center gap-1.5 px-3 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-xs font-medium"
             >
               <Plus className="w-3.5 h-3.5" /> Catat Tagihan Vendor Baru
@@ -3595,6 +3707,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                           </td>
                           <td className="p-4 text-center">
                             <button
+                              onClick={() => handleOpenEditVendorBill(bill)}
+                              className={`p-1.5 mr-1 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-sky-500 rounded-lg transition-colors`}
+                              title="Edit Tagihan Vendor"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
                               onClick={() => handleDeleteVendorBill(bill)}
                               className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
                               title="Hapus Tagihan Vendor"
@@ -3641,6 +3760,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                       </div>
                       <div className={`font-bold ${styles.textTitle}`}>Rp {Number(bill.amount).toLocaleString('id-ID')}</div>
                       {sisa > 0 && bill.status !== 'unpaid' && <div className="text-amber-500">Sisa Rp {sisa.toLocaleString('id-ID')}</div>}
+                      <button
+                        onClick={() => handleOpenEditVendorBill(bill)}
+                        className={`p-1.5 mr-1 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-sky-500 rounded-lg transition-colors`}
+                        title="Edit Tagihan Vendor"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={() => handleDeleteVendorBill(bill)}
                         className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
@@ -5585,14 +5711,16 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       {showVendorBillModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
-            <button onClick={() => setShowVendorBillModal(false)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+            <button onClick={closeVendorBillModal} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
               <X className="w-5 h-5" />
             </button>
             <h3 className={`text-lg font-bold ${styles.textTitle} mb-4 flex items-center gap-2`}>
-              <ArrowUpRight className="w-5 h-5 text-orange-500" /> Catat Tagihan Vendor Baru
+              <ArrowUpRight className="w-5 h-5 text-orange-500" /> {editingVendorBill ? 'Edit Tagihan Vendor' : 'Catat Tagihan Vendor Baru'}
             </h3>
             <p className={`text-[10.5px] ${styles.textSub} mb-4`}>
-              Catat invoice/tagihan dari vendor begitu diterima, sebelum dibayar. Nanti pas bayar, pilih tagihan ini di form "Catat Pembayaran Vendor".
+              {editingVendorBill
+                ? 'Mengubah tagihan ikut memperbarui jurnalnya (Biaya Dibayar Dimuka dan Hutang Vendor). Paket di sini hanya label: HPP paket dihitung dari pembayaran vendor yang dipilih paketnya saat bayar.'
+                : 'Catat invoice/tagihan dari vendor begitu diterima, sebelum dibayar. Nanti pas bayar, pilih tagihan ini di form "Catat Pembayaran Vendor".'}
             </p>
 
             <form onSubmit={handleVendorBillSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
@@ -5701,11 +5829,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
               </div>
 
               <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                <button type="button" onClick={() => setShowVendorBillModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                <button type="button" onClick={closeVendorBillModal} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
                 <button type="submit" disabled={savingVendorBill} className="px-4 py-2 bg-orange-600 text-white rounded-lg font-medium disabled:opacity-60">
-                  {savingVendorBill ? 'Menyimpan...' : 'Simpan Tagihan Vendor'}
+                  {savingVendorBill ? 'Menyimpan...' : (editingVendorBill ? 'Simpan Perubahan' : 'Simpan Tagihan Vendor')}
                 </button>
               </div>
             </form>
