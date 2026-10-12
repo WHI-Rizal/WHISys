@@ -9178,13 +9178,14 @@ Terimakasih🙏`;
                               <td className="p-2">{i + 1}</td>
                               <td className={`p-2 font-mono text-[10px] ${styles.textSub}`}>{b.groupBookingCode || b.bookingCode || '-'}</td>
                               <td className={`p-2 font-medium whitespace-nowrap ${styles.textTitle}`}>
-                                {onOpenJamaah && j.id ? (
-                                  <button
-                                    type="button"
-                                    title="Buka & edit di Data Master Jamaah"
-                                    onClick={() => { setShowRoomingModal(false); onOpenJamaah(j.id); }}
+                                {j.id ? (
+                                  <a
+                                    href={`/dashboard?jamaah=${encodeURIComponent(j.id)}#jamaah`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title="Buka & edit di Data Master Jamaah (tab baru)"
                                     className="text-emerald-500 hover:underline text-left"
-                                  >{b.jamaahName}</button>
+                                  >{b.jamaahName}</a>
                                 ) : b.jamaahName}
                               </td>
                               <td className="p-2">{txt('passportNumber', 'w-28')}</td>
