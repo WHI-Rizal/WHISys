@@ -19,7 +19,7 @@ const formatDateDDMMYYYY = (dateString) => {
   return `${day}/${month}/${year}`;
 };
 
-export default function JamaahModule({ theme = 'dark', currentUser = null, userRole = '' }) {
+export default function JamaahModule({ theme = 'dark', currentUser = null, userRole = '', targetJamaahId = null, onTargetHandled = null }) {
   const isDark = theme === 'dark';
 
   const styles = {
@@ -69,6 +69,9 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
     phone: '',
     passportNumber: '',
     passportExpiry: '',
+    passportIssueDate: '',
+    passportIssuingOffice: '',
+    birthPlace: '',
     address: '',
     birthDate: '',
   });
@@ -201,6 +204,15 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
     fetchJamaah();
   }, []);
 
+  // Dibuka dari Manifest (klik nama jamaah): begitu data kebaca, langsung buka form edit jamaah itu.
+  useEffect(() => {
+    if (!targetJamaahId || jamaahList.length === 0) return;
+    const found = jamaahList.find((j) => j.id === targetJamaahId);
+    if (found) handleOpenEdit(found);
+    if (onTargetHandled) onTargetHandled();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetJamaahId, jamaahList]);
+
   // Kode unik customer (CSTxxxxxx) sekarang dijamin unik & atomik lewat
   // helper terpusat di lib/customerCode.js (transaksi Firestore atas
   // counters/jamaah_customer_code) — nggak lagi dihitung dari state lokal
@@ -218,6 +230,9 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
       phone: '',
       passportNumber: '',
       passportExpiry: '',
+      passportIssueDate: '',
+      passportIssuingOffice: '',
+      birthPlace: '',
       address: '',
       birthDate: '',
     });
@@ -240,6 +255,9 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
       phone: item.phone || '',
       passportNumber: item.passportNumber || '',
       passportExpiry: item.passportExpiry || '',
+      passportIssueDate: item.passportIssueDate || '',
+      passportIssuingOffice: item.passportIssuingOffice || '',
+      birthPlace: item.birthPlace || '',
       address: item.address || '',
       birthDate: item.birthDate || parsedFromExistingNik?.birthDate || '',
     });
@@ -765,6 +783,33 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
                     nativeClassName={`[color-scheme:${theme}]`}
                     value={formData.passportExpiry}
                     onChange={(val) => setFormData({ ...formData, passportExpiry: val })}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Tanggal Terbit Paspor</label>
+                  <DateFieldID
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    nativeClassName={`[color-scheme:${theme}]`}
+                    value={formData.passportIssueDate}
+                    onChange={(val) => setFormData({ ...formData, passportIssueDate: val })}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium">Kantor Imigrasi Penerbit</label>
+                  <input
+                    type="text" placeholder="Cth: DEPOK"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={formData.passportIssuingOffice}
+                    onChange={(e) => setFormData({ ...formData, passportIssuingOffice: e.target.value })}
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block mb-1 font-medium">Tempat Lahir</label>
+                  <input
+                    type="text" placeholder="Cth: BEKASI"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={formData.birthPlace}
+                    onChange={(e) => setFormData({ ...formData, birthPlace: e.target.value })}
                   />
                 </div>
               </div>
