@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
-import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings, List, LayoutGrid, CalendarRange, Eye, EyeOff, ExternalLink } from 'lucide-react';
+import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings, List, LayoutGrid, CalendarRange, Eye, EyeOff, ExternalLink, Copy } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 import { logActivity } from '../../lib/activityLog';
 import { postJournalEntry, ACC } from '../../lib/journal';
@@ -185,6 +185,8 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
 
   const [showModal, setShowModal] = useState(false);
   const [editingPackageId, setEditingPackageId] = useState(null);
+  // Itinerary paket sumber waktu "Duplikat Paket" (itinerary nggak ada di form, jadi dibawa terpisah).
+  const [duplicateItinerary, setDuplicateItinerary] = useState(null);
 
   // Kategori Destinasi/Kota Tujuan sekarang bisa ditambah/diedit sendiri
   // lewat tombol "Kelola Kategori" — pola & alasannya sama persis kayak
@@ -338,6 +340,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       return;
     }
     setEditingPackageId(null);
+    setDuplicateItinerary(null);
     setFormData({
       code: getNextPackageCode(),
       name: '',
@@ -373,6 +376,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       return;
     }
     setEditingPackageId(pkg.id);
+    setDuplicateItinerary(null);
     setFormData({
       code: pkg.code || '',
       name: pkg.name || '',
@@ -414,6 +418,25 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       isActive: pkg.isActive !== false
     });
     setShowModal(true);
+  };
+
+  // Duplikat Paket: buka form "Tambah Paket" yang udah keisi data paket sumber (judul + "(Salinan)",
+  // kode paket baru). Staf tinggal ganti judul/harga/tanggal lalu Simpan. TIDAK ikut disalin: booking,
+  // kuota terpakai, pengakuan pendapatan, Tour Leader, dan pembayaran vendor.
+  const handleDuplicate = (pkg) => {
+    if (!canManagePackages) {
+      alert("Cuma Super Admin & Operational yang boleh menduplikat paket.");
+      return;
+    }
+    handleOpenEdit(pkg);
+    setEditingPackageId(null);
+    setDuplicateItinerary(Array.isArray(pkg.itinerary) && pkg.itinerary.length > 0 ? pkg.itinerary : null);
+    setFormData(prev => ({
+      ...prev,
+      code: getNextPackageCode(),
+      name: `${pkg.name || ''} (Salinan)`.trim(),
+      isActive: true
+    }));
   };
 
   // ============ Sinkronisasi Katalog Produk Publik (`public_catalog`) ============
@@ -1111,6 +1134,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         // booking ke paket ini bakal ditolak sistem karena dianggap 0 seat.
         payload.quotaRemaining = payload.quotaTotal;
         payload.createdAt = new Date().toISOString();
+        if (duplicateItinerary) payload.itinerary = duplicateItinerary;
         const newPkgRef = await addDoc(collection(db, 'packages'), payload);
         // Paket baru langsung disinkron ke Katalog Produk publik kalau
         // statusnya Aktif (default-nya memang Aktif, lihat formData.isActive).
@@ -1513,6 +1537,14 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                               >
                                 {pkg.isActive !== false ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
                               </button>
+                              <>
+                              <button
+                                onClick={() => handleDuplicate(pkg)}
+                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-sky-500 rounded-lg transition-colors`}
+                                title="Duplikat Paket"
+                              >
+                                <Copy className="w-4 h-4" />
+                              </button>
                               <button
                                 onClick={() => handleOpenEdit(pkg)}
                                 className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
@@ -1520,6 +1552,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                               >
                                 <Edit className="w-4 h-4" />
                               </button>
+                              </>
                               <button
                                 onClick={() => handleDelete(pkg)}
                                 className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
@@ -1623,6 +1656,14 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                         >
                           {pkg.isActive !== false ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
                         </button>
+                        <>
+                        <button
+                          onClick={() => handleDuplicate(pkg)}
+                          className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-sky-500 rounded-lg transition-colors`}
+                          title="Duplikat Paket"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
                         <button
                           onClick={() => handleOpenEdit(pkg)}
                           className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
@@ -1630,6 +1671,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                         >
                           <Edit className="w-4 h-4" />
                         </button>
+                        </>
                         <button
                           onClick={() => handleDelete(pkg)}
                           className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-rose-500 rounded-lg transition-colors`}
@@ -1730,6 +1772,14 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                                     <ListOrdered className="w-4 h-4" />
                                   </button>
                                   {canManagePackages && (
+                                    <>
+                                    <button
+                                      onClick={() => handleDuplicate(pkg)}
+                                      className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-sky-500 rounded-lg transition-colors`}
+                                      title="Duplikat Paket"
+                                    >
+                                      <Copy className="w-4 h-4" />
+                                    </button>
                                     <button
                                       onClick={() => handleOpenEdit(pkg)}
                                       className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
@@ -1737,6 +1787,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                                     >
                                       <Edit className="w-4 h-4" />
                                     </button>
+                                    </>
                                   )}
                                 </div>
                               </td>
@@ -1781,6 +1832,14 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                               <ListOrdered className="w-4 h-4" />
                             </button>
                             {canManagePackages && (
+                              <>
+                              <button
+                                onClick={() => handleDuplicate(pkg)}
+                                className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-sky-500 rounded-lg transition-colors`}
+                                title="Duplikat Paket"
+                              >
+                                <Copy className="w-4 h-4" />
+                              </button>
                               <button
                                 onClick={() => handleOpenEdit(pkg)}
                                 className={`p-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-emerald-500 rounded-lg transition-colors`}
@@ -1788,6 +1847,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                               >
                                 <Edit className="w-4 h-4" />
                               </button>
+                              </>
                             )}
                           </div>
                         </div>
