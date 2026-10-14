@@ -4231,7 +4231,7 @@ Terimakasih🙏`;
       const XLSX = await import('xlsx');
       const toDate = (v) => { if (!v) return ''; const d = new Date(v); return isNaN(d) ? '' : d; };
       const title = `${pkg?.name || ''} ${formatDateDDMMYYYY(pkg?.departureDate)}`.toUpperCase().trim();
-      const header = ['No', 'Name', 'Paspor No.', 'F/M', 'Place of Birth', 'Date of Birth', 'AGE', 'Date of Issue', 'Date of Expiry', 'Issuing Office', 'Room', 'NUMBER'];
+      const header = ['No', 'Name', 'Paspor No.', 'F/M', 'Place of Birth', 'Date of Birth', 'AGE', 'Date of Issue', 'Date of Expiry', 'Issuing Office', 'Room', 'NUMBER', 'Kode Booking'];
       const rows = roomingBookings.map((b, i) => {
         const j = jamaahList.find(x => x.id === b.jamaahId || x.fullName === b.jamaahName) || {};
         return [
@@ -4246,7 +4246,8 @@ Terimakasih🙏`;
           toDate(j.passportExpiry),
           String(j.passportIssuingOffice || '').toUpperCase(),
           ROOM_CAPACITY[b.roomType] ? String(b.roomType).toUpperCase() : '',
-          b.roomLabel || ''
+          b.roomLabel || '',
+          b.isTL ? '' : (b.groupBookingCode || b.bookingCode || '')
         ];
       });
       const countBy = (arr) => arr.reduce((m, k) => { if (k) m[k] = (m[k] || 0) + 1; return m; }, {});
@@ -4261,8 +4262,22 @@ Terimakasih🙏`;
       aoa.push([]);
       aoa.push(['', '', 'Grand Total', rows.length, '', 'Grand Total', Object.values(rCount).reduce((a, b) => a + b, 0)]);
       const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true });
-      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 11 } }];
-      ws['!cols'] = [6, 30, 14, 6, 18, 14, 7, 14, 14, 16, 12, 10].map(w => ({ wch: w }));
+      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 12 } }];
+      // Merge otomatis kolom Kode Booking untuk baris berurutan yang kodenya sama (satu keluarga/rombongan).
+      // Data mulai di baris index 2 (0 = judul, 1 = header). Baris diurutkan per kode, jadi satu kode selalu nempel.
+      {
+        let start = 0;
+        for (let i = 1; i <= rows.length; i++) {
+          const code = rows[start][12];
+          if (i === rows.length || rows[i][12] !== code) {
+            if (code && i - start > 1) {
+              ws['!merges'].push({ s: { r: 2 + start, c: 12 }, e: { r: 2 + i - 1, c: 12 } });
+            }
+            start = i;
+          }
+        }
+      }
+      ws['!cols'] = [6, 30, 14, 6, 18, 14, 7, 14, 14, 16, 12, 10, 18].map(w => ({ wch: w }));
       Object.keys(ws).forEach(addr => {
         if (addr[0] === '!') return;
         if (ws[addr].t === 'd') ws[addr].z = 'dd-mmm-yyyy';
