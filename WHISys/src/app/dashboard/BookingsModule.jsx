@@ -4208,6 +4208,23 @@ Terimakasih🙏`;
     }
   };
 
+  // Catatan per orang di Manifest. Jamaah biasa: disimpan di dokumen booking (field manifestNote).
+  // Tour Leader: disimpan di packages.tourLeaders[].note.
+  const handleSaveManifestNote = async (row, note) => {
+    try {
+      if (row.isTL) {
+        const pkg = packagesList.find(p => p.id === roomingPackageId);
+        if (!pkg) return;
+        await saveTourLeaders(pkg.id, (pkg.tourLeaders || []).map(t => t.jamaahId === row.jamaahId ? { ...t, note } : t));
+      } else {
+        await updateDoc(doc(db, 'bookings', row.id), { manifestNote: note });
+        setBookings(prev => prev.map(b => b.id === row.id ? { ...b, manifestNote: note } : b));
+      }
+    } catch (err) {
+      alert('Gagal menyimpan catatan: ' + err.message);
+    }
+  };
+
   // ===== MANIFEST =====
   const calcAge = (birthDate) => {
     if (!birthDate) return '';
@@ -4253,7 +4270,7 @@ Terimakasih🙏`;
           String(j.passportIssuingOffice || '').toUpperCase(),
           ROOM_CAPACITY[b.roomType] ? String(b.roomType).toUpperCase() : '',
           b.roomLabel || '',
-          ''
+          (b.isTL ? b.note : b.manifestNote) || ''
         ];
       });
       const countBy = (arr) => arr.reduce((m, k) => { if (k) m[k] = (m[k] || 0) + 1; return m; }, {});
@@ -9255,11 +9272,12 @@ Terimakasih🙏`;
                         <th className="p-2">Issuing Office</th>
                         <th className="p-2">Room</th>
                         <th className="p-2">Number</th>
+                        <th className="p-2">Note</th>
                       </tr>
                     </thead>
                     <tbody className={`divide-y ${styles.tableRowBorder}`}>
                       {manifestRows.length === 0 ? (
-                        <tr><td colSpan="13" className={`p-6 text-center ${styles.textSub}`}>Belum ada jamaah aktif di paket ini.</td></tr>
+                        <tr><td colSpan="14" className={`p-6 text-center ${styles.textSub}`}>Belum ada jamaah aktif di paket ini.</td></tr>
                       ) : (
                         manifestRows.map((b, i) => {
                           const j = jamaahList.find(x => x.id === b.jamaahId) || jamaahList.find(x => x.fullName === b.jamaahName) || {};
@@ -9325,6 +9343,16 @@ Terimakasih🙏`;
                                     className={`w-16 ${styles.inputBg} rounded p-1 text-[11px]`}
                                   />
                                 ) : (b.roomLabel || '-')}
+                              </td>
+                              <td className="p-2">
+                                <input
+                                  type="text"
+                                  key={`${b.id}-note-${(b.isTL ? b.note : b.manifestNote) || ''}`}
+                                  defaultValue={(b.isTL ? b.note : b.manifestNote) || ''}
+                                  placeholder="Catatan..."
+                                  onBlur={(e) => { if (e.target.value !== ((b.isTL ? b.note : b.manifestNote) || '')) handleSaveManifestNote(b, e.target.value.trim()); }}
+                                  className={`w-40 ${styles.inputBg} rounded p-1 text-[11px]`}
+                                />
                               </td>
                             </tr>
                           );
