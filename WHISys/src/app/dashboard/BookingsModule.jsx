@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, setDoc, query, where, increment, runTransaction, writeBatch } from 'firebase/firestore';
 import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus, Eye, Link2, Upload, Loader2 } from 'lucide-react';
@@ -876,6 +876,57 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   useEffect(() => {
     fetchData();
   }, []);
+
+  // ===== Rooming List & Manifest: ingat pilihan + auto-segarkan data =====
+  // 1) Pilihan modal/paket/tab disimpan di localStorage biar habis refresh halaman nggak balik ke awal.
+  const roomingRestoredRef = useRef(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('whisys_rooming_state');
+      if (raw) {
+        const st = JSON.parse(raw);
+        if (st && st.open) {
+          setRoomingPackageId(st.pkgId || '');
+          setRoomingTab(st.tab === 'manifest' ? 'manifest' : 'rooming');
+          setShowRoomingModal(true);
+        }
+      }
+    } catch (e) { /* abaikan */ }
+    roomingRestoredRef.current = true;
+  }, []);
+  useEffect(() => {
+    if (!roomingRestoredRef.current) return;
+    try {
+      localStorage.setItem('whisys_rooming_state', JSON.stringify({ open: showRoomingModal, pkgId: roomingPackageId, tab: roomingTab }));
+    } catch (e) { /* abaikan */ }
+  }, [showRoomingModal, roomingPackageId, roomingTab]);
+
+  // 2) Pas modal kebuka dan user balik ke tab ini (mis. habis edit nama jamaah di tab Data Master),
+  //    tarik ulang data jamaah, booking, dan paket secara diam-diam supaya tabel langsung update.
+  const refreshRoomingData = async () => {
+    try {
+      const [jmhSnap, bkSnap, pkgSnap] = await Promise.all([
+        getDocs(collection(db, 'jamaah')),
+        getDocs(collection(db, 'bookings')),
+        getDocs(collection(db, 'packages')),
+      ]);
+      setJamaahList(jmhSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setBookings(bkSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setPackagesList(pkgSnap.docs.filter(d => d.id !== '_destination_categories_config').map(d => ({ id: d.id, ...d.data() })));
+    } catch (err) {
+      console.error('Gagal menyegarkan data rooming/manifest:', err);
+    }
+  };
+  useEffect(() => {
+    if (!showRoomingModal) return;
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshRoomingData(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', refreshRoomingData);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', refreshRoomingData);
+    };
+  }, [showRoomingModal]);
 
   // Dipicu dari modul lain (mis. link "Kode Booking" di modul Keuangan) —
   // langsung buka layar detail GRUP (tombol Opsi: Riwayat Pembayaran, Edit,
@@ -5930,7 +5981,7 @@ Terimakasih🙏`;
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => { setRoomingPackageId(''); setShowRoomingModal(true); }}
+            onClick={() => { setShowRoomingModal(true); }}
             className={`flex items-center gap-2 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} px-4 py-2 rounded-lg text-sm font-medium transition-all`}
           >
             <DoorOpen className="w-4 h-4" /> Rooming List
