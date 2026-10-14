@@ -6982,32 +6982,8 @@ Terimakasih🙏`;
                 ))}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block mb-1 font-medium">Tipe Kamar</label>
-                  <select
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    value={formData.roomType}
-                    onChange={e => setFormData({ ...formData, roomType: e.target.value })}
-                  >
-                    <option value="Quad">Quad (4 Orang)</option>
-                    <option value="Triple">Triple (3 Orang)</option>
-                    <option value="Double">Double (2 Orang)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block mb-1 font-medium">Alokasi Bus</label>
-                  <select
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    value={formData.busGroup}
-                    onChange={e => setFormData({ ...formData, busGroup: e.target.value })}
-                  >
-                    <option value="Bus 1">Bus 1</option>
-                    <option value="Bus 2">Bus 2</option>
-                    <option value="Bus 3">Bus 3</option>
-                  </select>
-                </div>
-              </div>
+              {/* Tipe Kamar & Alokasi Bus sengaja dihilangkan dari form booking baru: diatur belakangan di Rooming List.
+                  Default tetap Quad / Bus 1 (lihat formData) supaya harga & data lama aman. */}
 
               <div className={`${styles.innerBg} p-4 rounded-xl border space-y-3`}>
                 <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">Sumber Closing (Opsional)</p>
