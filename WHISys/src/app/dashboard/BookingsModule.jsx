@@ -3371,6 +3371,10 @@ Terimakasih🙏`;
         createdByName: groupEditTarget.primary?.createdByName || '',
         // Sumber Lead ikutin punya grupnya (pax pertama) — 1 closing = 1 sumber lead yang sama.
         leadSource: groupEditTarget.primary?.leadSource || '',
+        // Sumber Closing (TC/Mitra) juga ikut grupnya — kalau nggak, pax tambahan nggak kehitung di Laporan Closing TC.
+        closingSourceType: groupEditTarget.primary?.closingSourceType || '',
+        closingSourceId: groupEditTarget.primary?.closingSourceId || '',
+        closingSourceName: groupEditTarget.primary?.closingSourceName || '',
         createdAt: new Date().toISOString()
       });
 
