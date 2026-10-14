@@ -4228,15 +4228,21 @@ Terimakasih🙏`;
 
   const handleExportManifest = async (roomingBookings, pkg) => {
     try {
-      const XLSX = await import('xlsx');
+      // xlsx-js-style = fork SheetJS yang bisa nulis warna sel (fill). API-nya sama dengan 'xlsx'.
+      const mod = await import('xlsx-js-style');
+      const XLSX = mod.default || mod;
       const toDate = (v) => { if (!v) return ''; const d = new Date(v); return isNaN(d) ? '' : d; };
       const title = `${pkg?.name || ''} ${formatDateDDMMYYYY(pkg?.departureDate)}`.toUpperCase().trim();
-      const header = ['No', 'Name', 'Paspor No.', 'F/M', 'Place of Birth', 'Date of Birth', 'AGE', 'Date of Issue', 'Date of Expiry', 'Issuing Office', 'Room', 'NUMBER', 'Kode Booking'];
+      // Kolom: 0 No, 1 Name, 2 Kode Booking, 3 Paspor, 4 F/M, 5 Place of Birth, 6 DOB, 7 AGE,
+      // 8 Date of Issue, 9 Date of Expiry, 10 Issuing Office, 11 Room, 12 NUMBER
+      const header = ['No', 'Name', 'Kode Booking', 'Paspor No.', 'F/M', 'Place of Birth', 'Date of Birth', 'AGE', 'Date of Issue', 'Date of Expiry', 'Issuing Office', 'Room', 'NUMBER'];
+      const COLS = header.length;
       const rows = roomingBookings.map((b, i) => {
         const j = jamaahList.find(x => x.id === b.jamaahId || x.fullName === b.jamaahName) || {};
         return [
           i + 1,
           String(b.jamaahName || j.fullName || '').trim().toUpperCase() + (b.isTL ? ' (TOUR LEADER)' : ''),
+          b.isTL ? '' : (b.groupBookingCode || b.bookingCode || ''),
           j.passportNumber || (b.passportNumber && b.passportNumber !== '-' ? b.passportNumber : ''),
           j.gender === 'P' ? 'F' : j.gender === 'L' ? 'M' : '',
           String(j.birthPlace || '').toUpperCase(),
@@ -4246,42 +4252,65 @@ Terimakasih🙏`;
           toDate(j.passportExpiry),
           String(j.passportIssuingOffice || '').toUpperCase(),
           ROOM_CAPACITY[b.roomType] ? String(b.roomType).toUpperCase() : '',
-          b.roomLabel || '',
-          b.isTL ? '' : (b.groupBookingCode || b.bookingCode || '')
+          b.roomLabel || ''
         ];
       });
       const countBy = (arr) => arr.reduce((m, k) => { if (k) m[k] = (m[k] || 0) + 1; return m; }, {});
-      const gCount = countBy(rows.map(r => r[3]));
-      const rCount = countBy(rows.map(r => r[10]));
-      const aoa = [[title], header, ...rows, [], ['', '', 'F', gCount.F || 0, '', 'ROOM', ''], ['', '', 'M', gCount.M || 0]];
+      const gCount = countBy(rows.map(r => r[4]));
+      const rCount = countBy(rows.map(r => r[11]));
+      const aoa = [[title], header, ...rows, [], ['', '', '', 'F', gCount.F || 0, '', 'ROOM', ''], ['', '', '', 'M', gCount.M || 0]];
       Object.entries(rCount).forEach(([k, v], idx) => {
         const rowIdx = rows.length + 3 + idx;
         while (aoa.length <= rowIdx) aoa.push([]);
-        aoa[rowIdx][5] = k; aoa[rowIdx][6] = v;
+        aoa[rowIdx][6] = k; aoa[rowIdx][7] = v;
       });
       aoa.push([]);
-      aoa.push(['', '', 'Grand Total', rows.length, '', 'Grand Total', Object.values(rCount).reduce((a, b) => a + b, 0)]);
+      aoa.push(['', '', '', 'Grand Total', rows.length, '', 'Grand Total', Object.values(rCount).reduce((a, b) => a + b, 0)]);
       const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true });
-      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 12 } }];
-      // Merge otomatis kolom Kode Booking untuk baris berurutan yang kodenya sama (satu keluarga/rombongan).
-      // Data mulai di baris index 2 (0 = judul, 1 = header). Baris diurutkan per kode, jadi satu kode selalu nempel.
-      {
-        let start = 0;
-        for (let i = 1; i <= rows.length; i++) {
-          const code = rows[start][12];
-          if (i === rows.length || rows[i][12] !== code) {
-            if (code && i - start > 1) {
-              ws['!merges'].push({ s: { r: 2 + start, c: 12 }, e: { r: 2 + i - 1, c: 12 } });
-            }
-            start = i;
-          }
-        }
-      }
-      ws['!cols'] = [6, 30, 14, 6, 18, 14, 7, 14, 14, 16, 12, 10, 18].map(w => ({ wch: w }));
+      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: COLS - 1 } }];
+      ws['!cols'] = [6, 30, 18, 14, 6, 18, 14, 7, 14, 14, 16, 12, 10].map(w => ({ wch: w }));
       Object.keys(ws).forEach(addr => {
         if (addr[0] === '!') return;
         if (ws[addr].t === 'd') ws[addr].z = 'dd-mmm-yyyy';
       });
+
+      // Merge kolom Kode Booking + warna selang-seling (kuning / biru muda) per kode booking.
+      // Data mulai di baris index 2 (0 = judul, 1 = header). Baris sudah diurutkan per kode, jadi satu kode selalu nempel.
+      const FILLS = ['FFF59D', 'BDE3F7'];
+      const thin = { style: 'thin', color: { rgb: 'BFBFBF' } };
+      const border = { top: thin, bottom: thin, left: thin, right: thin };
+      let colorIdx = -1;
+      let start = 0;
+      for (let i = 1; i <= rows.length; i++) {
+        const code = rows[start][2];
+        if (i === rows.length || rows[i][2] !== code || !code) {
+          // kelompok [start, i-1]
+          if (code) {
+            colorIdx = (colorIdx + 1) % FILLS.length;
+            if (i - start > 1) ws['!merges'].push({ s: { r: 2 + start, c: 2 }, e: { r: 2 + i - 1, c: 2 } });
+            for (let r = start; r < i; r++) {
+              for (let c = 0; c < COLS; c++) {
+                const addr = XLSX.utils.encode_cell({ r: 2 + r, c });
+                if (!ws[addr]) ws[addr] = { t: 's', v: '' };
+                ws[addr].s = {
+                  ...(ws[addr].s || {}),
+                  fill: { patternType: 'solid', fgColor: { rgb: FILLS[colorIdx] } },
+                  border,
+                  ...(c === 2 ? { alignment: { vertical: 'center', horizontal: 'center' } } : {})
+                };
+              }
+            }
+          }
+          // baris tanpa kode (mis. Tour Leader) tidak diwarnai
+          start = i;
+        }
+      }
+      // Header tebal
+      for (let c = 0; c < COLS; c++) {
+        const addr = XLSX.utils.encode_cell({ r: 1, c });
+        if (ws[addr]) ws[addr].s = { font: { bold: true }, border };
+      }
+
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'MANIFEST');
       const safe = (pkg?.name || 'manifest').replace(/[^A-Za-z0-9]+/g, '_');
