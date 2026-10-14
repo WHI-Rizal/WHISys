@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Search, MapPin, Calendar, Plane, Loader2, AlertTriangle } from 'lucide-react';
+import { Search, MapPin, Calendar, Plane, Loader2, AlertTriangle, ExternalLink, Moon, Landmark } from 'lucide-react';
 import {
   formatTanggalPanjang, monthYearKey, monthYearLabel, formatRupiah, hargaMulai,
 } from '@/lib/publicCatalogFormat';
@@ -24,7 +24,37 @@ import {
 // bukan lagi ke WhatsApp langsung.
 // ============================================================================
 
+// ---------------------------------------------------------------------------
+// KATALOG UMROH & HAJI — datanya ada di website Erahajj (belum ada API), jadi
+// di sini cuma kartu pengantar yang mengarah ke sana. Ganti URL lewat env
+// NEXT_PUBLIC_ERAHAJJ_URL (opsional), atau edit konstanta di bawah ini.
+// ---------------------------------------------------------------------------
+const ERAHAJJ_URL = (process.env.NEXT_PUBLIC_ERAHAJJ_URL || 'https://wisatahalaltour.com/transaksi').replace(/\/$/, '');
+const ERAHAJJ_CARDS = [
+  {
+    key: 'umroh',
+    title: 'Paket Umroh',
+    desc: 'Lihat jadwal keberangkatan, hotel, dan harga paket Umroh terbaru.',
+    href: `${ERAHAJJ_URL}/paket-umrah`,
+    Icon: Moon,
+  },
+  {
+    key: 'haji',
+    title: 'Paket Haji',
+    desc: 'Informasi Haji Khusus dan Haji Furoda beserta syarat pendaftarannya.',
+    href: `${ERAHAJJ_URL}/paket-haji`,
+    Icon: Landmark,
+  },
+];
+
+const TABS = [
+  { key: 'wisata', label: 'Wisata' },
+  { key: 'umroh', label: 'Umroh' },
+  { key: 'haji', label: 'Haji' },
+];
+
 export default function KatalogPublikPage() {
+  const [tab, setTab] = useState('wisata');
   const [packages, setPackages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
@@ -32,6 +62,18 @@ export default function KatalogPublikPage() {
   const [filterBulan, setFilterBulan] = useState('');
   const [filterTujuan, setFilterTujuan] = useState('');
   const [filterJenis, setFilterJenis] = useState('');
+
+  useEffect(() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get('tab');
+      if (t && TABS.some((x) => x.key === t)) setTab(t);
+    } catch (e) { /* abaikan */ }
+  }, []);
+
+  const pilihTab = (key) => {
+    setTab(key);
+    try { window.history.replaceState(null, '', key === 'wisata' ? '/katalog' : `/katalog?tab=${key}`); } catch (e) { /* abaikan */ }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -108,14 +150,52 @@ export default function KatalogPublikPage() {
           <p className="text-xs font-semibold tracking-wide text-emerald-700 uppercase mb-1">
             Wisata Halal Internasional
           </p>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Katalog Paket Keberangkatan</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Katalog Paket Wisata, Umroh & Haji</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Pilih paket keberangkatan Wisata Halal Internasional yang sesuai jadwal dan tujuan Anda.
+            Pilih paket wisata halal, Umroh, atau Haji yang sesuai kebutuhan Anda.
           </p>
+          <div className="flex gap-2 mt-4">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => pilihTab(t.key)}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                  tab === t.key
+                    ? 'bg-emerald-700 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+        {tab !== 'wisata' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            {ERAHAJJ_CARDS.filter((c) => c.key === tab).map(({ key, title, desc, href, Icon }) => (
+              <div key={key} className="bg-white border border-slate-200 rounded-xl p-6 flex flex-col gap-3 shadow-sm">
+                <Icon className="w-8 h-8 text-emerald-700" />
+                <h3 className="font-bold text-slate-900">{title}</h3>
+                <p className="text-sm text-slate-600">{desc}</p>
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg px-4 py-2.5 transition-colors"
+                >
+                  LIHAT PAKET
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === 'wisata' && (<>
         {/* Filter bar */}
         <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 mb-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -264,6 +344,7 @@ export default function KatalogPublikPage() {
             })}
           </div>
         )}
+        </>)}
       </main>
 
       <footer className="text-center text-xs text-slate-400 py-8">
