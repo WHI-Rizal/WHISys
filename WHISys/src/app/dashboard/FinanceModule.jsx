@@ -2887,7 +2887,29 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // jadi DOBEL (di booking lama yang harusnya udah nggak berlaku, DAN di
   // booking baru) — persis kasus yang bikin "Total Closingan" beda sama
   // Neraca (selisih ~Rp 40 juta ketemu 30 Sep 2026).
-  const closingTcBookingsInPeriod = bookingsList.filter(bk => {
+  // Peserta yang ditambahin belakangan lewat "Tambah Peserta" di grup (sebelum 14 Okt 2026) nggak ikut
+  // nyimpen Sumber Closing (TC/Mitra) grupnya, jadi sebelumnya cuma 1 pax (yang daftar pertama) yang
+  // kehitung di laporan ini. Sekarang tiap booking yang kosong Sumber Closing-nya "meminjam" dari
+  // booking lain di grup yang sama (groupBookingCode) yang punya — jadi data lama ikut benar tanpa migrasi.
+  const closingBookingsList = (() => {
+    const bySource = {};
+    bookingsList.forEach(bk => {
+      if (bk.groupBookingCode && bk.closingSourceType && bk.closingSourceId && !bySource[bk.groupBookingCode]) {
+        bySource[bk.groupBookingCode] = {
+          closingSourceType: bk.closingSourceType,
+          closingSourceId: bk.closingSourceId,
+          closingSourceName: bk.closingSourceName || ''
+        };
+      }
+    });
+    return bookingsList.map(bk => (
+      (!bk.closingSourceType || !bk.closingSourceId) && bk.groupBookingCode && bySource[bk.groupBookingCode]
+        ? { ...bk, ...bySource[bk.groupBookingCode] }
+        : bk
+    ));
+  })();
+
+  const closingTcBookingsInPeriod = closingBookingsList.filter(bk => {
     if (bk.closingSourceType !== 'tc' || !bk.closingSourceId) return false;
     if (bk.status === 'cancelled' || bk.status === 'rescheduled') return false;
     const txDate = toLocalDateOnlyString(bk.createdAt);
@@ -2901,7 +2923,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // tanggal yang sama — dipisah khusus buat ditampilkan di CSV export
   // (bukan buat dihitung ke total/rekap), biar HRD tetap bisa lihat ada
   // closingan yang batal tanpa itu nambah/ganggu Total Closingan.
-  const closingTcCancelledInPeriod = bookingsList.filter(bk => {
+  const closingTcCancelledInPeriod = closingBookingsList.filter(bk => {
     if (bk.closingSourceType !== 'tc' || !bk.closingSourceId) return false;
     if (bk.status !== 'cancelled') return false;
     const txDate = toLocalDateOnlyString(bk.createdAt);
@@ -2914,7 +2936,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // Sama kayak closingTcCancelledInPeriod, tapi buat booking yang statusnya
   // 'rescheduled' — tetap kelihatan jejaknya di CSV export ("Direschedule"),
   // cuma nggak ikut dihitung ke Total Closingan.
-  const closingTcRescheduledInPeriod = bookingsList.filter(bk => {
+  const closingTcRescheduledInPeriod = closingBookingsList.filter(bk => {
     if (bk.closingSourceType !== 'tc' || !bk.closingSourceId) return false;
     if (bk.status !== 'rescheduled') return false;
     const txDate = toLocalDateOnlyString(bk.createdAt);
