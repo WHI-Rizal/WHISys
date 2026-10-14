@@ -125,7 +125,15 @@ export default function AiAnalyzerModule({ theme = 'dark' }) {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   })();
+  // Pax tambahan lama di grup nggak nyimpen Sumber Closing — pinjam dari booking lain di grup yang sama.
+  const closingBySourceGroup = {};
+  bookings.forEach(bk => {
+    if (bk.groupBookingCode && bk.closingSourceType && bk.closingSourceId && !closingBySourceGroup[bk.groupBookingCode]) {
+      closingBySourceGroup[bk.groupBookingCode] = { closingSourceType: bk.closingSourceType, closingSourceId: bk.closingSourceId, closingSourceName: bk.closingSourceName || '' };
+    }
+  });
   const closingTcBookingsThisMonth = bookings
+    .map(bk => ((!bk.closingSourceType || !bk.closingSourceId) && bk.groupBookingCode && closingBySourceGroup[bk.groupBookingCode]) ? { ...bk, ...closingBySourceGroup[bk.groupBookingCode] } : bk)
     .filter(bk => bk.closingSourceType === 'tc' && bk.closingSourceId && bk.status !== 'cancelled')
     .filter(bk => {
       const departureKey = toLocalDateOnlyString(bk.departureDate);
