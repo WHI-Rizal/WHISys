@@ -4234,8 +4234,8 @@ Terimakasih🙏`;
       const toDate = (v) => { if (!v) return ''; const d = new Date(v); return isNaN(d) ? '' : d; };
       const title = `${pkg?.name || ''} ${formatDateDDMMYYYY(pkg?.departureDate)}`.toUpperCase().trim();
       // Kolom: 0 No, 1 Name, 2 Kode Booking, 3 Paspor, 4 F/M, 5 Place of Birth, 6 DOB, 7 AGE,
-      // 8 Date of Issue, 9 Date of Expiry, 10 Issuing Office, 11 Room, 12 NUMBER
-      const header = ['No', 'Name', 'Kode Booking', 'Paspor No.', 'F/M', 'Place of Birth', 'Date of Birth', 'AGE', 'Date of Issue', 'Date of Expiry', 'Issuing Office', 'Room', 'NUMBER'];
+      // 8 Date of Issue, 9 Date of Expiry, 10 Issuing Office, 11 Room, 12 NUMBER, 13 Note
+      const header = ['No', 'Name', 'Kode Booking', 'Paspor No.', 'F/M', 'Place of Birth', 'Date of Birth', 'AGE', 'Date of Issue', 'Date of Expiry', 'Issuing Office', 'Room', 'NUMBER', 'Note'];
       const COLS = header.length;
       const rows = roomingBookings.map((b, i) => {
         const j = jamaahList.find(x => x.id === b.jamaahId || x.fullName === b.jamaahName) || {};
@@ -4252,7 +4252,8 @@ Terimakasih🙏`;
           toDate(j.passportExpiry),
           String(j.passportIssuingOffice || '').toUpperCase(),
           ROOM_CAPACITY[b.roomType] ? String(b.roomType).toUpperCase() : '',
-          b.roomLabel || ''
+          b.roomLabel || '',
+          ''
         ];
       });
       const countBy = (arr) => arr.reduce((m, k) => { if (k) m[k] = (m[k] || 0) + 1; return m; }, {});
@@ -4268,7 +4269,7 @@ Terimakasih🙏`;
       aoa.push(['', '', '', 'Grand Total', rows.length, '', 'Grand Total', Object.values(rCount).reduce((a, b) => a + b, 0)]);
       const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true });
       ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: COLS - 1 } }];
-      ws['!cols'] = [6, 30, 18, 14, 6, 18, 14, 7, 14, 14, 16, 12, 10].map(w => ({ wch: w }));
+      ws['!cols'] = [6, 30, 18, 14, 6, 18, 14, 7, 14, 14, 16, 12, 10, 28].map(w => ({ wch: w }));
       Object.keys(ws).forEach(addr => {
         if (addr[0] === '!') return;
         if (ws[addr].t === 'd') ws[addr].z = 'dd-mmm-yyyy';
