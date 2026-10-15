@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
+import { getAdminDb } from '@/lib/firebaseAdmin';
 
 // =====================================================================
 // Endpoint PUBLIK (TANPA login) — dipanggil dari luar sistem WHISys,
@@ -70,12 +71,44 @@ const CORS_HEADERS = {
   'Cache-Control': 'public, max-age=30, s-maxage=30, stale-while-revalidate=60',
 };
 
+// SISA SEAT HARUS LIVE (diperbaiki 15 Okt 2026): `public_catalog` cuma di-update pas staf Paket
+// menyimpan paket, sedangkan sisa seat berubah tiap ada booking/batal/reschedule (yang cuma
+// ngubah `packages.quotaRemaining`, dan staf Sales/Finance nggak boleh nulis ke public_catalog).
+// Akibatnya angka di katalog bisa basi. Sekarang, kalau Admin SDK tersedia, sisa seat (dan
+// status aktif) diambil LIVE dari `packages` — cuma field itu yang dibaca & dikirim, field
+// internal paket tetap nggak ikut keluar. Kalau Admin SDK gagal, jatuh ke data cermin.
+async function overlayLiveSeats(packages) {
+  try {
+    const adb = getAdminDb();
+    const refs = packages.map((p) => adb.collection('packages').doc(p.id));
+    if (refs.length === 0) return packages;
+    const snaps = await adb.getAll(...refs, { fieldMask: ['quotaRemaining', 'quotaTotal', 'isActive'] });
+    const live = new Map(snaps.map((sn) => [sn.id, sn]));
+    return packages
+      .filter((p) => {
+        const sn = live.get(p.id);
+        return !(sn && (!sn.exists || sn.get('isActive') === false));
+      })
+      .map((p) => {
+        const sn = live.get(p.id);
+        if (!sn || !sn.exists) return p;
+        const total = Number(sn.get('quotaTotal') ?? p.quotaTotal) || 0;
+        const remaining = Number(sn.get('quotaRemaining') ?? sn.get('quotaTotal') ?? p.quotaRemaining ?? 0);
+        return { ...p, quotaTotal: total, quotaRemaining: Math.max(0, remaining) };
+      });
+  } catch (err) {
+    console.error('Gagal ambil sisa seat live, pakai data cermin:', err);
+    return packages;
+  }
+}
+
 export async function GET() {
   try {
     const snap = await getDocs(collection(db, 'public_catalog'));
-    const packages = snap.docs
+    const mirrored = snap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .sort((a, b) => new Date(a.departureDate || 0) - new Date(b.departureDate || 0));
+    const packages = await overlayLiveSeats(mirrored);
 
     return NextResponse.json({ packages, count: packages.length }, { headers: CORS_HEADERS });
   } catch (err) {
