@@ -2352,7 +2352,9 @@ Terimakasih🙏`;
       return;
     }
 
-    const refundAmountVal = Number(cancelForm.refundAmount || 0);
+    const isNoRefund = cancelForm.refundMethod === 'No Refund';
+    // "No Refund" = seluruh setoran customer dihanguskan, nggak ada duit keluar sama sekali.
+    const refundAmountVal = isNoRefund ? 0 : Number(cancelForm.refundAmount || 0);
     // Refund yang beneran keluar dari rekening/kas perusahaan (Transfer Bank
     // / Cash) WAJIB milih akunnya dulu, biar bisa dicatat & direkonsiliasi —
     // beda dari "Deposit / Saldo Akun" yang nggak ngeluarin duit fisik sama
@@ -2377,7 +2379,8 @@ Terimakasih🙏`;
         cancelReason: cancelForm.reason || '-',
         refundAmount: refundAmountVal,
         refundMethod: cancelForm.refundMethod,
-        ...(cancelForm.refundMethod !== 'Deposit / Saldo Akun' ? { refundAccountId: cancelForm.refundAccountId, refundAccountName: financialAccounts.find(a => a.id === cancelForm.refundAccountId)?.name || '' } : {}),
+        forfeitedAmount: Math.max(0, totalPaidForRefund - refundAmountVal),
+        ...(cancelForm.refundMethod !== 'Deposit / Saldo Akun' && !isNoRefund ? { refundAccountId: cancelForm.refundAccountId, refundAccountName: financialAccounts.find(a => a.id === cancelForm.refundAccountId)?.name || '' } : {}),
         cancelledAt: new Date().toISOString()
       });
 
@@ -3970,7 +3973,8 @@ Terimakasih🙏`;
       return;
     }
 
-    const totalRefund = Number(groupCancelForm.refundAmount || 0);
+    const isNoRefund = groupCancelForm.refundMethod === 'No Refund';
+    const totalRefund = isNoRefund ? 0 : Number(groupCancelForm.refundAmount || 0);
     if (groupCancelForm.refundMethod !== 'Deposit / Saldo Akun' && totalRefund > 0 && !groupCancelForm.refundAccountId) {
       alert("Pilih akun Kas/Bank sumber dana refund ini dulu.");
       return;
@@ -4012,7 +4016,8 @@ Terimakasih🙏`;
           cancelReason: groupCancelForm.reason || '-',
           refundAmount: share,
           refundMethod: groupCancelForm.refundMethod,
-          ...(groupCancelForm.refundMethod !== 'Deposit / Saldo Akun' ? { refundAccountId: groupCancelForm.refundAccountId, refundAccountName: refundAccount?.name || '' } : {}),
+          forfeitedAmount: Math.max(0, Number(item.totalPaid || 0) - share),
+          ...(groupCancelForm.refundMethod !== 'Deposit / Saldo Akun' && !isNoRefund ? { refundAccountId: groupCancelForm.refundAccountId, refundAccountName: refundAccount?.name || '' } : {}),
           cancelledAt: nowIso
         });
       }));
@@ -7811,24 +7816,53 @@ Terimakasih🙏`;
                   <input
                     type="number" required
                     className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    value={cancelForm.refundAmount}
+                    disabled={cancelForm.refundMethod === 'No Refund'}
+                    value={cancelForm.refundMethod === 'No Refund' ? 0 : cancelForm.refundAmount}
                     onChange={e => setCancelForm({ ...cancelForm, refundAmount: e.target.value })}
                   />
                   <p className="text-[10px] mt-1 opacity-70">Boleh kurang dari total setoran kalau ada potongan/biaya pembatalan.</p>
                 </div>
+                {cancelForm.refundMethod !== 'No Refund' && (
+                  <div>
+                    <label className="block mb-1 font-medium">Nominal Hangus / Dipotong (Rp)</label>
+                    <input
+                      type="number" min="0"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={Math.max(0, Number(selectedBookingForAction.totalPaid || 0) - Number(cancelForm.refundAmount || 0))}
+                      onChange={e => {
+                        const paid = Number(selectedBookingForAction.totalPaid || 0);
+                        const h = Math.min(paid, Math.max(0, Number(e.target.value || 0)));
+                        setCancelForm({ ...cancelForm, refundAmount: paid - h });
+                      }}
+                    />
+                    <p className="text-[10px] mt-1 opacity-70">Isi misal 3.000.000 kalau cuma DP yang hangus, sisanya otomatis jadi nominal refund. Saling nyambung sama kolom Nominal Refund di atas.</p>
+                  </div>
+                )}
                 <div>
                   <label className="block mb-1 font-medium">Metode Refund</label>
                   <select
                     className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                     value={cancelForm.refundMethod}
-                    onChange={e => setCancelForm({ ...cancelForm, refundMethod: e.target.value })}
+                    onChange={e => {
+                      const m = e.target.value;
+                      setCancelForm({
+                        ...cancelForm,
+                        refundMethod: m,
+                        refundAmount: m === 'No Refund' ? 0 : (cancelForm.refundMethod === 'No Refund' ? Number(selectedBookingForAction.totalPaid || 0) : cancelForm.refundAmount),
+                        refundAccountId: m === 'No Refund' ? '' : cancelForm.refundAccountId
+                      });
+                    }}
                   >
                     <option value="Transfer Bank">Transfer Bank</option>
                     <option value="Cash / Tunai">Cash / Tunai</option>
                     <option value="Deposit / Saldo Akun">Deposit / Saldo Akun</option>
+                    <option value="No Refund">No Refund (setoran hangus)</option>
                   </select>
+                  {cancelForm.refundMethod === 'No Refund' && (
+                    <p className="text-[10px] mt-1.5 text-amber-500">Uang customer Rp {Number(selectedBookingForAction.totalPaid || 0).toLocaleString('id-ID')} nggak dikembalikan. Nggak ada mutasi Kas/Bank, dan nominalnya otomatis jadi pendapatan perusahaan (lewat Pendapatan Diterima Dimuka sampai paketnya diakui).</p>
+                  )}
                 </div>
-                {cancelForm.refundMethod !== 'Deposit / Saldo Akun' && (
+                {cancelForm.refundMethod !== 'Deposit / Saldo Akun' && cancelForm.refundMethod !== 'No Refund' && (
                   <div>
                     <label className="block mb-1 font-medium">Akun Kas/Bank Sumber Dana Refund</label>
                     <select
@@ -9044,24 +9078,58 @@ Terimakasih🙏`;
                 <input
                   type="number" required
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={groupCancelForm.refundAmount}
+                  disabled={groupCancelForm.refundMethod === 'No Refund'}
+                  value={groupCancelForm.refundMethod === 'No Refund' ? 0 : groupCancelForm.refundAmount}
                   onChange={e => setGroupCancelForm({ ...groupCancelForm, refundAmount: e.target.value })}
                 />
                 <p className="text-[10px] mt-1 opacity-70">Nominal total ini akan dibagi rata otomatis ke seluruh peserta aktif di grup ini. Boleh kurang dari total setoran kalau ada potongan/biaya pembatalan.</p>
               </div>
+              {groupCancelForm.refundMethod !== 'No Refund' && (() => {
+                const activePaidTotal = groupCancelTarget.items.filter(b => (b.status || 'active') === 'active').reduce((acc, b) => acc + Number(b.totalPaid || 0), 0);
+                const activeCount = groupCancelTarget.items.filter(b => (b.status || 'active') === 'active').length || 1;
+                const hangus = Math.max(0, activePaidTotal - Number(groupCancelForm.refundAmount || 0));
+                return (
+                  <div>
+                    <label className="block mb-1 font-medium">Nominal Hangus / Dipotong Total (Rp)</label>
+                    <input
+                      type="number" min="0"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={hangus}
+                      onChange={e => {
+                        const h = Math.min(activePaidTotal, Math.max(0, Number(e.target.value || 0)));
+                        setGroupCancelForm({ ...groupCancelForm, refundAmount: activePaidTotal - h });
+                      }}
+                    />
+                    <p className="text-[10px] mt-1 opacity-70">Total untuk seluruh grup ({activeCount} peserta). Contoh DP hangus 3 juta/pax x {activeCount} pax = {(3000000 * activeCount).toLocaleString('id-ID')}, sisanya otomatis jadi nominal refund.</p>
+                  </div>
+                );
+              })()}
               <div>
                 <label className="block mb-1 font-medium">Metode Refund</label>
                 <select
                   className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                   value={groupCancelForm.refundMethod}
-                  onChange={e => setGroupCancelForm({ ...groupCancelForm, refundMethod: e.target.value })}
+                  onChange={e => {
+                    const m = e.target.value;
+                    const activePaid = groupCancelTarget.items.filter(b => (b.status || 'active') === 'active').reduce((acc, b) => acc + Number(b.totalPaid || 0), 0);
+                    setGroupCancelForm({
+                      ...groupCancelForm,
+                      refundMethod: m,
+                      refundAmount: m === 'No Refund' ? 0 : (groupCancelForm.refundMethod === 'No Refund' ? activePaid : groupCancelForm.refundAmount),
+                      refundAccountId: m === 'No Refund' ? '' : groupCancelForm.refundAccountId
+                    });
+                  }}
                 >
                   <option value="Transfer Bank">Transfer Bank</option>
                   <option value="Cash / Tunai">Cash / Tunai</option>
                   <option value="Deposit / Saldo Akun">Deposit / Saldo Akun</option>
+                  <option value="No Refund">No Refund (setoran hangus)</option>
                 </select>
+                {groupCancelForm.refundMethod === 'No Refund' && (
+                  <p className="text-[10px] mt-1.5 text-amber-500">Seluruh setoran peserta aktif grup ini nggak dikembalikan. Nggak ada mutasi Kas/Bank, dan nominalnya otomatis jadi pendapatan perusahaan (lewat Pendapatan Diterima Dimuka sampai paketnya diakui).</p>
+                )}
               </div>
-              {groupCancelForm.refundMethod !== 'Deposit / Saldo Akun' && (
+              {groupCancelForm.refundMethod !== 'Deposit / Saldo Akun' && groupCancelForm.refundMethod !== 'No Refund' && (
                 <div>
                   <label className="block mb-1 font-medium">Akun Kas/Bank Sumber Dana Refund</label>
                   <select
