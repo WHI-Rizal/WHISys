@@ -475,6 +475,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // tetep nempel ke paket sebagai Biaya Dibayar Dimuka normal (baru jadi
   // HPP pas "Akui Pendapatan", BUKAN langsung diakui kayak "Konversi").
   const [showInvoiceCorrectionModal, setShowInvoiceCorrectionModal] = useState(false);
+  // Tetapkan paket buat pembayaran vendor yang tadinya dicatat "Belum ada keberangkatan"
+  const [assignPkgPayment, setAssignPkgPayment] = useState(null);
+  const [assignPkgId, setAssignPkgId] = useState('');
+  const [savingAssignPkg, setSavingAssignPkg] = useState(false);
   const [correctingPayment, setCorrectingPayment] = useState(null);
   const [invoiceCorrectionForm, setInvoiceCorrectionForm] = useState({ newAmount: '', notes: '' });
   const [savingInvoiceCorrection, setSavingInvoiceCorrection] = useState(false);
@@ -1862,6 +1866,67 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     }
   };
 
+  // Tombol "Bayar" di baris Tagihan Vendor — buka form Catat Pembayaran
+  // Vendor yang udah keisi vendor, tagihan, paket (kalau ada) & nominal sisa.
+  const handleOpenPayBill = (bill) => {
+    if (blockIfNotFinanceRole()) return;
+    const sisa = Math.max(0, Number(bill.amount || 0) - Number(bill.amountPaid || 0));
+    setVendorForm({
+      packageId: bill.packageId || '',
+      vendorId: bill.vendorId || '',
+      vendorName: bill.vendorName || '',
+      category: bill.category || vendorCategories[0],
+      payMethod: 'Kas/Bank',
+      amount: sisa ? String(sisa) : '',
+      accountId: '',
+      billId: bill.id,
+      notes: `Bayar tagihan ${bill.billNumber ? 'No. ' + bill.billNumber : bill.category || ''}`.trim(),
+      paymentDate: todayISODate(),
+      adminFee: ''
+    });
+    setShowVendorModal(true);
+  };
+
+  const handleOpenAssignPackage = (vp) => {
+    if (blockIfNotFinanceRole()) return;
+    setAssignPkgPayment(vp);
+    setAssignPkgId('');
+  };
+
+  const handleAssignPackageSubmit = async (e) => {
+    e.preventDefault();
+    if (blockIfNotFinanceRole()) return;
+    if (!assignPkgPayment || savingAssignPkg) return;
+    const pkg = packagesList.find(p => p.id === assignPkgId);
+    if (!pkg) { alert("Pilih paket keberangkatannya dulu."); return; }
+    if (pkg.revenueRecognized) {
+      alert(`Paket "${pkg.name}" omzet & HPP-nya sudah "Diakui". Batalkan dulu pengakuan pendapatannya di Laporan Keuangan, baru tetapkan pembayaran ini ke paket itu.`);
+      return;
+    }
+    setSavingAssignPkg(true);
+    try {
+      await updateDoc(doc(db, 'payments_vendor', assignPkgPayment.id), { packageId: pkg.id, packageName: pkg.name });
+      // Tagihan terkait yang paketnya masih kosong ikut ditetapkan juga.
+      if (assignPkgPayment.billId) {
+        const linkedBill = vendorBills.find(b => b.id === assignPkgPayment.billId);
+        if (linkedBill && !linkedBill.packageId) {
+          await updateDoc(doc(db, 'vendor_bills', linkedBill.id), { packageId: pkg.id, packageName: pkg.name });
+        }
+      }
+      logActivity({
+        userId: currentUser?.uid, userName: currentUser?.fullName || currentUser?.email, userRole: currentUser?.role,
+        action: 'update', module: 'Pembayaran Vendor', targetLabel: assignPkgPayment.vendorName,
+        details: `Menetapkan pembayaran vendor "${assignPkgPayment.vendorName}" (${assignPkgPayment.category}) senilai Rp ${Number(assignPkgPayment.amount).toLocaleString('id-ID')} ke paket "${pkg.name}".`
+      });
+      setAssignPkgPayment(null);
+      fetchData();
+    } catch (err) {
+      alert("Gagal menetapkan paket: " + err.message);
+    } finally {
+      setSavingAssignPkg(false);
+    }
+  };
+
   const handleDeleteVendorPayment = async (vp) => {
     if (blockIfNotFinanceRole()) return;
     // Sama kayak hapus setoran jamaah — kalau paket terkait pembayaran vendor
@@ -2447,15 +2512,23 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     setSavingVendor(true);
     try {
       const selectedPkg = packagesList.find(p => p.id === vendorForm.packageId);
-      if (!selectedPkg) {
-        alert("Pilih paket keberangkatan terkait dulu. Kalau ini biaya kantor yang bukan buat trip tertentu, catat lewat tombol \"Biaya Operasional Kantor\", bukan di sini.");
+      // Boleh TANPA paket ("Belum ada keberangkatan") KHUSUS kalau yang dibayar
+      // adalah Tagihan Vendor yang udah dicatat (biayanya udah nongkrong di
+      // Biaya Dibayar Dimuka sejak tagihan dicatat). Paketnya bisa ditetapkan
+      // belakangan lewat tombol "Tetapkan Paket" di Riwayat Bayar Vendor.
+      if (!selectedPkg && !vendorForm.billId) {
+        alert("Pilih paket keberangkatan terkait dulu. Kalau belum ada keberangkatannya, pilih dulu Tagihan Vendor yang mau dibayar (kolom \"Bayar Tagihan Mana?\"), baru paket boleh dikosongin. Kalau ini biaya kantor yang bukan buat trip tertentu, catat lewat tombol \"Biaya Operasional Kantor\", bukan di sini.");
+        return;
+      }
+      if (!selectedPkg && vendorForm.payMethod === 'Saldo Deposit Vendor') {
+        alert("Bayar pakai Saldo Deposit Vendor wajib milih paket keberangkatannya.");
         return;
       }
       // Blok pembayaran ke paket yang omzet & HPP-nya sudah "Diakui". Jurnal HPP
       // cuma diposting sekali saat "Akui Pendapatan", jadi pembayaran susulan
       // bikin Laporan P&L dan Neraca selisih. Konsisten sama blok hapus
       // pembayaran/setoran di paket yang sudah diakui.
-      if (selectedPkg.revenueRecognized) {
+      if (selectedPkg && selectedPkg.revenueRecognized) {
         alert(`Pembayaran vendor tidak bisa dicatat ke paket "${selectedPkg.name}" karena omzet & HPP-nya sudah "Diakui" dan sudah masuk Laporan P&L.\n\nBatalkan dulu pengakuan pendapatan paket ini lewat tombol "Batalkan Pengakuan" di Laporan Keuangan, catat pembayarannya, lalu akui pendapatannya lagi.`);
         return;
       }
@@ -2493,8 +2566,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
       const paymentDateResolved = resolvePaymentCreatedAt(vendorForm.paymentDate);
       const vendorRef = await addDoc(collection(db, 'payments_vendor'), {
-        packageId: selectedPkg.id,
-        packageName: selectedPkg.name,
+        packageId: selectedPkg?.id || '',
+        packageName: selectedPkg?.name || '',
         vendorId: selectedVendor.id,
         vendorName: selectedVendor.name,
         category: vendorForm.category,
@@ -2512,8 +2585,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           selectedVendor.name,
           -vendorAmountVal,
           'usage',
-          `Bayar ${vendorForm.category} - ${selectedPkg.name}`,
-          selectedPkg.name,
+          `Bayar ${vendorForm.category} - ${selectedPkg?.name || '-'}`,
+          selectedPkg?.name || '',
           paymentDateResolved
         );
       } else {
@@ -2602,7 +2675,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         action: 'create',
         module: 'Pembayaran Vendor',
         targetLabel: selectedVendor.name,
-        details: `Mencatat pembayaran vendor "${selectedVendor.name}" (${vendorForm.category}) senilai Rp ${vendorAmountVal.toLocaleString('id-ID')} untuk paket "${selectedPkg.name}"${selectedBill ? ` (bayar tagihan ${selectedBill.billNumber || selectedBill.category})` : ''}${vendorAdminFeeVal > 0 ? ` + Biaya Admin Bank Rp ${vendorAdminFeeVal.toLocaleString('id-ID')}` : ''}`
+        details: `Mencatat pembayaran vendor "${selectedVendor.name}" (${vendorForm.category}) senilai Rp ${vendorAmountVal.toLocaleString('id-ID')} ${selectedPkg ? ` untuk paket "${selectedPkg.name}"` : ' (belum ada keberangkatan)'}${selectedBill ? ` (bayar tagihan ${selectedBill.billNumber || selectedBill.category})` : ''}${vendorAdminFeeVal > 0 ? ` + Biaya Admin Bank Rp ${vendorAdminFeeVal.toLocaleString('id-ID')}` : ''}`
       });
       setShowVendorModal(false);
       setVendorForm({ packageId: '', vendorId: '', vendorName: '', category: vendorCategories[0], payMethod: 'Kas/Bank', amount: '', accountId: '', billId: '', notes: 'DP Booking Seat', paymentDate: todayISODate(), adminFee: '' });
@@ -3526,7 +3599,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                         </span>
                       </td>
                       <td className={`p-4 ${styles.textTitle}`}>
-                        {vp.packageName}
+                        {vp.packageName || (vp.packageId ? '' : <span className="text-amber-500 font-medium">Belum ada keberangkatan</span>)}
                         {vp.packageId === 'GLOBAL' && (
                           <span className="block text-[10px] text-amber-500 font-medium mt-0.5">
                             ⚠ Data lama tanpa paket — review manual
@@ -3556,6 +3629,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                       </td>
                       <td className="p-4 text-center">
                         <div className="flex items-center justify-center gap-2">
+                          {!vp.packageId && (
+                            <button
+                              onClick={() => handleOpenAssignPackage(vp)}
+                              className={`px-2 py-1 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-orange-500 rounded-lg transition-colors text-[10px] font-semibold`}
+                              title="Tetapkan paket keberangkatan untuk pembayaran ini"
+                            >
+                              Tetapkan Paket
+                            </button>
+                          )}
                           {!vp.convertedToDeposit && vp.payMethod !== 'Saldo Deposit Vendor' && (
                             <button
                               onClick={() => handleOpenConvertModal(vp)}
@@ -3607,7 +3689,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                   <div>
                     <span className="text-[10px] opacity-60 uppercase">Paket Terkait</span>
                     <div className={styles.textTitle}>
-                      {vp.packageName}
+                      {vp.packageName || (vp.packageId ? '' : <span className="text-amber-500 font-medium">Belum ada keberangkatan</span>)}
                       {vp.packageId === 'GLOBAL' && (
                         <span className="block text-[10px] text-amber-500 font-medium mt-0.5">
                           ⚠ Data lama tanpa paket — review manual
@@ -3641,6 +3723,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                     )}
                   </div>
                   <div className="flex flex-wrap gap-2 pt-1">
+                    {!vp.packageId && (
+                      <button
+                        onClick={() => handleOpenAssignPackage(vp)}
+                        className={`px-2 py-1 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-orange-500 rounded-lg transition-colors text-[10px] font-semibold`}
+                        title="Tetapkan paket keberangkatan untuk pembayaran ini"
+                      >
+                        Tetapkan Paket
+                      </button>
+                    )}
                     {!vp.convertedToDeposit && vp.payMethod !== 'Saldo Deposit Vendor' && (
                       <button
                         onClick={() => handleOpenConvertModal(vp)}
@@ -3736,6 +3827,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                             <span className={`px-2.5 py-1 rounded-full border font-medium ${statusStyle}`}>{statusLabel}</span>
                           </td>
                           <td className="p-4 text-center">
+                            {bill.status !== 'paid' && (
+                              <button
+                                onClick={() => handleOpenPayBill(bill)}
+                                className="px-2.5 py-1.5 mr-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-semibold transition-colors"
+                                title="Catat pembayaran untuk tagihan ini"
+                              >
+                                Bayar
+                              </button>
+                            )}
                             <button
                               onClick={() => handleOpenEditVendorBill(bill)}
                               className={`p-1.5 mr-1 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-sky-500 rounded-lg transition-colors`}
@@ -3790,6 +3890,15 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                       </div>
                       <div className={`font-bold ${styles.textTitle}`}>Rp {Number(bill.amount).toLocaleString('id-ID')}</div>
                       {sisa > 0 && bill.status !== 'unpaid' && <div className="text-amber-500">Sisa Rp {sisa.toLocaleString('id-ID')}</div>}
+                      {bill.status !== 'paid' && (
+                        <button
+                          onClick={() => handleOpenPayBill(bill)}
+                          className="px-2.5 py-1.5 mr-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-semibold transition-colors"
+                          title="Catat pembayaran untuk tagihan ini"
+                        >
+                          Bayar
+                        </button>
+                      )}
                       <button
                         onClick={() => handleOpenEditVendorBill(bill)}
                         className={`p-1.5 mr-1 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'} text-sky-500 rounded-lg transition-colors`}
@@ -5142,6 +5251,36 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         </div>
       )}
 
+      {assignPkgPayment && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative`}>
+            <button onClick={() => setAssignPkgPayment(null)} className={`absolute right-4 top-4 ${styles.textSub} hover:${styles.textTitle}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-2`}>Tetapkan Paket Keberangkatan</h3>
+            <p className={`text-[10.5px] ${styles.textSub} mb-4`}>
+              Pembayaran Rp {Number(assignPkgPayment.amount || 0).toLocaleString('id-ID')} ke {assignPkgPayment.vendorName} ({assignPkgPayment.category}) akan masuk HPP paket yang dipilih. Nggak nyentuh Kas/Bank dan nggak bikin jurnal baru, biayanya emang udah ada di Biaya Dibayar Dimuka.
+            </p>
+            <form onSubmit={handleAssignPackageSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <SearchableSelect
+                isDark={isDark}
+                inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
+                placeholder="-- Pilih Paket --"
+                value={assignPkgId}
+                onChange={(val) => setAssignPkgId(val)}
+                options={packagesList.map(p => ({ value: p.id, label: p.name, sublabel: p.code }))}
+              />
+              <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setAssignPkgPayment(null)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>Batal</button>
+                <button type="submit" disabled={savingAssignPkg} className="px-4 py-2 bg-orange-600 text-white rounded-lg font-medium disabled:opacity-60">
+                  {savingAssignPkg ? 'Menyimpan...' : 'Simpan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {showInvoiceCorrectionModal && correctingPayment && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto`}>
@@ -5567,11 +5706,16 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 <SearchableSelect
                   isDark={isDark}
                   inputClassName={`${styles.inputBg} rounded-lg p-2.5`}
-                  placeholder="-- Pilih Paket --"
+                  placeholder="-- Pilih Paket (atau kosongkan kalau bayar tagihan yg belum ada keberangkatan) --"
                   value={vendorForm.packageId}
                   onChange={(val) => setVendorForm({ ...vendorForm, packageId: val })}
                   options={packagesList.map(p => ({ value: p.id, label: p.name, sublabel: p.code }))}
                 />
+                {!vendorForm.packageId && vendorForm.billId && (
+                  <p className="text-[10.5px] mt-1 text-amber-500">
+                    Paket dikosongin: pembayaran ini dicatat "Belum ada keberangkatan" dan biayanya belum masuk HPP paket mana pun. Tetapkan paketnya nanti lewat tombol "Tetapkan Paket" di Riwayat Bayar Vendor.
+                  </p>
+                )}
                 <p className={`text-[10.5px] ${styles.textSub} mt-1`}>
                   Biaya kantor yang bukan buat trip tertentu (sewa, gaji, listrik, dll) dicatat lewat tombol <strong>"+ Biaya Operasional Kantor"</strong>, bukan di sini.
                 </p>
@@ -5605,7 +5749,19 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                   <select
                     className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                     value={vendorForm.billId}
-                    onChange={e => setVendorForm({ ...vendorForm, billId: e.target.value })}
+                    onChange={e => {
+                      const bid = e.target.value;
+                      const b = vendorBills.find(x => x.id === bid);
+                      setVendorForm({
+                        ...vendorForm,
+                        billId: bid,
+                        ...(b ? {
+                          amount: String(Math.max(0, Number(b.amount || 0) - Number(b.amountPaid || 0))),
+                          packageId: vendorForm.packageId || b.packageId || '',
+                          category: b.category || vendorForm.category
+                        } : {})
+                      });
+                    }}
                   >
                     <option value="">-- Bayar Ad-hoc (Tanpa Tagihan) --</option>
                     {vendorBills.filter(b => b.vendorId === vendorForm.vendorId && b.status !== 'paid').map(b => (
