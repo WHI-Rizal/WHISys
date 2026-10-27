@@ -169,6 +169,12 @@ export default function KatalogPublikPage() {
                 {t.label}
               </button>
             ))}
+            <Link
+              href="/kalkulator"
+              className="ml-auto px-4 py-2 rounded-lg text-sm font-semibold border border-emerald-700 text-emerald-700 hover:bg-emerald-50 transition-colors"
+            >
+              Kalkulator Harga
+            </Link>
           </div>
         </div>
       </header>
