@@ -38,6 +38,8 @@ export default function KalkulatorHargaPage() {
   const [discountNote, setDiscountNote] = useState('');
   const [withPpn, setWithPpn] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [dp1, setDp1] = useState('');
+  const [dp2Pct, setDp2Pct] = useState('30');
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +67,8 @@ export default function KalkulatorHargaPage() {
     setExOn({});
     setExQty({});
     setExPrice({});
+    setDp1('');
+    setDp2Pct('30');
   };
 
   const rooms = useMemo(() => {
@@ -115,6 +119,18 @@ export default function KalkulatorHargaPage() {
   const grandTotal = withPpn ? totalDenganPpn : dpp;
   const perPax = totalPax > 0 ? grandTotal / totalPax : 0;
 
+  // Skema pembayaran: DP1 nominal custom, DP2 persen dari total invoice,
+  // Pelunasan = sisanya.
+  const dp1Val = Math.min(num(dp1), grandTotal);
+  const dp2Rp = Math.min(Math.round(grandTotal * Math.min(num(dp2Pct), 100) / 100), Math.max(0, grandTotal - dp1Val));
+  const pelunasan = Math.max(0, grandTotal - dp1Val - dp2Rp);
+  const dp1Over = num(dp1) > grandTotal;
+
+  // Penomoran section dinamis (section "Biaya Tambahan Paket" bisa nggak muncul)
+  const nCustom = excludes.length > 0 ? 4 : 3;
+  const nDisc = nCustom + 1;
+  const nPay = nDisc + 1;
+
   const buildText = () => {
     const lines = [];
     lines.push('*ESTIMASI HARGA PAKET*');
@@ -132,6 +148,13 @@ export default function KalkulatorHargaPage() {
     if (withPpn) lines.push(`PPN 1,1%: ${rp(ppn)}`);
     lines.push(`*TOTAL: ${rp(grandTotal)}*`);
     if (totalPax > 0) lines.push(`(${totalPax} pax, rata-rata ${rp(perPax)}/pax)`);
+    if (dp1Val > 0 || dp2Rp > 0) {
+      lines.push('');
+      lines.push('*Skema Pembayaran*');
+      if (dp1Val > 0) lines.push(`DP 1: ${rp(dp1Val)}`);
+      if (dp2Rp > 0) lines.push(`DP 2 (${num(dp2Pct)}%): ${rp(dp2Rp)}`);
+      lines.push(`Pelunasan: ${rp(pelunasan)}`);
+    }
     lines.push('');
     lines.push('Estimasi harga, bisa berubah sewaktu-waktu. Harga final mengikuti saat booking.');
     return lines.join('\n');
@@ -265,7 +288,7 @@ export default function KalkulatorHargaPage() {
 
                 <section className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 print:hidden">
                   <div className="flex items-center justify-between mb-1">
-                    <h2 className="text-xs font-semibold text-slate-600">4. Tambahan Lain (Single Supplement, Extra Bed, dll)</h2>
+                    <h2 className="text-xs font-semibold text-slate-600">{nCustom}. Tambahan Lain (Single Supplement, Extra Bed, dll)</h2>
                     <button type="button" onClick={addCustom} className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline">
                       <Plus className="w-3.5 h-3.5" /> Tambah
                     </button>
@@ -286,7 +309,7 @@ export default function KalkulatorHargaPage() {
                 </section>
 
                 <section className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 print:hidden">
-                  <h2 className="text-xs font-semibold text-slate-600 mb-3">5. Diskon & PPN</h2>
+                  <h2 className="text-xs font-semibold text-slate-600 mb-3">{nDisc}. Diskon & PPN</h2>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs text-slate-600 mb-1">Diskon (Rp, total)</label>
@@ -301,6 +324,22 @@ export default function KalkulatorHargaPage() {
                     <input type="checkbox" className="w-4 h-4 accent-emerald-700" checked={withPpn} onChange={(e) => setWithPpn(e.target.checked)} />
                     Tambahkan PPN 1,1% di total
                   </label>
+                </section>
+
+                <section className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 print:hidden">
+                  <h2 className="text-xs font-semibold text-slate-600 mb-1">{nPay}. Skema Pembayaran</h2>
+                  <p className="text-[11px] text-slate-400 mb-3">DP 1 diisi nominal bebas, DP 2 dalam persen dari total invoice, pelunasan otomatis sisanya.</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-slate-600 mb-1">DP 1 (Rp)</label>
+                      <input type="number" min="0" inputMode="numeric" placeholder="0" className={inputCls} value={dp1} onChange={(e) => setDp1(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-600 mb-1">DP 2 (% dari total invoice)</label>
+                      <input type="number" min="0" max="100" inputMode="numeric" placeholder="30" className={inputCls} value={dp2Pct} onChange={(e) => setDp2Pct(e.target.value)} />
+                    </div>
+                  </div>
+                  {dp1Over && <p className="text-[11px] text-rose-600 mt-2">DP 1 lebih besar dari total invoice, dibatasi sebesar total.</p>}
                 </section>
 
                 <section className="bg-white border-2 border-emerald-700 rounded-xl p-4 sm:p-5">
@@ -337,6 +376,14 @@ export default function KalkulatorHargaPage() {
                           <p className="text-xs text-slate-500 text-right">{totalPax} pax, rata-rata {rp(perPax)}/pax</p>
                         )}
                       </div>
+                      {grandTotal > 0 && (
+                        <div className="border-t border-slate-200 mt-3 pt-3 space-y-1.5 text-sm">
+                          <p className="text-xs font-semibold text-slate-600">Skema Pembayaran</p>
+                          <div className="flex justify-between"><span className="text-slate-600">DP 1</span><span>{rp(dp1Val)}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-600">DP 2 ({num(dp2Pct)}%)</span><span>{rp(dp2Rp)}</span></div>
+                          <div className="flex justify-between font-semibold text-slate-900"><span>Pelunasan</span><span>{rp(pelunasan)}</span></div>
+                        </div>
+                      )}
                       <p className="text-[10.5px] text-slate-400 mt-3">Estimasi harga, bisa berubah sewaktu-waktu. Harga final mengikuti saat booking.</p>
                     </>
                   )}
