@@ -39,7 +39,7 @@ export default function KalkulatorHargaPage() {
   const [withPpn, setWithPpn] = useState(true);
   const [copied, setCopied] = useState(false);
   const [dp1, setDp1] = useState('');
-  const [dp2Pct, setDp2Pct] = useState('30');
+  const DP2_PCT = 30; // DP 2 dikunci 30% dari total invoice
 
   useEffect(() => {
     let cancelled = false;
@@ -68,7 +68,6 @@ export default function KalkulatorHargaPage() {
     setExQty({});
     setExPrice({});
     setDp1('');
-    setDp2Pct('30');
   };
 
   const rooms = useMemo(() => {
@@ -122,7 +121,7 @@ export default function KalkulatorHargaPage() {
   // Skema pembayaran: DP1 nominal custom, DP2 persen dari total invoice,
   // Pelunasan = sisanya.
   const dp1Val = Math.min(num(dp1), grandTotal);
-  const dp2Rp = Math.min(Math.round(grandTotal * Math.min(num(dp2Pct), 100) / 100), Math.max(0, grandTotal - dp1Val));
+  const dp2Rp = Math.min(Math.round(grandTotal * DP2_PCT / 100), Math.max(0, grandTotal - dp1Val));
   const pelunasan = Math.max(0, grandTotal - dp1Val - dp2Rp);
   const dp1Over = num(dp1) > grandTotal;
 
@@ -152,7 +151,7 @@ export default function KalkulatorHargaPage() {
       lines.push('');
       lines.push('*Skema Pembayaran*');
       if (dp1Val > 0) lines.push(`DP 1: ${rp(dp1Val)}`);
-      if (dp2Rp > 0) lines.push(`DP 2 (${num(dp2Pct)}%): ${rp(dp2Rp)}`);
+      if (dp2Rp > 0) lines.push(`DP 2 (${DP2_PCT}%): ${rp(dp2Rp)}`);
       lines.push(`Pelunasan: ${rp(pelunasan)}`);
     }
     lines.push('');
@@ -181,7 +180,7 @@ export default function KalkulatorHargaPage() {
   const inputCls = 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500';
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="bg-white border-b border-slate-200 print:hidden">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-5">
           <Link href="/katalog" className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 mb-2">
@@ -328,15 +327,15 @@ export default function KalkulatorHargaPage() {
 
                 <section className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 print:hidden">
                   <h2 className="text-xs font-semibold text-slate-600 mb-1">{nPay}. Skema Pembayaran</h2>
-                  <p className="text-[11px] text-slate-400 mb-3">DP 1 diisi nominal bebas, DP 2 dalam persen dari total invoice, pelunasan otomatis sisanya.</p>
+                  <p className="text-[11px] text-slate-400 mb-3">DP 1 diisi nominal bebas, DP 2 otomatis 30% dari total invoice, pelunasan otomatis sisanya.</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs text-slate-600 mb-1">DP 1 (Rp)</label>
                       <input type="number" min="0" inputMode="numeric" placeholder="0" className={inputCls} value={dp1} onChange={(e) => setDp1(e.target.value)} />
                     </div>
                     <div>
-                      <label className="block text-xs text-slate-600 mb-1">DP 2 (% dari total invoice)</label>
-                      <input type="number" min="0" max="100" inputMode="numeric" placeholder="30" className={inputCls} value={dp2Pct} onChange={(e) => setDp2Pct(e.target.value)} />
+                      <label className="block text-xs text-slate-600 mb-1">DP 2 ({DP2_PCT}% dari total invoice)</label>
+                      <input type="text" readOnly disabled className={`${inputCls} bg-slate-100 text-slate-700 cursor-not-allowed`} value={`${DP2_PCT}% = ${rp(dp2Rp)}`} />
                     </div>
                   </div>
                   {dp1Over && <p className="text-[11px] text-rose-600 mt-2">DP 1 lebih besar dari total invoice, dibatasi sebesar total.</p>}
@@ -362,12 +361,12 @@ export default function KalkulatorHargaPage() {
                         ))}
                       </div>
                       <div className="border-t border-slate-200 mt-3 pt-3 space-y-1.5 text-sm">
-                        <div className="flex justify-between"><span className="text-slate-600">Subtotal</span><span>{rp(subtotal)}</span></div>
+                        <div className="flex justify-between"><span className="text-slate-600">Subtotal</span><span className="font-medium text-slate-900">{rp(subtotal)}</span></div>
                         {diskon > 0 && (
                           <div className="flex justify-between text-rose-600"><span>Diskon{discountNote ? ` (${discountNote})` : ''}</span><span>-{rp(diskon)}</span></div>
                         )}
                         {withPpn && (
-                          <div className="flex justify-between"><span className="text-slate-600">PPN 1,1%</span><span>{rp(ppn)}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-600">PPN 1,1%</span><span className="font-medium text-slate-900">{rp(ppn)}</span></div>
                         )}
                         <div className="flex justify-between text-lg font-bold text-emerald-800 pt-1">
                           <span>TOTAL</span><span>{rp(grandTotal)}</span>
@@ -379,8 +378,8 @@ export default function KalkulatorHargaPage() {
                       {grandTotal > 0 && (
                         <div className="border-t border-slate-200 mt-3 pt-3 space-y-1.5 text-sm">
                           <p className="text-xs font-semibold text-slate-600">Skema Pembayaran</p>
-                          <div className="flex justify-between"><span className="text-slate-600">DP 1</span><span>{rp(dp1Val)}</span></div>
-                          <div className="flex justify-between"><span className="text-slate-600">DP 2 ({num(dp2Pct)}%)</span><span>{rp(dp2Rp)}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-600">DP 1</span><span className="font-medium text-slate-900">{rp(dp1Val)}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-600">DP 2 ({DP2_PCT}%)</span><span className="font-medium text-slate-900">{rp(dp2Rp)}</span></div>
                           <div className="flex justify-between font-semibold text-slate-900"><span>Pelunasan</span><span>{rp(pelunasan)}</span></div>
                         </div>
                       )}
