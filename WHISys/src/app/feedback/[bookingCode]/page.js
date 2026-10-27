@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, query, where, getDocs, limit } from 'firebase/firestore';
 import { Star, Send, CheckCircle2, Plane, ExternalLink, Copy, Check, AlertTriangle, Loader2 } from 'lucide-react';
-import { CS_NAMES, SURVEY_SECTIONS, STAR_QUESTIONS } from '@/lib/surveyConfig';
+import { CS_NAMES, TL_NAMES, SURVEY_SECTIONS, STAR_QUESTIONS } from '@/lib/surveyConfig';
 
 const GOOGLE_REVIEW_LINK = 'https://www.google.com/maps/place/Wisata+Halal+Indonesia/@-6.3127371,106.767536,17z/data=!3m1!4b1!4m6!3m5!1s0x2e69ef800cfab2df:0x6c9f79f91ef9de17!8m2!3d-6.3127424!4d106.7701109!16s%2Fg%2F11v0qsvbxm?hl=en-GB&entry=ttu';
 
@@ -33,7 +33,8 @@ export default function PublicFeedbackPage({ params }) {
   const [answers, setAnswers] = useState({});
   const [csChoice, setCsChoice] = useState('');
   const [csCustom, setCsCustom] = useState('');
-  const [tlName, setTlName] = useState('');
+  const [tlChoice, setTlChoice] = useState('');
+  const [tlCustom, setTlCustom] = useState('');
   const [tlSaran, setTlSaran] = useState('');
   const [tgName, setTgName] = useState('');
   const [tgSaran, setTgSaran] = useState('');
@@ -101,7 +102,8 @@ export default function PublicFeedbackPage({ params }) {
       const csName = (csChoice === '__other' ? csCustom : csChoice).trim();
       const survey = {};
       if (csName) survey.csName = csName;
-      if (tlName.trim()) survey.tlName = tlName.trim();
+      const tlNameFinal = (tlChoice === '__other' ? tlCustom : tlChoice).trim();
+      if (tlNameFinal) survey.tlName = tlNameFinal;
       if (tlSaran.trim()) survey.tlSaran = tlSaran.trim().slice(0, 500);
       if (tgName.trim()) survey.tgName = tgName.trim();
       if (tgSaran.trim()) survey.tgSaran = tgSaran.trim().slice(0, 500);
@@ -294,7 +296,14 @@ export default function PublicFeedbackPage({ params }) {
                   {sec.key === 'tl' && (
                     <div style={{ marginBottom: '0.9rem' }}>
                       <label style={svLabel}>Nama Tour Leader</label>
-                      <input type="text" value={tlName} onChange={(e) => setTlName(e.target.value)} placeholder="Nama Tour Leader" style={svInput} />
+                      <select value={tlChoice} onChange={(e) => setTlChoice(e.target.value)} style={svInput}>
+                        <option value="">-- Pilih --</option>
+                        {TL_NAMES.map((n) => <option key={n} value={n}>{n}</option>)}
+                        <option value="__other">Isi Sendiri</option>
+                      </select>
+                      {tlChoice === '__other' && (
+                        <input type="text" value={tlCustom} onChange={(e) => setTlCustom(e.target.value)} placeholder="Nama Tour Leader" style={{ ...svInput, marginTop: '0.4rem' }} />
+                      )}
                     </div>
                   )}
 
