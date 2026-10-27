@@ -4,8 +4,15 @@ import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, query, where, getDocs, limit } from 'firebase/firestore';
 import { Star, Send, CheckCircle2, Plane, ExternalLink, Copy, Check, AlertTriangle, Loader2 } from 'lucide-react';
+import { CS_NAMES, SURVEY_SECTIONS, STAR_QUESTIONS } from '@/lib/surveyConfig';
 
 const GOOGLE_REVIEW_LINK = 'https://www.google.com/maps/place/Wisata+Halal+Indonesia/@-6.3127371,106.767536,17z/data=!3m1!4b1!4m6!3m5!1s0x2e69ef800cfab2df:0x6c9f79f91ef9de17!8m2!3d-6.3127424!4d106.7701109!16s%2Fg%2F11v0qsvbxm?hl=en-GB&entry=ttu';
+
+const svLabel = { display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '0.35rem' };
+const svInput = {
+  width: '100%', padding: '0.6rem 0.8rem', backgroundColor: '#1e293b', border: '1px solid #334155',
+  borderRadius: '0.6rem', color: '#fff', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: '0.82rem'
+};
 
 export default function PublicFeedbackPage({ params }) {
   const bookingCode = params?.bookingCode || '';
@@ -21,6 +28,17 @@ export default function PublicFeedbackPage({ params }) {
   const packageId = verifiedBooking?.packageId || '';
 
   const [rating, setRating] = useState(5);
+  // Survey Pelayanan & Kepuasan (semua OPSIONAL) — jawaban skala disimpan per
+  // key sebagai angka 5..1, lihat src/lib/surveyConfig.js.
+  const [answers, setAnswers] = useState({});
+  const [csChoice, setCsChoice] = useState('');
+  const [csCustom, setCsCustom] = useState('');
+  const [tlName, setTlName] = useState('');
+  const [tlSaran, setTlSaran] = useState('');
+  const [tgName, setTgName] = useState('');
+  const [tgSaran, setTgSaran] = useState('');
+  const [nextCountry, setNextCountry] = useState('');
+  const setAnswer = (key, val) => setAnswers((a) => ({ ...a, [key]: val }));
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -80,6 +98,16 @@ export default function PublicFeedbackPage({ params }) {
     setSubmitting(true);
     setError('');
     try {
+      const csName = (csChoice === '__other' ? csCustom : csChoice).trim();
+      const survey = {};
+      if (csName) survey.csName = csName;
+      if (tlName.trim()) survey.tlName = tlName.trim();
+      if (tlSaran.trim()) survey.tlSaran = tlSaran.trim().slice(0, 500);
+      if (tgName.trim()) survey.tgName = tgName.trim();
+      if (tgSaran.trim()) survey.tgSaran = tgSaran.trim().slice(0, 500);
+      if (nextCountry.trim()) survey.nextCountry = nextCountry.trim().slice(0, 100);
+      const cleanAnswers = Object.fromEntries(Object.entries(answers).filter(([, v]) => typeof v === 'number'));
+      if (Object.keys(cleanAnswers).length > 0) survey.answers = cleanAnswers;
       await addDoc(collection(db, 'feedback'), {
         bookingCode,
         jamaahName: jamaahName || 'Jamaah',
@@ -87,6 +115,7 @@ export default function PublicFeedbackPage({ params }) {
         packageId: packageId || null,
         rating,
         comment: comment.trim(),
+        ...(Object.keys(survey).length > 0 ? { survey } : {}),
         source: 'self',
         createdAt: new Date().toISOString()
       });
@@ -240,8 +269,103 @@ export default function PublicFeedbackPage({ params }) {
             </div>
 
             <div style={{ marginBottom: '1.25rem' }}>
+              <p style={{ color: '#94a3b8', fontSize: '0.75rem', lineHeight: 1.6, margin: '0 0 0.9rem', textAlign: 'center' }}>
+                Bantu kami jadi travel dengan pelayanan nomor 1. Survei singkat di bawah ini boleh diisi sebagian atau dilewati.
+              </p>
+
+              {SURVEY_SECTIONS.map((sec) => (
+                <div key={sec.key} style={{ marginBottom: '1.1rem', padding: '1rem', backgroundColor: '#0b1220', border: '1px solid #1e293b', borderRadius: '0.75rem' }}>
+                  <p style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 700, margin: '0 0 0.75rem' }}>{sec.title}</p>
+
+                  {sec.key === 'cs' && (
+                    <div style={{ marginBottom: '0.9rem' }}>
+                      <label style={svLabel}>Nama Customer Service</label>
+                      <select value={csChoice} onChange={(e) => setCsChoice(e.target.value)} style={svInput}>
+                        <option value="">-- Pilih --</option>
+                        {CS_NAMES.map((n) => <option key={n} value={n}>{n}</option>)}
+                        <option value="__other">Isi Sendiri</option>
+                      </select>
+                      {csChoice === '__other' && (
+                        <input type="text" value={csCustom} onChange={(e) => setCsCustom(e.target.value)} placeholder="Nama Customer Service" style={{ ...svInput, marginTop: '0.4rem' }} />
+                      )}
+                    </div>
+                  )}
+
+                  {sec.key === 'tl' && (
+                    <div style={{ marginBottom: '0.9rem' }}>
+                      <label style={svLabel}>Nama Tour Leader</label>
+                      <input type="text" value={tlName} onChange={(e) => setTlName(e.target.value)} placeholder="Nama Tour Leader" style={svInput} />
+                    </div>
+                  )}
+
+                  {sec.questions.map((q) => (
+                    <div key={q.key} style={{ marginBottom: '0.9rem' }}>
+                      <p style={{ color: '#e2e8f0', fontSize: '0.8rem', margin: '0 0 0.45rem', lineHeight: 1.5 }}>{q.text}</p>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                        {q.options.map((label, i) => {
+                          const score = 5 - i;
+                          const on = answers[q.key] === score;
+                          return (
+                            <button
+                              type="button" key={label}
+                              onClick={() => setAnswer(q.key, on ? undefined : score)}
+                              style={{
+                                padding: '0.4rem 0.7rem', borderRadius: '999px', fontSize: '0.72rem', cursor: 'pointer',
+                                border: on ? '1px solid #10b981' : '1px solid #334155',
+                                backgroundColor: on ? '#065f46' : '#1e293b', color: on ? '#a7f3d0' : '#cbd5e1'
+                              }}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+
+                  {sec.key === 'tl' && (
+                    <>
+                      <div style={{ marginBottom: '0.9rem' }}>
+                        <label style={svLabel}>Saran untuk Tour Leader</label>
+                        <textarea rows={2} value={tlSaran} onChange={(e) => setTlSaran(e.target.value)} style={{ ...svInput, resize: 'vertical' }} />
+                      </div>
+                      <div style={{ marginBottom: '0.9rem' }}>
+                        <label style={svLabel}>Nama Tour Guide</label>
+                        <input type="text" value={tgName} onChange={(e) => setTgName(e.target.value)} placeholder="Nama Tour Guide" style={svInput} />
+                      </div>
+                      <div>
+                        <label style={svLabel}>Saran untuk Tour Guide</label>
+                        <textarea rows={2} value={tgSaran} onChange={(e) => setTgSaran(e.target.value)} style={{ ...svInput, resize: 'vertical' }} />
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+
+              <div style={{ marginBottom: '1.1rem', padding: '1rem', backgroundColor: '#0b1220', border: '1px solid #1e293b', borderRadius: '0.75rem' }}>
+                <p style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 700, margin: '0 0 0.75rem' }}>Fasilitas & Pengalaman Trip</p>
+                {STAR_QUESTIONS.map((q) => (
+                  <div key={q.key} style={{ marginBottom: '0.9rem' }}>
+                    <p style={{ color: '#e2e8f0', fontSize: '0.8rem', margin: '0 0 0.45rem', lineHeight: 1.5 }}>{q.text}</p>
+                    <div style={{ display: 'flex', gap: '0.3rem' }}>
+                      {[1, 2, 3, 4, 5].map((n) => (
+                        <button type="button" key={n} onClick={() => setAnswer(q.key, answers[q.key] === n ? undefined : n)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                          <Star size={28} color={n <= (answers[q.key] || 0) ? '#fbbf24' : '#334155'} fill={n <= (answers[q.key] || 0) ? '#fbbf24' : 'none'} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <div>
+                  <label style={svLabel}>Ke negara mana Anda ingin trip selanjutnya bersama kami?</label>
+                  <input type="text" value={nextCountry} onChange={(e) => setNextCountry(e.target.value)} placeholder="Contoh: Jepang" style={svInput} />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '1.25rem' }}>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Cerita / Masukan Anda (Opsional)
+                Masukan & Saran untuk Wisata Halal Indonesia (Opsional)
               </label>
               <textarea
                 rows={4}
