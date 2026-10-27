@@ -9,6 +9,25 @@
 
 export const CS_NAMES = ['Ocha', 'Fani', 'Nita', 'Nia', 'Arbi'];
 
+export const TL_NAMES = [
+  'Fardhan Mandaria',
+  'Umar Faruq',
+  'Husaini/Uchen',
+  'Dhydha Maryudha',
+  'Mochamad Fajar Akbar',
+  'Muhammad Jajuli/Ridho',
+  'Surya Saputra',
+  'Permady Primasandy/Sandy',
+  'Elan Farhani Ramadhan/Dolet',
+  'Reza Akbar Ramanda',
+  'Idfi Pancani',
+  'Yusup Abdul Rauf',
+  'Emzy Ardiwinata',
+  'Johan Prawira Sodiq',
+  'Gilang Malcom Habiebie (Umroh)',
+  'Surya Huda Aprila (Umroh)',
+];
+
 export const SCALE_5 = [5, 4, 3, 2, 1];
 
 export const SURVEY_SECTIONS = [
