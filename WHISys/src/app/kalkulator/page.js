@@ -32,6 +32,7 @@ export default function KalkulatorHargaPage() {
   const [pax, setPax] = useState({ main: '', triple: '', double: '', child: '' });
   const [exOn, setExOn] = useState({});
   const [exQty, setExQty] = useState({});
+  const [exPrice, setExPrice] = useState({});
   const [custom, setCustom] = useState([]);
   const [discount, setDiscount] = useState('');
   const [discountNote, setDiscountNote] = useState('');
@@ -63,6 +64,7 @@ export default function KalkulatorHargaPage() {
     setPax({ main: '', triple: '', double: '', child: '' });
     setExOn({});
     setExQty({});
+    setExPrice({});
   };
 
   const rooms = useMemo(() => {
@@ -85,10 +87,11 @@ export default function KalkulatorHargaPage() {
       .filter((it) => num(it.amount) > 0 && !/ppn/i.test(it.label || ''));
   }, [pkg]);
 
+  const singleTier = rooms.length === 1;
   const totalPax = rooms.reduce((a, r) => a + num(pax[r.key]), 0);
 
   const roomLines = rooms
-    .map((r) => ({ label: `Paket ${r.label}`, qty: num(pax[r.key]), price: r.price }))
+    .map((r) => ({ label: singleTier ? 'Paket' : `Paket ${r.label}`, qty: num(pax[r.key]), price: r.price }))
     .filter((l) => l.qty > 0)
     .map((l) => ({ ...l, total: l.qty * l.price }));
 
@@ -96,7 +99,8 @@ export default function KalkulatorHargaPage() {
     .filter((it) => exOn[it.idx])
     .map((it) => {
       const qty = exQty[it.idx] !== undefined && exQty[it.idx] !== '' ? num(exQty[it.idx]) : totalPax;
-      return { label: it.label, qty, price: num(it.amount), total: qty * num(it.amount) };
+      const price = exPrice[it.idx] !== undefined && exPrice[it.idx] !== '' ? num(exPrice[it.idx]) : num(it.amount);
+      return { label: it.label, qty, price, total: qty * price };
     })
     .filter((l) => l.qty > 0);
 
@@ -151,7 +155,7 @@ export default function KalkulatorHargaPage() {
   const updCustom = (id, field, value) => setCustom((c) => c.map((x) => (x.id === id ? { ...x, [field]: value } : x)));
   const delCustom = (id) => setCustom((c) => c.filter((x) => x.id !== id));
 
-  const inputCls = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500';
+  const inputCls = 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500';
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -201,7 +205,7 @@ export default function KalkulatorHargaPage() {
                       {rooms.map((r) => (
                         <div key={r.key}>
                           <label className="block text-xs text-slate-600 mb-1">
-                            {r.label} <span className="text-slate-400">({rp(r.price)}/pax)</span>
+                            {singleTier ? 'Jumlah peserta' : r.label} <span className="text-slate-400">({rp(r.price)}/pax)</span>
                           </label>
                           <input
                             type="number" min="0" inputMode="numeric" placeholder="0"
@@ -219,25 +223,39 @@ export default function KalkulatorHargaPage() {
                 {excludes.length > 0 && (
                   <section className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 print:hidden">
                     <h2 className="text-xs font-semibold text-slate-600 mb-1">3. Biaya Tambahan Paket</h2>
-                    <p className="text-[11px] text-slate-400 mb-3">Centang yang mau ditambahkan. Jumlahnya otomatis sebanyak total peserta, bisa diubah.</p>
-                    <div className="space-y-2">
+                    <p className="text-[11px] text-slate-400 mb-3">Centang yang mau ditambahkan. Harga dan jumlahnya bisa diubah sesuai kebutuhan.</p>
+                    <div className="space-y-3">
                       {excludes.map((it) => (
-                        <div key={it.idx} className="flex items-center gap-3">
-                          <input
-                            type="checkbox" className="w-4 h-4 accent-emerald-700"
-                            checked={!!exOn[it.idx]}
-                            onChange={(e) => setExOn({ ...exOn, [it.idx]: e.target.checked })}
-                          />
-                          <div className="flex-1 text-sm text-slate-800">
-                            {it.label} <span className="text-slate-400 text-xs">{rp(it.amount)}{it.note ? ` ${it.note}` : ''}</span>
-                          </div>
-                          {exOn[it.idx] && (
+                        <div key={it.idx}>
+                          <label className="flex items-center gap-3 cursor-pointer">
                             <input
-                              type="number" min="0" inputMode="numeric"
-                              className="w-20 border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
-                              value={exQty[it.idx] !== undefined ? exQty[it.idx] : totalPax}
-                              onChange={(e) => setExQty({ ...exQty, [it.idx]: e.target.value })}
+                              type="checkbox" className="w-4 h-4 accent-emerald-700"
+                              checked={!!exOn[it.idx]}
+                              onChange={(e) => setExOn({ ...exOn, [it.idx]: e.target.checked })}
                             />
+                            <span className="text-sm text-slate-800">{it.label}</span>
+                          </label>
+                          {exOn[it.idx] && (
+                            <div className="grid grid-cols-2 gap-3 mt-2 ml-7">
+                              <div>
+                                <label className="block text-[11px] text-slate-500 mb-1">Harga (Rp)</label>
+                                <input
+                                  type="number" min="0" inputMode="numeric"
+                                  className={inputCls}
+                                  value={exPrice[it.idx] !== undefined ? exPrice[it.idx] : num(it.amount)}
+                                  onChange={(e) => setExPrice({ ...exPrice, [it.idx]: e.target.value })}
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] text-slate-500 mb-1">Jumlah</label>
+                                <input
+                                  type="number" min="0" inputMode="numeric"
+                                  className={inputCls}
+                                  value={exQty[it.idx] !== undefined ? exQty[it.idx] : totalPax}
+                                  onChange={(e) => setExQty({ ...exQty, [it.idx]: e.target.value })}
+                                />
+                              </div>
+                            </div>
                           )}
                         </div>
                       ))}
