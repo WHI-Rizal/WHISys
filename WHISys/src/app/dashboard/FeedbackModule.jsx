@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth } from '@/lib/firebase';
 import { collection, addDoc, getDocs, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
+import { ALL_ASPECTS, labelForScore } from '@/lib/surveyConfig';
 import { Star, MessageSquareHeart, Plus, X, Trash2, User, Bot, Search, Filter } from 'lucide-react';
 
 const formatDateDDMMYYYY = (dateString) => {
@@ -162,6 +163,34 @@ export default function FeedbackModule({ theme = 'dark' }) {
     }, {})
   ).map(p => ({ ...p, avg: p.total / p.count })).sort((a, b) => a.avg - b.avg);
 
+  // ---- Ringkasan Survey Pelayanan (cuma dari feedback yang ada isi survey-nya) ----
+  const surveyed = feedbackList.filter(f => f.survey && f.survey.answers);
+  const aspectSummary = ALL_ASPECTS.map(a => {
+    const vals = surveyed.map(f => Number(f.survey.answers[a.key])).filter(v => v >= 1 && v <= 5);
+    return { ...a, count: vals.length, avg: vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : 0 };
+  }).filter(a => a.count > 0);
+
+  // Rata-rata per orang (CS atau Tour Leader), digabung kalau namanya sama
+  // walau beda huruf besar/kecil. Nilai tiap orang = rata-rata aspek yang
+  // relevan (CS: 3 pertanyaan CS, TL: 4 pertanyaan TL).
+  const personSummary = (nameKey, aspectKeys) => {
+    const map = {};
+    surveyed.forEach(f => {
+      const raw = (f.survey[nameKey] || '').trim();
+      if (!raw) return;
+      const vals = aspectKeys.map(k => Number(f.survey.answers[k])).filter(v => v >= 1 && v <= 5);
+      if (vals.length === 0) return;
+      const key = raw.toLowerCase();
+      if (!map[key]) map[key] = { name: raw, total: 0, n: 0, responses: 0 };
+      map[key].total += vals.reduce((x, y) => x + y, 0);
+      map[key].n += vals.length;
+      map[key].responses += 1;
+    });
+    return Object.values(map).map(p => ({ ...p, avg: p.total / p.n })).sort((a, b) => a.avg - b.avg);
+  };
+  const csSummary = personSummary('csName', ['csDetail', 'csRamah', 'csFast']);
+  const tlSummary = personSummary('tlName', ['tlTanggungJawab', 'tlMembantu', 'tlShalat', 'tlKomunikatif']);
+
   return (
     <div className="space-y-6">
       <div className={`flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${styles.cardBg} p-6 rounded-xl border`}>
@@ -221,6 +250,50 @@ export default function FeedbackModule({ theme = 'dark' }) {
         </div>
       )}
 
+      {/* SURVEY PELAYANAN & KEPUASAN */}
+      {aspectSummary.length > 0 && (
+        <div className={`${styles.cardBg} border rounded-xl p-5 space-y-5`}>
+          <div>
+            <h4 className={`text-sm font-bold ${styles.textTitle}`}>Survey Pelayanan & Kepuasan</h4>
+            <p className={`text-[11px] ${styles.textSub}`}>Dari {surveyed.length} jamaah yang mengisi survei (skala 1 sampai 5). Yang paling rendah di paling atas.</p>
+          </div>
+          <div className="space-y-2">
+            {aspectSummary.slice().sort((a, b) => a.avg - b.avg).map(a => (
+              <div key={a.key} className={`flex items-center justify-between p-2.5 rounded-lg ${styles.innerBg} border text-xs`}>
+                <span className={styles.textTitle}>{a.label}</span>
+                <div className="flex items-center gap-2">
+                  <StarDisplay value={a.avg} />
+                  <span className="font-bold text-amber-500">{a.avg.toFixed(1)}</span>
+                  <span className={styles.textSub}>({a.count})</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          {(csSummary.length > 0 || tlSummary.length > 0) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {[{ title: 'Per Customer Service', list: csSummary }, { title: 'Per Tour Leader', list: tlSummary }].map(g => (
+                g.list.length > 0 && (
+                  <div key={g.title}>
+                    <p className={`text-xs font-semibold ${styles.textTitle} mb-2`}>{g.title}</p>
+                    <div className="space-y-2">
+                      {g.list.map(p => (
+                        <div key={p.name} className={`flex items-center justify-between p-2.5 rounded-lg ${styles.innerBg} border text-xs`}>
+                          <span className={styles.textTitle}>{p.name}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-amber-500">{p.avg.toFixed(1)}</span>
+                            <span className={styles.textSub}>({p.responses} respon)</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* FILTER */}
       <div className={`${styles.cardBg} p-4 rounded-xl border flex flex-col sm:flex-row gap-3`}>
         <div className="relative flex-1">
@@ -272,6 +345,25 @@ export default function FeedbackModule({ theme = 'dark' }) {
                   <p className={`text-[11px] ${styles.textSub} mb-2`}>{f.packageName || '-'} {f.bookingCode ? `• ${f.bookingCode}` : ''} • {formatDateDDMMYYYY(f.createdAt)}</p>
                   <StarDisplay value={f.rating} />
                   {f.comment && <p className={`text-xs ${styles.textSub} mt-2 leading-relaxed`}>{f.comment}</p>}
+                  {f.survey && (
+                    <details className="mt-3">
+                      <summary className="text-[11px] text-emerald-500 cursor-pointer select-none">Lihat detail survey</summary>
+                      <div className={`mt-2 p-3 rounded-lg ${styles.innerBg} border text-[11px] space-y-1.5`}>
+                        {f.survey.csName && <div><span className={styles.textSub}>Customer Service:</span> <span className={styles.textTitle}>{f.survey.csName}</span></div>}
+                        {f.survey.tlName && <div><span className={styles.textSub}>Tour Leader:</span> <span className={styles.textTitle}>{f.survey.tlName}</span></div>}
+                        {f.survey.tgName && <div><span className={styles.textSub}>Tour Guide:</span> <span className={styles.textTitle}>{f.survey.tgName}</span></div>}
+                        {f.survey.answers && ALL_ASPECTS.filter(a => f.survey.answers[a.key] != null).map(a => (
+                          <div key={a.key} className="flex justify-between gap-3">
+                            <span className={styles.textSub}>{a.label}</span>
+                            <span className={styles.textTitle}>{labelForScore(a.key, f.survey.answers[a.key])}</span>
+                          </div>
+                        ))}
+                        {f.survey.tlSaran && <div><span className={styles.textSub}>Saran TL:</span> <span className={styles.textTitle}>{f.survey.tlSaran}</span></div>}
+                        {f.survey.tgSaran && <div><span className={styles.textSub}>Saran Tour Guide:</span> <span className={styles.textTitle}>{f.survey.tgSaran}</span></div>}
+                        {f.survey.nextCountry && <div><span className={styles.textSub}>Trip berikutnya ingin ke:</span> <span className={styles.textTitle}>{f.survey.nextCountry}</span></div>}
+                      </div>
+                    </details>
+                  )}
                 </div>
                 <button
                   onClick={() => handleDelete(f.id)}
