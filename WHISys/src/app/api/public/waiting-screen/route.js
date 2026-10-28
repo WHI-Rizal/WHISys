@@ -36,6 +36,11 @@ export async function GET(request) {
     const slides = (Array.isArray(cfg.slides) ? cfg.slides : []).filter((s) => s && s.enabled !== false);
     const needPackages = slides.some((s) => s.type === 'packages');
     const needTesti = slides.some((s) => s.type === 'testimonials');
+    const pkgSlides = slides.filter((s) => s.type === 'packages');
+    // Flyer (gambar base64) lumayan besar, jadi cuma dikirim kalau ada slide
+    // jadwal yang tampilannya "flyer", dan cuma buat paket yang bakal tampil.
+    const needFlyer = pkgSlides.some((s) => s.layout !== 'cards');
+    const maxN = Math.min(12, Math.max(1, ...pkgSlides.map((s) => Number(s.maxItems) || 6)));
 
     let packages = [];
     if (needPackages) {
@@ -44,7 +49,7 @@ export async function GET(request) {
       let list = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
         .filter((p) => !p.departureDate || new Date(p.departureDate) >= today)
         .sort((a, b) => new Date(a.departureDate || 0) - new Date(b.departureDate || 0))
-        .slice(0, 12);
+        .slice(0, maxN);
       // Sisa seat live dari `packages` (mirror katalog bisa telat).
       try {
         if (list.length > 0) {
@@ -69,6 +74,7 @@ export async function GET(request) {
         destinationCity: p.destinationCity || '',
         priceFrom: priceOf(p),
         quotaRemaining: p.quotaRemaining != null ? Math.max(0, Number(p.quotaRemaining) || 0) : null,
+        ...(needFlyer && p.flyerImageDataUrl ? { flyerImageDataUrl: p.flyerImageDataUrl } : {}),
       }));
     }
 
