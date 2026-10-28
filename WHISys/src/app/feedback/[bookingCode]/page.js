@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, query, where, getDocs, limit } from 'firebase/firestore';
+import { collection, addDoc } from 'firebase/firestore';
 import { Star, Send, CheckCircle2, Plane, ExternalLink, Copy, Check, AlertTriangle, Loader2 } from 'lucide-react';
 import { CS_NAMES, TL_NAMES, SURVEY_SECTIONS, STAR_QUESTIONS } from '@/lib/surveyConfig';
 
@@ -56,17 +56,16 @@ export default function PublicFeedbackPage({ params }) {
         return;
       }
       try {
-        const q = query(collection(db, 'bookings'), where('bookingCode', '==', bookingCode), limit(1));
-        const snap = await getDocs(q);
-        if (snap.empty) {
-          setBookingNotFound(true);
-        } else {
-          const bk = snap.docs[0].data();
+        const res = await fetch(`/api/public/feedback-booking?code=${encodeURIComponent(bookingCode)}`, { cache: 'no-store' });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.found) {
           setVerifiedBooking({
-            jamaahName: bk.jamaahName || '',
-            packageName: bk.packageName || '',
-            packageId: bk.packageId || ''
+            jamaahName: data.jamaahName || '',
+            packageName: data.packageName || '',
+            packageId: data.packageId || ''
           });
+        } else {
+          setBookingNotFound(true);
         }
       } catch (err) {
         console.error('Gagal verifikasi kode booking:', err);
