@@ -138,8 +138,40 @@ function youtubeId(url) {
   return m ? m[1] : '';
 }
 
-function VideoSlide({ slide, onEnded, soundOk }) {
+const isShorts = (url) => /youtube\.com\/shorts\//i.test(String(url || ''));
+
+function ShortsSide({ slide, packages }) {
+  const qrTarget = slide.qrUrl || (typeof window !== 'undefined' ? `${window.location.origin}/katalog` : '');
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=8&data=${encodeURIComponent(qrTarget)}`;
+  const list = (packages || []).slice(0, 2);
+  return (
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '1.2em', justifyContent: 'center' }}>
+      {slide.title && <div style={{ fontSize: '2.4em', fontWeight: 800, color: C.gold, lineHeight: 1.15 }}>{slide.title}</div>}
+      {list.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8em' }}>
+          <div style={{ color: C.sub, fontSize: '0.9em', letterSpacing: '0.15em', fontWeight: 700 }}>KEBERANGKATAN TERDEKAT</div>
+          {list.map((p) => (
+            <div key={p.id} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: '1em', padding: '1em 1.3em', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1em' }}>
+              <div>
+                <div style={{ fontSize: '1.4em', fontWeight: 700, lineHeight: 1.25 }}>{p.name}</div>
+                <div style={{ color: C.sub, marginTop: '0.2em' }}>{fmtDate(p.departureDate)}</div>
+              </div>
+              <SeatBadge n={p.quotaRemaining} />
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1.4em', marginTop: '0.5em' }}>
+        <img src={qrSrc} alt="QR" style={{ width: '9em', height: '9em', background: '#fff', borderRadius: '0.6em', padding: '0.3em' }} />
+        <div style={{ fontSize: '1.4em', lineHeight: 1.4, whiteSpace: 'pre-line' }}>{slide.qrLabel || 'Scan untuk lihat katalog\ndan hitung harga paket'}</div>
+      </div>
+    </div>
+  );
+}
+
+function VideoSlide({ slide, onEnded, soundOk, packages }) {
   const yt = youtubeId(slide.videoUrl);
+  const shorts = !!yt && isShorts(slide.videoUrl);
   const muted = !(slide.sound && soundOk);
   const vref = useRef(null);
   // Video file: kalau diminta bersuara tapi browser nolak, putar bisu saja
@@ -152,9 +184,9 @@ function VideoSlide({ slide, onEnded, soundOk }) {
     if (pr && pr.catch) pr.catch(() => { v.muted = true; v.play().catch(() => {}); });
   }, [muted, slide.videoUrl]);
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', gap: '0.8em' }}>
-      {slide.title && <h2 style={{ fontSize: '1.8em', margin: 0, color: C.gold }}>{slide.title}</h2>}
-      <div style={{ flex: 1, minHeight: 0, borderRadius: '1em', overflow: 'hidden', background: '#000' }}>
+    <div style={shorts ? { width: '100%', height: '100%', display: 'flex', gap: '3em' } : { width: '100%', height: '100%', display: 'flex', flexDirection: 'column', gap: '0.8em' }}>
+      {!shorts && slide.title && <h2 style={{ fontSize: '1.8em', margin: 0, color: C.gold }}>{slide.title}</h2>}
+      <div style={shorts ? { height: '100%', aspectRatio: '9 / 16', flex: '0 0 auto', borderRadius: '1.2em', overflow: 'hidden', background: '#000' } : { flex: 1, minHeight: 0, borderRadius: '1em', overflow: 'hidden', background: '#000' }}>
         {yt ? (
           <iframe
             key={muted ? 'm' : 'u'}
@@ -174,6 +206,7 @@ function VideoSlide({ slide, onEnded, soundOk }) {
           <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.sub, fontSize: '1.4em' }}>Link video belum diisi.</div>
         )}
       </div>
+      {shorts && <ShortsSide slide={slide} packages={packages} />}
     </div>
   );
 }
@@ -332,7 +365,7 @@ export default function LayarTunggu() {
         ) : current.type === 'packages' ? (
           <PackagesSlide slide={current} packages={data.packages || []} page={pkgPage} />
         ) : current.type === 'video' ? (
-          <VideoSlide slide={current} onEnded={nextSlide} soundOk={soundOk} />
+          <VideoSlide slide={current} onEnded={nextSlide} soundOk={soundOk} packages={data.packages || []} />
         ) : current.type === 'testimonials' ? (
           <TestimonialSlide slide={current} item={testiItem} />
         ) : (
