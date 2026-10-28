@@ -251,6 +251,55 @@ export default function PublicFeedbackPage({ params }) {
           <form onSubmit={handleSubmit}>
             <div style={{ height: '1rem' }} />
 
+              <div style={{ textAlign: 'center', margin: '1.5rem 0 1.1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Rating Keseluruhan
+                </label>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: '0.4rem' }}>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button type="button" key={n} onClick={() => setRating(n)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                      <Star size={36} color={n <= rating ? '#fbbf24' : '#334155'} fill={n <= rating ? '#fbbf24' : 'none'} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '1.1rem', padding: '1rem', backgroundColor: '#0b1220', border: '1px solid #1e293b', borderRadius: '0.75rem' }}>
+                <p style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 700, margin: '0 0 0.75rem' }}>Fasilitas & Pengalaman Trip</p>
+                {TEXT_QUESTIONS.map((q) => (
+                  <div key={q.key} style={{ marginBottom: '0.9rem' }}>
+                    <label style={{ ...svLabel, color: '#e2e8f0', fontWeight: 400, fontSize: '0.8rem', lineHeight: 1.5, marginBottom: '0.45rem' }}>{q.text}</label>
+                    <textarea
+                      rows={2}
+                      value={textAns[q.key] || ''}
+                      onChange={(e) => setTextAns((t) => ({ ...t, [q.key]: e.target.value }))}
+                      placeholder="Tulis penilaian Anda di sini..."
+                      style={{ ...svInput, resize: 'vertical' }}
+                    />
+                  </div>
+                ))}
+                <div>
+                  <label style={svLabel}>Ke negara mana Anda ingin trip selanjutnya bersama kami?</label>
+                  <input type="text" value={nextCountry} onChange={(e) => setNextCountry(e.target.value)} placeholder="Contoh: Jepang" style={svInput} />
+                </div>
+                <div style={{ marginTop: '0.9rem' }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Ceritakan pengalaman menarik Anda bersama Wisata Halal Indonesia (Opsional)
+                </label>
+                <textarea
+                  rows={4}
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder="Ceritakan momen paling berkesan selama perjalanan bersama kami..."
+                  style={{
+                    width: '100%', padding: '0.75rem 1rem', backgroundColor: '#1e293b', border: '1px solid #334155',
+                    borderRadius: '0.75rem', color: '#fff', outline: 'none', boxSizing: 'border-box', resize: 'vertical',
+                    fontFamily: 'inherit', fontSize: '0.85rem'
+                  }}
+                />
+              </div>
+              </div>
+
             <div style={{ marginBottom: '1.25rem' }}>
               <p style={{ color: '#94a3b8', fontSize: '0.75rem', lineHeight: 1.6, margin: '0 0 0.9rem', textAlign: 'center' }}>
                 Bantu kami jadi travel dengan pelayanan nomor 1. Survei singkat di bawah ini boleh diisi sebagian atau dilewati.
@@ -332,55 +381,6 @@ export default function PublicFeedbackPage({ params }) {
                 </div>
               ))}
 
-              <div style={{ textAlign: 'center', margin: '1.5rem 0 1.1rem' }}>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Rating Keseluruhan
-                </label>
-                <div style={{ display: 'flex', justifyContent: 'center', gap: '0.4rem' }}>
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <button type="button" key={n} onClick={() => setRating(n)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                      <Star size={36} color={n <= rating ? '#fbbf24' : '#334155'} fill={n <= rating ? '#fbbf24' : 'none'} />
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{ marginBottom: '1.1rem', padding: '1rem', backgroundColor: '#0b1220', border: '1px solid #1e293b', borderRadius: '0.75rem' }}>
-                <p style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 700, margin: '0 0 0.75rem' }}>Fasilitas & Pengalaman Trip</p>
-                {TEXT_QUESTIONS.map((q) => (
-                  <div key={q.key} style={{ marginBottom: '0.9rem' }}>
-                    <label style={{ ...svLabel, color: '#e2e8f0', fontWeight: 400, fontSize: '0.8rem', lineHeight: 1.5, marginBottom: '0.45rem' }}>{q.text}</label>
-                    <textarea
-                      rows={2}
-                      value={textAns[q.key] || ''}
-                      onChange={(e) => setTextAns((t) => ({ ...t, [q.key]: e.target.value }))}
-                      placeholder="Tulis penilaian Anda di sini..."
-                      style={{ ...svInput, resize: 'vertical' }}
-                    />
-                  </div>
-                ))}
-                <div>
-                  <label style={svLabel}>Ke negara mana Anda ingin trip selanjutnya bersama kami?</label>
-                  <input type="text" value={nextCountry} onChange={(e) => setNextCountry(e.target.value)} placeholder="Contoh: Jepang" style={svInput} />
-                </div>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '1.25rem' }}>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Ceritakan pengalaman menarik Anda bersama Wisata Halal Indonesia (Opsional)
-              </label>
-              <textarea
-                rows={4}
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                placeholder="Ceritakan momen paling berkesan selama perjalanan bersama kami..."
-                style={{
-                  width: '100%', padding: '0.75rem 1rem', backgroundColor: '#1e293b', border: '1px solid #334155',
-                  borderRadius: '0.75rem', color: '#fff', outline: 'none', boxSizing: 'border-box', resize: 'vertical',
-                  fontFamily: 'inherit', fontSize: '0.85rem'
-                }}
-              />
             </div>
 
             {error && (
