@@ -315,6 +315,19 @@ export default function WaitingScreenSettings({ theme = 'dark', canEdit = false,
                   <label className={`block text-[11px] ${styles.textSub} mb-1`}>Link video</label>
                   <input className={input} value={s.videoUrl || ''} onChange={(e) => updateSlide(s.id, { videoUrl: e.target.value.trim() })} placeholder="https://www.youtube.com/watch?v=...  atau link langsung file .mp4" />
                 </div>
+                {/youtube\.com\/shorts\//i.test(s.videoUrl || '') && (
+                  <div className="space-y-2 p-2 rounded-lg border border-emerald-500/30">
+                    <p className={`text-[11px] ${styles.textSub}`}>Terdeteksi YouTube Shorts. Layar otomatis dibagi dua: video di kiri, jadwal terdekat dan QR code di kanan.</p>
+                    <div>
+                      <label className={`block text-[11px] ${styles.textSub} mb-1`}>Link tujuan QR code (kosong = halaman katalog)</label>
+                      <input className={input} value={s.qrUrl || ''} onChange={(e) => updateSlide(s.id, { qrUrl: e.target.value.trim() })} placeholder="https://wa.me/62... atau link katalog" />
+                    </div>
+                    <div>
+                      <label className={`block text-[11px] ${styles.textSub} mb-1`}>Tulisan di samping QR</label>
+                      <input className={input} value={s.qrLabel || ''} onChange={(e) => updateSlide(s.id, { qrLabel: e.target.value })} placeholder="Scan untuk lihat katalog dan hitung harga paket" />
+                    </div>
+                  </div>
+                )}
                 {!/(youtube\.com|youtu\.be)/i.test(s.videoUrl || '') && (
                   <label className={`flex items-center gap-2 text-[11px] ${styles.textSub} cursor-pointer`}>
                     <input type="checkbox" className="w-3.5 h-3.5 accent-emerald-500" checked={!!s.untilEnd} onChange={(e) => updateSlide(s.id, { untilEnd: e.target.checked })} />
