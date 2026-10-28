@@ -39,8 +39,56 @@ function SeatBadge({ n }) {
   );
 }
 
-function PackagesSlide({ slide, packages }) {
-  const list = packages.slice(0, Number(slide.maxItems) || 6);
+const PER_PAGE_FLYER = 4;
+
+function FlyerCard({ p }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6em', minWidth: 0, minHeight: 0 }}>
+      <div style={{ flex: 1, minHeight: 0, background: C.panel, border: `1px solid ${C.line}`, borderRadius: '1em', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {p.flyerImageDataUrl ? (
+          <img src={p.flyerImageDataUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+        ) : (
+          <div style={{ padding: '1em', textAlign: 'center', fontSize: '1.5em', fontWeight: 800, color: C.gold, lineHeight: 1.3 }}>{p.name}</div>
+        )}
+      </div>
+      <div>
+        <div style={{ fontSize: '1.05em', fontWeight: 700, lineHeight: 1.25, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{p.name}</div>
+        <div style={{ color: C.sub, fontSize: '0.9em', margin: '0.15em 0 0.4em' }}>{fmtDate(p.departureDate)}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5em' }}>
+          <div style={{ color: C.green, fontWeight: 800, fontSize: '1.05em' }}>{p.priceFrom ? <><span style={{ color: C.sub, fontSize: '0.7em', fontWeight: 400 }}>mulai </span>{rp(p.priceFrom)}</> : null}</div>
+          <SeatBadge n={p.quotaRemaining} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PackagesSlide({ slide, packages, page }) {
+  const total = Math.min(packages.length, Number(slide.maxItems) || 6);
+  const list = packages.slice(0, total);
+  const flyerMode = slide.layout !== 'cards';
+
+  if (flyerMode) {
+    const pages = Math.max(1, Math.ceil(list.length / PER_PAGE_FLYER));
+    const cur = page % pages;
+    const items = list.slice(cur * PER_PAGE_FLYER, cur * PER_PAGE_FLYER + PER_PAGE_FLYER);
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '1em', margin: '0 0 0.6em' }}>
+          <h2 style={{ fontSize: '2em', margin: 0, color: C.gold }}>{slide.title || 'Jadwal Keberangkatan Terdekat'}</h2>
+          {pages > 1 && <span style={{ color: C.sub, fontSize: '0.9em' }}>{cur + 1} / {pages}</span>}
+        </div>
+        {items.length === 0 ? (
+          <p style={{ color: C.sub, fontSize: '1.2em' }}>Belum ada jadwal keberangkatan aktif.</p>
+        ) : (
+          <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: `repeat(${items.length}, 1fr)`, gap: '1.2em' }}>
+            {items.map((p) => <FlyerCard key={p.id} p={p} />)}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
       <h2 style={{ fontSize: '2.2em', margin: '0 0 0.6em', color: C.gold }}>{slide.title || 'Jadwal Keberangkatan Terdekat'}</h2>
@@ -157,6 +205,8 @@ export default function LayarTunggu() {
   const [error, setError] = useState('');
   const [idx, setIdx] = useState(0);
   const [testiPick, setTestiPick] = useState(0);
+  const [pkgPage, setPkgPage] = useState(0);
+  const pkgCounter = useRef(0);
   const [now, setNow] = useState(new Date());
   const testiCounter = useRef(0);
   // Izin suara: true kalau browser/perangkat sudah mengizinkan autoplay
@@ -235,6 +285,10 @@ export default function LayarTunggu() {
       setTestiPick(testiCounter.current);
       testiCounter.current += 1;
     }
+    if (current?.type === 'packages') {
+      setPkgPage(pkgCounter.current);
+      pkgCounter.current += 1;
+    }
   }, [idx, current?.type]);
 
   const clock = new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: TZ }).format(now).replace('.', ':');
@@ -276,7 +330,7 @@ export default function LayarTunggu() {
             Belum ada slide yang aktif.
           </div>
         ) : current.type === 'packages' ? (
-          <PackagesSlide slide={current} packages={data.packages || []} />
+          <PackagesSlide slide={current} packages={data.packages || []} page={pkgPage} />
         ) : current.type === 'video' ? (
           <VideoSlide slide={current} onEnded={nextSlide} soundOk={soundOk} />
         ) : current.type === 'testimonials' ? (
