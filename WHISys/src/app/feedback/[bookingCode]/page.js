@@ -30,6 +30,7 @@ export default function PublicFeedbackPage({ params }) {
   // Survey Pelayanan & Kepuasan (semua OPSIONAL) — jawaban skala disimpan per
   // key sebagai angka 5..1, lihat src/lib/surveyConfig.js.
   const [rating, setRating] = useState(5);
+  const [attempted, setAttempted] = useState(false);
   const [answers, setAnswers] = useState({});
   const [textAns, setTextAns] = useState({});
   const [csChoice, setCsChoice] = useState('');
@@ -93,9 +94,35 @@ export default function PublicFeedbackPage({ params }) {
     }
   };
 
+  // Semua kolom wajib diisi sebelum bisa kirim. Daftar key yang masih kosong
+  // dipakai buat nahan submit & nyorot bagian yang belum diisi.
+  const csNameNow = (csChoice === '__other' ? csCustom : csChoice).trim();
+  const tlNameNow = (tlChoice === '__other' ? tlCustom : tlChoice).trim();
+  const missing = [];
+  if (!csNameNow) missing.push('csName');
+  ['csDetail', 'csRamah', 'csFast'].forEach((k) => { if (typeof answers[k] !== 'number') missing.push(k); });
+  if (!tlNameNow) missing.push('tlName');
+  ['tlTanggungJawab', 'tlMembantu', 'tlShalat', 'tlKomunikatif'].forEach((k) => { if (typeof answers[k] !== 'number') missing.push(k); });
+  if (!tlSaran.trim()) missing.push('tlSaran');
+  if (!tgName.trim()) missing.push('tgName');
+  if (!tgSaran.trim()) missing.push('tgSaran');
+  TEXT_QUESTIONS.forEach((q) => { if (!(textAns[q.key] || '').trim()) missing.push(q.key); });
+  if (!nextCountry.trim()) missing.push('nextCountry');
+  if (!comment.trim()) missing.push('comment');
+  const hl = (key) => (attempted && missing.includes(key)
+    ? { outline: '1px solid #f87171', outlineOffset: '5px', borderRadius: '0.5rem' }
+    : {});
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!verifiedBooking) return;
+    setAttempted(true);
+    if (missing.length > 0) {
+      setError('Masih ada bagian yang belum diisi. Mohon lengkapi semua pertanyaan sebelum mengirim ulasan.');
+      const el = document.getElementById(`fld-${missing[0]}`);
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     setSubmitting(true);
     setError('');
     try {
@@ -168,7 +195,7 @@ export default function PublicFeedbackPage({ params }) {
           </div>
         ) : (
           <>
-            <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+            <div style={{ textAlign: 'center', marginBottom: '0.9rem' }}>
               <div style={{
                 width: '3rem', height: '3rem', backgroundColor: '#059669', borderRadius: '0.75rem',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem'
@@ -249,9 +276,7 @@ export default function PublicFeedbackPage({ params }) {
           </div>
         ) : (
           <form onSubmit={handleSubmit}>
-            <div style={{ height: '1rem' }} />
-
-              <div style={{ textAlign: 'center', margin: '1.5rem 0 1.1rem' }}>
+              <div style={{ textAlign: 'center', margin: '0 0 1.1rem' }}>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   Rating Keseluruhan
                 </label>
@@ -267,7 +292,7 @@ export default function PublicFeedbackPage({ params }) {
               <div style={{ marginBottom: '1.1rem', padding: '1rem', backgroundColor: '#0b1220', border: '1px solid #1e293b', borderRadius: '0.75rem' }}>
                 <p style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 700, margin: '0 0 0.75rem' }}>Fasilitas & Pengalaman Trip</p>
                 {TEXT_QUESTIONS.map((q) => (
-                  <div key={q.key} style={{ marginBottom: '0.9rem' }}>
+                  <div key={q.key} id={`fld-${q.key}`} style={{ marginBottom: '0.9rem', ...hl(q.key) }}>
                     <label style={{ ...svLabel, color: '#e2e8f0', fontWeight: 400, fontSize: '0.8rem', lineHeight: 1.5, marginBottom: '0.45rem' }}>{q.text}</label>
                     <textarea
                       rows={2}
@@ -278,13 +303,13 @@ export default function PublicFeedbackPage({ params }) {
                     />
                   </div>
                 ))}
-                <div>
+                <div id="fld-nextCountry" style={hl('nextCountry')}>
                   <label style={svLabel}>Ke negara mana Anda ingin trip selanjutnya bersama kami?</label>
                   <input type="text" value={nextCountry} onChange={(e) => setNextCountry(e.target.value)} placeholder="Contoh: Jepang" style={svInput} />
                 </div>
-                <div style={{ marginTop: '0.9rem' }}>
+                <div id="fld-comment" style={{ marginTop: '0.9rem', ...hl('comment') }}>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Ceritakan pengalaman menarik Anda bersama Wisata Halal Indonesia (Opsional)
+                  Ceritakan pengalaman menarik Anda bersama Wisata Halal Indonesia
                 </label>
                 <textarea
                   rows={4}
@@ -302,7 +327,7 @@ export default function PublicFeedbackPage({ params }) {
 
             <div style={{ marginBottom: '1.25rem' }}>
               <p style={{ color: '#94a3b8', fontSize: '0.75rem', lineHeight: 1.6, margin: '0 0 0.9rem', textAlign: 'center' }}>
-                Bantu kami jadi travel dengan pelayanan nomor 1. Survei singkat di bawah ini boleh diisi sebagian atau dilewati.
+                Bantu kami jadi travel dengan pelayanan nomor 1.
               </p>
 
               {SURVEY_SECTIONS.map((sec) => (
@@ -310,7 +335,7 @@ export default function PublicFeedbackPage({ params }) {
                   <p style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 700, margin: '0 0 0.75rem' }}>{sec.title}</p>
 
                   {sec.key === 'cs' && (
-                    <div style={{ marginBottom: '0.9rem' }}>
+                    <div id="fld-csName" style={{ marginBottom: '0.9rem', ...hl('csName') }}>
                       <label style={svLabel}>Nama Customer Service</label>
                       <select value={csChoice} onChange={(e) => setCsChoice(e.target.value)} style={svInput}>
                         <option value="">-- Pilih --</option>
@@ -324,7 +349,7 @@ export default function PublicFeedbackPage({ params }) {
                   )}
 
                   {sec.key === 'tl' && (
-                    <div style={{ marginBottom: '0.9rem' }}>
+                    <div id="fld-tlName" style={{ marginBottom: '0.9rem', ...hl('tlName') }}>
                       <label style={svLabel}>Nama Tour Leader</label>
                       <select value={tlChoice} onChange={(e) => setTlChoice(e.target.value)} style={svInput}>
                         <option value="">-- Pilih --</option>
@@ -338,7 +363,7 @@ export default function PublicFeedbackPage({ params }) {
                   )}
 
                   {sec.questions.map((q) => (
-                    <div key={q.key} style={{ marginBottom: '0.9rem' }}>
+                    <div key={q.key} id={`fld-${q.key}`} style={{ marginBottom: '0.9rem', ...hl(q.key) }}>
                       <p style={{ color: '#e2e8f0', fontSize: '0.8rem', margin: '0 0 0.45rem', lineHeight: 1.5 }}>{q.text}</p>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
                         {q.options.map((label, i) => {
@@ -364,15 +389,15 @@ export default function PublicFeedbackPage({ params }) {
 
                   {sec.key === 'tl' && (
                     <>
-                      <div style={{ marginBottom: '0.9rem' }}>
+                      <div id="fld-tlSaran" style={{ marginBottom: '0.9rem', ...hl('tlSaran') }}>
                         <label style={svLabel}>Saran untuk Tour Leader</label>
                         <textarea rows={2} value={tlSaran} onChange={(e) => setTlSaran(e.target.value)} style={{ ...svInput, resize: 'vertical' }} />
                       </div>
-                      <div style={{ marginBottom: '0.9rem' }}>
+                      <div id="fld-tgName" style={{ marginBottom: '0.9rem', ...hl('tgName') }}>
                         <label style={svLabel}>Nama Tour Guide</label>
                         <input type="text" value={tgName} onChange={(e) => setTgName(e.target.value)} placeholder="Nama Tour Guide" style={svInput} />
                       </div>
-                      <div>
+                      <div id="fld-tgSaran" style={hl('tgSaran')}>
                         <label style={svLabel}>Saran untuk Tour Guide</label>
                         <textarea rows={2} value={tgSaran} onChange={(e) => setTgSaran(e.target.value)} style={{ ...svInput, resize: 'vertical' }} />
                       </div>
