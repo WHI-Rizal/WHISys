@@ -6,6 +6,7 @@ import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc, setDoc, addDoc, updateDoc, collection, getDocs, deleteDoc, deleteField } from 'firebase/firestore';
 import { logActivity } from '../../lib/activityLog';
+import WaitingScreenSettings from './WaitingScreenSettings';
 import {
   Building2,
   Key,
@@ -26,7 +27,8 @@ import {
   Plus,
   Pencil,
   Search,
-  Landmark
+  Landmark,
+  Tv
 } from 'lucide-react';
 
 export default function SettingsModule({ theme = 'dark', currentUser = null }) {
@@ -461,6 +463,7 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
           <p className={`text-xs ${styles.textSub} mt-1`}>Kelola identitas perusahaan, hak akses pengguna, serta integrasi API ERP WHISys.</p>
         </div>
         
+        {activeTab !== 'waiting' && (
         <button
           onClick={handleSaveSettings}
           disabled={saving}
@@ -469,6 +472,7 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
           {savedSuccess ? <Check className="w-4 h-4 text-white animate-bounce" /> : <Save className="w-4 h-4" />}
           {saving ? 'Menyimpan...' : savedSuccess ? 'Tersimpan!' : 'Simpan Perubahan'}
         </button>
+        )}
       </div>
 
       {/* TAB NAVIGATION */}
@@ -507,6 +511,13 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
           className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${activeTab === 'edc' ? styles.tabActive : styles.tabInactive}`}
         >
           <CreditCard className="w-4 h-4" /> Pengaturan EDC
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('waiting')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${activeTab === 'waiting' ? styles.tabActive : styles.tabInactive}`}
+        >
+          <Tv className="w-4 h-4" /> Layar Tunggu
         </button>
       </div>
 
@@ -972,6 +983,10 @@ export default function SettingsModule({ theme = 'dark', currentUser = null }) {
         )}
 
       </form>
+
+      {activeTab === 'waiting' && (
+        <WaitingScreenSettings theme={theme} canEdit={isSuperAdmin} currentUser={currentUser} />
+      )}
 
       {/* MODAL DIALOG TAMBAH USER BARU */}
       {showUserModal && (
