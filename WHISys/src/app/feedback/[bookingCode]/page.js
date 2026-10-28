@@ -27,7 +27,6 @@ export default function PublicFeedbackPage({ params }) {
   const packageName = verifiedBooking?.packageName || '';
   const packageId = verifiedBooking?.packageId || '';
 
-  const [rating, setRating] = useState(5);
   // Survey Pelayanan & Kepuasan (semua OPSIONAL) — jawaban skala disimpan per
   // key sebagai angka 5..1, lihat src/lib/surveyConfig.js.
   const [answers, setAnswers] = useState({});
@@ -94,7 +93,13 @@ export default function PublicFeedbackPage({ params }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!verifiedBooking) return; // jaga-jaga — tombol submit harusnya sudah nggak muncul kalau booking belum terverifikasi
+    if (!verifiedBooking) return;
+    // Bintang penilaian fasilitas & itinerary dipakai sebagai rating keseluruhan (wajib).
+    const rating = Number(answers.fasilitas) || 0;
+    if (rating < 1) {
+      setError('Mohon beri penilaian bintang pada bagian Fasilitas & Pengalaman Trip dulu.');
+      return;
+    } // jaga-jaga — tombol submit harusnya sudah nggak muncul kalau booking belum terverifikasi
     setSubmitting(true);
     setError('');
     try {
@@ -247,27 +252,7 @@ export default function PublicFeedbackPage({ params }) {
           </div>
         ) : (
           <form onSubmit={handleSubmit}>
-            <div style={{ textAlign: 'center', margin: '1.5rem 0' }}>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Rating Keseluruhan
-              </label>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '0.4rem' }}>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <button
-                    type="button"
-                    key={n}
-                    onClick={() => setRating(n)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                  >
-                    <Star
-                      size={36}
-                      color={n <= rating ? '#fbbf24' : '#334155'}
-                      fill={n <= rating ? '#fbbf24' : 'none'}
-                    />
-                  </button>
-                ))}
-              </div>
-            </div>
+            <div style={{ height: '1rem' }} />
 
             <div style={{ marginBottom: '1.25rem' }}>
               <p style={{ color: '#94a3b8', fontSize: '0.75rem', lineHeight: 1.6, margin: '0 0 0.9rem', textAlign: 'center' }}>
@@ -354,10 +339,10 @@ export default function PublicFeedbackPage({ params }) {
                 <p style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 700, margin: '0 0 0.75rem' }}>Fasilitas & Pengalaman Trip</p>
                 {STAR_QUESTIONS.map((q) => (
                   <div key={q.key} style={{ marginBottom: '0.9rem' }}>
-                    <p style={{ color: '#e2e8f0', fontSize: '0.8rem', margin: '0 0 0.45rem', lineHeight: 1.5 }}>{q.text}</p>
+                    <p style={{ color: '#e2e8f0', fontSize: '0.8rem', margin: '0 0 0.45rem', lineHeight: 1.5 }}>{q.text} <span style={{ color: '#f87171' }}>*</span></p>
                     <div style={{ display: 'flex', gap: '0.3rem' }}>
                       {[1, 2, 3, 4, 5].map((n) => (
-                        <button type="button" key={n} onClick={() => setAnswer(q.key, answers[q.key] === n ? undefined : n)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                        <button type="button" key={n} onClick={() => setAnswer(q.key, n)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
                           <Star size={28} color={n <= (answers[q.key] || 0) ? '#fbbf24' : '#334155'} fill={n <= (answers[q.key] || 0) ? '#fbbf24' : 'none'} />
                         </button>
                       ))}
@@ -373,13 +358,13 @@ export default function PublicFeedbackPage({ params }) {
 
             <div style={{ marginBottom: '1.25rem' }}>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Masukan & Saran untuk Wisata Halal Indonesia (Opsional)
+                Ceritakan pengalaman menarik Anda bersama Wisata Halal Indonesia (Opsional)
               </label>
               <textarea
                 rows={4}
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
-                placeholder="Ceritakan pengalaman Anda: pelayanan, hotel, transportasi, tour leader, dll..."
+                placeholder="Ceritakan momen paling berkesan selama perjalanan bersama kami..."
                 style={{
                   width: '100%', padding: '0.75rem 1rem', backgroundColor: '#1e293b', border: '1px solid #334155',
                   borderRadius: '0.75rem', color: '#fff', outline: 'none', boxSizing: 'border-box', resize: 'vertical',
