@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth } from '@/lib/firebase';
 import { collection, addDoc, getDocs, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
-import { ALL_ASPECTS, labelForScore } from '@/lib/surveyConfig';
+import { ALL_ASPECTS, TEXT_QUESTIONS, labelForScore } from '@/lib/surveyConfig';
 import { Star, MessageSquareHeart, Plus, X, Trash2, User, Bot, Search, Filter } from 'lucide-react';
 
 const formatDateDDMMYYYY = (dateString) => {
@@ -357,6 +357,9 @@ export default function FeedbackModule({ theme = 'dark' }) {
                             <span className={styles.textSub}>{a.label}</span>
                             <span className={styles.textTitle}>{labelForScore(a.key, f.survey.answers[a.key])}</span>
                           </div>
+                        ))}
+                        {TEXT_QUESTIONS.filter(q => f.survey[q.key]).map(q => (
+                          <div key={q.key}><span className={styles.textSub}>{q.short}:</span> <span className={styles.textTitle}>{f.survey[q.key]}</span></div>
                         ))}
                         {f.survey.tlSaran && <div><span className={styles.textSub}>Saran TL:</span> <span className={styles.textTitle}>{f.survey.tlSaran}</span></div>}
                         {f.survey.tgSaran && <div><span className={styles.textSub}>Saran Tour Guide:</span> <span className={styles.textTitle}>{f.survey.tgSaran}</span></div>}
