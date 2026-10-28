@@ -55,14 +55,20 @@ export const SURVEY_SECTIONS = [
 // Pertanyaan berbintang 1-5 (format jawaban Q8 & Q9 di survei asli nggak
 // kelihatan di halamannya, jadi dibikin bintang).
 export const STAR_QUESTIONS = [
-  { key: 'fasilitas', text: 'Bagaimana penilaian terhadap fasilitas (pesawat, hotel, makanan, & transportasi)?', short: 'Fasilitas' },
-  { key: 'itinerary', text: 'Bagaimana penilaian terhadap itinerary & destinasi perjalanan?', short: 'Itinerary & Destinasi' },
+  { key: 'fasilitas', text: 'Bagaimana penilaian Anda terhadap fasilitas (pesawat, hotel, makanan, transportasi), itinerary & destinasi perjalanan secara keseluruhan?', short: 'Fasilitas, Itinerary & Destinasi' },
+];
+
+// Aspek dari versi survei awal (sebelum dua bintang digabung jadi satu) —
+// cuma buat nampilin data lama di dashboard.
+const LEGACY_ASPECTS = [
+  { key: 'itinerary', label: 'Itinerary & Destinasi (versi lama)', group: 'Fasilitas & Pengalaman' },
 ];
 
 // Semua aspek berskor, buat ringkasan di dashboard.
 export const ALL_ASPECTS = [
   ...SURVEY_SECTIONS.flatMap((s) => s.questions.map((q) => ({ key: q.key, label: q.short, group: s.title }))),
   ...STAR_QUESTIONS.map((q) => ({ key: q.key, label: q.short, group: 'Fasilitas & Pengalaman' })),
+  ...LEGACY_ASPECTS,
 ];
 
 export const labelForScore = (qKey, score) => {
