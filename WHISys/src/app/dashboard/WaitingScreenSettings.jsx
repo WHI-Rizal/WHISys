@@ -290,14 +290,23 @@ export default function WaitingScreenSettings({ theme = 'dark', canEdit = false,
               </div>
 
               {s.type === 'packages' && (
-                <div>
-                  <label className={`block text-[11px] ${styles.textSub} mb-1`}>Jumlah paket ditampilkan</label>
-                  <input type="number" min="1" max="9" className={input} value={s.maxItems ?? 6} onChange={(e) => updateSlide(s.id, { maxItems: e.target.value })} />
-                </div>
+                <>
+                  <div>
+                    <label className={`block text-[11px] ${styles.textSub} mb-1`}>Jumlah paket ditampilkan</label>
+                    <input type="number" min="1" max="12" className={input} value={s.maxItems ?? 6} onChange={(e) => updateSlide(s.id, { maxItems: e.target.value })} />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className={`block text-[11px] ${styles.textSub} mb-1`}>Tampilan</label>
+                    <select className={input} value={s.layout === 'cards' ? 'cards' : 'flyer'} onChange={(e) => updateSlide(s.id, { layout: e.target.value })}>
+                      <option value="flyer">Flyer (gambar besar, 4 paket per halaman)</option>
+                      <option value="cards">Kartu teks (tanpa gambar)</option>
+                    </select>
+                  </div>
+                </>
               )}
             </div>
 
-            {s.type === 'packages' && <p className={`text-[11px] ${styles.textSub} mt-2`}>Otomatis dari paket aktif yang berangkat paling dekat: tanggal, harga mulai, dan sisa seat terbaru.</p>}
+            {s.type === 'packages' && <p className={`text-[11px] ${styles.textSub} mt-2`}>Otomatis dari paket aktif yang berangkat paling dekat: flyer, tanggal, harga mulai, dan sisa seat terbaru. Flyer diambil dari Flyer Promosi Paket di menu Paket Travel. Paket tanpa flyer tampil dengan nama saja. Kalau paketnya lebih dari 4, halaman berganti tiap slide ini muncul lagi.</p>}
             {s.type === 'testimonials' && <p className={`text-[11px] ${styles.textSub} mt-2`}>Otomatis dari ulasan jamaah bintang 4 sampai 5 yang ada ceritanya. Nama yang tampil cuma nama depan.</p>}
 
             {s.type === 'video' && (
