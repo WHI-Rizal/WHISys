@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc } from 'firebase/firestore';
 import { Star, Send, CheckCircle2, Plane, ExternalLink, Copy, Check, AlertTriangle, Loader2 } from 'lucide-react';
-import { CS_NAMES, TL_NAMES, SURVEY_SECTIONS, STAR_QUESTIONS } from '@/lib/surveyConfig';
+import { CS_NAMES, TL_NAMES, SURVEY_SECTIONS, TEXT_QUESTIONS } from '@/lib/surveyConfig';
 
 const GOOGLE_REVIEW_LINK = 'https://www.google.com/maps/place/Wisata+Halal+Indonesia/@-6.3127371,106.767536,17z/data=!3m1!4b1!4m6!3m5!1s0x2e69ef800cfab2df:0x6c9f79f91ef9de17!8m2!3d-6.3127424!4d106.7701109!16s%2Fg%2F11v0qsvbxm?hl=en-GB&entry=ttu';
 
@@ -29,7 +29,9 @@ export default function PublicFeedbackPage({ params }) {
 
   // Survey Pelayanan & Kepuasan (semua OPSIONAL) — jawaban skala disimpan per
   // key sebagai angka 5..1, lihat src/lib/surveyConfig.js.
+  const [rating, setRating] = useState(5);
   const [answers, setAnswers] = useState({});
+  const [textAns, setTextAns] = useState({});
   const [csChoice, setCsChoice] = useState('');
   const [csCustom, setCsCustom] = useState('');
   const [tlChoice, setTlChoice] = useState('');
@@ -94,12 +96,6 @@ export default function PublicFeedbackPage({ params }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!verifiedBooking) return;
-    // Bintang penilaian fasilitas & itinerary dipakai sebagai rating keseluruhan (wajib).
-    const rating = Number(answers.fasilitas) || 0;
-    if (rating < 1) {
-      setError('Mohon beri penilaian bintang pada bagian Fasilitas & Pengalaman Trip dulu.');
-      return;
-    } // jaga-jaga — tombol submit harusnya sudah nggak muncul kalau booking belum terverifikasi
     setSubmitting(true);
     setError('');
     try {
@@ -114,6 +110,7 @@ export default function PublicFeedbackPage({ params }) {
       if (nextCountry.trim()) survey.nextCountry = nextCountry.trim().slice(0, 100);
       const cleanAnswers = Object.fromEntries(Object.entries(answers).filter(([, v]) => typeof v === 'number'));
       if (Object.keys(cleanAnswers).length > 0) survey.answers = cleanAnswers;
+      TEXT_QUESTIONS.forEach((q) => { const v = (textAns[q.key] || '').trim(); if (v) survey[q.key] = v.slice(0, 500); });
       await addDoc(collection(db, 'feedback'), {
         bookingCode,
         jamaahName: jamaahName || 'Jamaah',
@@ -335,18 +332,31 @@ export default function PublicFeedbackPage({ params }) {
                 </div>
               ))}
 
+              <div style={{ textAlign: 'center', margin: '1.5rem 0 1.1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Rating Keseluruhan
+                </label>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: '0.4rem' }}>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button type="button" key={n} onClick={() => setRating(n)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                      <Star size={36} color={n <= rating ? '#fbbf24' : '#334155'} fill={n <= rating ? '#fbbf24' : 'none'} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div style={{ marginBottom: '1.1rem', padding: '1rem', backgroundColor: '#0b1220', border: '1px solid #1e293b', borderRadius: '0.75rem' }}>
                 <p style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 700, margin: '0 0 0.75rem' }}>Fasilitas & Pengalaman Trip</p>
-                {STAR_QUESTIONS.map((q) => (
+                {TEXT_QUESTIONS.map((q) => (
                   <div key={q.key} style={{ marginBottom: '0.9rem' }}>
-                    <p style={{ color: '#e2e8f0', fontSize: '0.8rem', margin: '0 0 0.45rem', lineHeight: 1.5 }}>{q.text} <span style={{ color: '#f87171' }}>*</span></p>
-                    <div style={{ display: 'flex', gap: '0.3rem' }}>
-                      {[1, 2, 3, 4, 5].map((n) => (
-                        <button type="button" key={n} onClick={() => setAnswer(q.key, n)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                          <Star size={28} color={n <= (answers[q.key] || 0) ? '#fbbf24' : '#334155'} fill={n <= (answers[q.key] || 0) ? '#fbbf24' : 'none'} />
-                        </button>
-                      ))}
-                    </div>
+                    <label style={{ ...svLabel, color: '#e2e8f0', fontWeight: 400, fontSize: '0.8rem', lineHeight: 1.5, marginBottom: '0.45rem' }}>{q.text}</label>
+                    <textarea
+                      rows={2}
+                      value={textAns[q.key] || ''}
+                      onChange={(e) => setTextAns((t) => ({ ...t, [q.key]: e.target.value }))}
+                      placeholder="Tulis penilaian Anda di sini..."
+                      style={{ ...svInput, resize: 'vertical' }}
+                    />
                   </div>
                 ))}
                 <div>
