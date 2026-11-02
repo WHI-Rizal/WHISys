@@ -4656,7 +4656,6 @@ Terimakasih🙏`;
             <tr>
               <th>Program Paket Travel</th>
               <th>Tgl Keberangkatan</th>
-              <th>Kamar / Bus</th>
               <th style="text-align: right;">Jumlah Tagihan</th>
             </tr>
           </thead>
@@ -4664,7 +4663,6 @@ Terimakasih🙏`;
             <tr>
               <td><strong>${booking.packageName || '-'}</strong></td>
               <td>${formatDateDDMMYYYY(booking.departureDate)}</td>
-              <td>${booking.roomType} / ${booking.busGroup}</td>
               <td style="text-align: right; font-weight: bold; white-space: nowrap;">Rp ${totalAmount.toLocaleString('id-ID')}</td>
             </tr>
           </tbody>
@@ -4937,7 +4935,6 @@ Terimakasih🙏`;
       <tr>
         <td>${idx + 1}</td>
         <td>${b.jamaahName || '-'}</td>
-        <td>${b.roomType || '-'} / ${b.busGroup || '-'}</td>
         <td style="text-align: right; white-space: nowrap;">Rp ${Number(b.totalAmount || 0).toLocaleString('id-ID')}</td>
       </tr>
     `).join('');
@@ -5026,7 +5023,6 @@ Terimakasih🙏`;
             <tr>
               <th>No</th>
               <th>Nama Peserta</th>
-              <th>Kamar / Bus</th>
               <th style="text-align: right;">Tagihan Peserta</th>
             </tr>
           </thead>
