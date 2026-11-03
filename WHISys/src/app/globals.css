@@ -48,3 +48,98 @@ body {
 .hide-scrollbar::-webkit-scrollbar {
   display: none; /* Chrome, Safari, Edge baru (berbasis Chromium) */
 }
+/* ===== Tema Warna "Hangat" (opsional, dipilih lewat tombol Tema di dashboard) =====
+   Dark: charcoal hangat + aksen emas redup. Light: krem hangat + aksen teal.
+   Cuma aktif kalau <html data-palette="hangat"> (diset dari dashboard/page.js). */
+html[data-palette="hangat"][data-mode="dark"] body, html[data-palette="hangat"][data-mode="dark"] { background-color: #1a1815; color: #e8e1d3; }
+html[data-palette="hangat"][data-mode="light"] body, html[data-palette="hangat"][data-mode="light"] { background-color: #f5f1e8; color: #2d2a25; }
+html[data-palette="hangat"][data-mode="dark"] .bg-slate-950 { background-color: #1a1815 !important; }
+html[data-palette="hangat"][data-mode="dark"] .bg-slate-900 { background-color: #26231f !important; }
+html[data-palette="hangat"][data-mode="dark"] .bg-slate-800 { background-color: #322e28 !important; }
+html[data-palette="hangat"][data-mode="dark"] .bg-slate-700 { background-color: #3d3830 !important; }
+html[data-palette="hangat"][data-mode="dark"] .bg-slate-800\/60 { background-color: rgba(50,46,40,.6) !important; }
+html[data-palette="hangat"][data-mode="dark"] .hover\:bg-slate-800:hover { background-color: #322e28 !important; }
+html[data-palette="hangat"][data-mode="dark"] .hover\:bg-slate-700:hover { background-color: #3d3830 !important; }
+html[data-palette="hangat"][data-mode="dark"] .hover\:bg-slate-600:hover { background-color: #4a443a !important; }
+html[data-palette="hangat"][data-mode="dark"] .disabled\:bg-slate-700:disabled { background-color: #3d3830 !important; }
+html[data-palette="hangat"][data-mode="dark"] .hover\:bg-slate-800\/30:hover { background-color: rgba(50,46,40,.3) !important; }
+html[data-palette="hangat"][data-mode="dark"] .hover\:bg-slate-800\/40:hover { background-color: rgba(50,46,40,.4) !important; }
+html[data-palette="hangat"][data-mode="dark"] .hover\:bg-slate-800\/10:hover { background-color: rgba(50,46,40,.1) !important; }
+html[data-palette="hangat"][data-mode="dark"] .bg-slate-950\/30 { background-color: rgba(26,24,21,.3) !important; }
+html[data-palette="hangat"][data-mode="dark"] .bg-slate-950\/40 { background-color: rgba(26,24,21,.4) !important; }
+html[data-palette="hangat"][data-mode="dark"] .bg-slate-950\/60 { background-color: rgba(26,24,21,.6) !important; }
+html[data-palette="hangat"][data-mode="dark"] .border-slate-800 { border-color: #37332c !important; }
+html[data-palette="hangat"][data-mode="dark"] .border-slate-700 { border-color: #453f35 !important; }
+html[data-palette="hangat"][data-mode="dark"] .border-slate-700\/60 { border-color: rgba(69,63,53,.6) !important; }
+html[data-palette="hangat"][data-mode="dark"] .border-zinc-800 { border-color: #37332c !important; }
+html[data-palette="hangat"][data-mode="dark"] .border-slate-800\/60 { border-color: rgba(55,51,44,.6) !important; }
+html[data-palette="hangat"][data-mode="dark"] .border-slate-800\/80 { border-color: rgba(55,51,44,.8) !important; }
+html[data-palette="hangat"][data-mode="dark"] .text-white { color: #f1ebdd !important; }
+html[data-palette="hangat"][data-mode="dark"] .text-slate-100 { color: #ece6d8 !important; }
+html[data-palette="hangat"][data-mode="dark"] .text-slate-200 { color: #e8e1d3 !important; }
+html[data-palette="hangat"][data-mode="dark"] .text-slate-300 { color: #cfc7b6 !important; }
+html[data-palette="hangat"][data-mode="dark"] .text-slate-400 { color: #a39a88 !important; }
+html[data-palette="hangat"][data-mode="dark"] .text-zinc-400 { color: #a39a88 !important; }
+html[data-palette="hangat"][data-mode="dark"] .text-emerald-500 { color: #8fbf8a !important; }
+html[data-palette="hangat"][data-mode="dark"] .text-emerald-400 { color: #a3cc9e !important; }
+html[data-palette="hangat"][data-mode="dark"] .text-emerald-300 { color: #bcd9b7 !important; }
+html[data-palette="hangat"][data-mode="dark"] .hover\:text-emerald-500:hover { color: #8fbf8a !important; }
+html[data-palette="hangat"][data-mode="dark"] .hover\:text-emerald-400:hover { color: #a3cc9e !important; }
+html[data-palette="hangat"][data-mode="dark"] .bg-emerald-500\/10 { background-color: rgba(143,191,138,.12) !important; }
+html[data-palette="hangat"][data-mode="dark"] .bg-emerald-500\/15 { background-color: rgba(143,191,138,.16) !important; }
+html[data-palette="hangat"][data-mode="dark"] .bg-emerald-600\/20 { background-color: rgba(143,191,138,.2) !important; }
+html[data-palette="hangat"][data-mode="dark"] .border-emerald-500\/20 { border-color: rgba(143,191,138,.25) !important; }
+html[data-palette="hangat"][data-mode="dark"] .border-emerald-500\/30 { border-color: rgba(143,191,138,.35) !important; }
+html[data-palette="hangat"][data-mode="dark"] .hover\:bg-emerald-500\/10:hover { background-color: rgba(143,191,138,.12) !important; }
+html[data-palette="hangat"][data-mode="dark"] .bg-emerald-600 { background-color: #b8903c !important; }
+html[data-palette="hangat"][data-mode="dark"] .bg-emerald-500 { background-color: #b8903c !important; }
+html[data-palette="hangat"][data-mode="dark"] .bg-emerald-700 { background-color: #9a7632 !important; }
+html[data-palette="hangat"][data-mode="dark"] .hover\:bg-emerald-500:hover { background-color: #c9a24d !important; }
+html[data-palette="hangat"][data-mode="dark"] .hover\:bg-emerald-600:hover { background-color: #c9a24d !important; }
+html[data-palette="hangat"][data-mode="dark"] .hover\:bg-emerald-800:hover { background-color: #8a6a2c !important; }
+html[data-palette="hangat"][data-mode="dark"] .focus\:border-emerald-500:focus { border-color: #c9a24d !important; }
+html[data-palette="hangat"][data-mode="dark"] .border-emerald-500 { border-color: #c9a24d !important; }
+html[data-palette="hangat"][data-mode="dark"] .border-emerald-700 { border-color: #9a7632 !important; }
+html[data-palette="hangat"][data-mode="dark"] .hover\:border-emerald-500:hover { border-color: #c9a24d !important; }
+html[data-palette="hangat"][data-mode="dark"] .focus\:ring-emerald-500:focus { --tw-ring-color: #c9a24d !important; }
+html[data-palette="hangat"][data-mode="dark"] .accent-emerald-500 { accent-color: #c9a24d !important; }
+html[data-palette="hangat"][data-mode="light"] .bg-slate-100 { background-color: #f5f1e8 !important; }
+html[data-palette="hangat"][data-mode="light"] .bg-slate-50 { background-color: #f8f4ea !important; }
+html[data-palette="hangat"][data-mode="light"] .bg-white { background-color: #fffdf8 !important; }
+html[data-palette="hangat"][data-mode="light"] .bg-slate-200 { background-color: #ebe4d4 !important; }
+html[data-palette="hangat"][data-mode="light"] .hover\:bg-slate-200:hover { background-color: #ebe4d4 !important; }
+html[data-palette="hangat"][data-mode="light"] .hover\:bg-slate-100:hover { background-color: #f1ecdf !important; }
+html[data-palette="hangat"][data-mode="light"] .hover\:bg-slate-50:hover { background-color: #f8f4ea !important; }
+html[data-palette="hangat"][data-mode="light"] .border-slate-200 { border-color: #e6dfd0 !important; }
+html[data-palette="hangat"][data-mode="light"] .border-slate-300 { border-color: #d8cfbb !important; }
+html[data-palette="hangat"][data-mode="light"] .border-slate-100 { border-color: #eee8da !important; }
+html[data-palette="hangat"][data-mode="light"] .divide-slate-200 > :not([hidden]) ~ :not([hidden]) { border-color: #e6dfd0 !important; }
+html[data-palette="hangat"][data-mode="light"] .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #eee8da !important; }
+html[data-palette="hangat"][data-mode="light"] .text-slate-900 { color: #2d2a25 !important; }
+html[data-palette="hangat"][data-mode="light"] .text-slate-800 { color: #3a362f !important; }
+html[data-palette="hangat"][data-mode="light"] .text-slate-700 { color: #4a453c !important; }
+html[data-palette="hangat"][data-mode="light"] .text-slate-600 { color: #5f594d !important; }
+html[data-palette="hangat"][data-mode="light"] .text-slate-500 { color: #7a7466 !important; }
+html[data-palette="hangat"][data-mode="light"] .text-slate-400 { color: #9a9382 !important; }
+html[data-palette="hangat"][data-mode="light"] .text-emerald-500 { color: #2f855a !important; }
+html[data-palette="hangat"][data-mode="light"] .text-emerald-600 { color: #2f855a !important; }
+html[data-palette="hangat"][data-mode="light"] .text-emerald-700 { color: #276749 !important; }
+html[data-palette="hangat"][data-mode="light"] .text-emerald-800 { color: #22543d !important; }
+html[data-palette="hangat"][data-mode="light"] .bg-emerald-50 { background-color: #eaf3ea !important; }
+html[data-palette="hangat"][data-mode="light"] .border-emerald-200 { border-color: #c6dfc9 !important; }
+html[data-palette="hangat"][data-mode="light"] .bg-emerald-500\/10 { background-color: rgba(47,133,90,.1) !important; }
+html[data-palette="hangat"][data-mode="light"] .border-emerald-500\/20 { border-color: rgba(47,133,90,.25) !important; }
+html[data-palette="hangat"][data-mode="light"] .bg-emerald-600 { background-color: #0f766e !important; }
+html[data-palette="hangat"][data-mode="light"] .bg-emerald-500 { background-color: #0f766e !important; }
+html[data-palette="hangat"][data-mode="light"] .bg-emerald-700 { background-color: #0c5f59 !important; }
+html[data-palette="hangat"][data-mode="light"] .hover\:bg-emerald-500:hover { background-color: #14877d !important; }
+html[data-palette="hangat"][data-mode="light"] .hover\:bg-emerald-600:hover { background-color: #14877d !important; }
+html[data-palette="hangat"][data-mode="light"] .hover\:bg-emerald-800:hover { background-color: #0a4f4a !important; }
+html[data-palette="hangat"][data-mode="light"] .focus\:border-emerald-500:focus { border-color: #0f766e !important; }
+html[data-palette="hangat"][data-mode="light"] .border-emerald-500 { border-color: #0f766e !important; }
+html[data-palette="hangat"][data-mode="light"] .hover\:border-emerald-500:hover { border-color: #0f766e !important; }
+html[data-palette="hangat"][data-mode="light"] .focus\:ring-emerald-500:focus { --tw-ring-color: #0f766e !important; }
+html[data-palette="hangat"][data-mode="light"] .accent-emerald-500 { accent-color: #0f766e !important; }
+html[data-palette="hangat"][data-mode="dark"] .divide-slate-800 > :not([hidden]) ~ :not([hidden]) { border-color: #37332c !important; }
+html[data-palette="hangat"][data-mode="dark"] .divide-slate-800\/60 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(55,51,44,.6) !important; }
+html[data-palette="hangat"][data-mode="dark"] .bg-emerald-600.text-white, html[data-palette="hangat"][data-mode="dark"] .bg-emerald-500.text-white, html[data-palette="hangat"][data-mode="dark"] .bg-emerald-700.text-white { color: #1a1815 !important; }
