@@ -8,7 +8,7 @@ import { validateUploadFile, uploadDocumentFile, ALLOWED_UPLOAD_TYPES } from '@/
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN, addPPN } from '../../lib/ppn';
 import { getNextCustomerCode } from '../../lib/customerCode';
-import { postBookingCreated, postIncomePayment, postBookingCancelRefund, postJournalEntry, deleteJournalEntriesBySource, deleteAllJournalEntriesForBooking, resyncBookingCreatedJournalDate, ACC } from '../../lib/journal';
+import { postBookingCreated, postIncomePayment, postDepositTopup, postBookingCancelRefund, postJournalEntry, deleteJournalEntriesBySource, deleteAllJournalEntriesForBooking, resyncBookingCreatedJournalDate, ACC } from '../../lib/journal';
 import SearchableSelect from '@/components/SearchableSelect';
 import DateFieldID from '@/components/DateFieldID';
 
@@ -2048,6 +2048,68 @@ Terimakasih🙏`;
     });
   };
 
+  // ============ Kelebihan Bayar -> Saldo Deposit Pemesan ============
+  // Cek dulu apakah nominal setoran melebihi sisa tagihan. Kalau iya, minta
+  // konfirmasi: sisa tagihan dicatat sebagai pembayaran booking, kelebihannya
+  // otomatis jadi Saldo Deposit Pemesan (pola sama persis dgn "Titip Deposit"
+  // di modul Keuangan: Dr Kas/Bank, Cr Utang Deposit Jamaah).
+  const checkOverpayment = ({ amount, remaining, method, orderer, mdrAmount = 0, label }) => {
+    const rem = Math.max(0, Math.round(Number(remaining) || 0));
+    const excess = Math.max(0, Math.round(amount) - rem);
+    if (excess <= 0) return { ok: true, applied: amount, excess: 0 };
+    if (method === 'Saldo Deposit') {
+      alert(`Nominal (Rp ${amount.toLocaleString('id-ID')}) lebih besar dari sisa tagihan (Rp ${rem.toLocaleString('id-ID')}). Kalau bayar pakai Saldo Deposit, nominalnya nggak boleh melebihi sisa tagihan.`);
+      return { ok: false };
+    }
+    if (!orderer?.id) {
+      alert('Nominal melebihi sisa tagihan, tapi Pemesan belum terdata, jadi kelebihannya nggak bisa dimasukkan ke Saldo Deposit. Isi Pemesan dulu atau kurangi nominalnya.');
+      return { ok: false };
+    }
+    if (mdrAmount > 0 && amount - excess <= 0) {
+      alert('Pembayaran via EDC yang seluruhnya kelebihan nggak bisa dicatat otomatis. Catat kelebihannya lewat Titip Deposit di modul Keuangan.');
+      return { ok: false };
+    }
+    const okConfirm = window.confirm(
+      `Nominal setoran Rp ${amount.toLocaleString('id-ID')} lebih besar dari sisa tagihan Rp ${rem.toLocaleString('id-ID')}.\n\n` +
+      `- Rp ${rem.toLocaleString('id-ID')} dicatat sebagai pembayaran ${label}\n` +
+      `- Kelebihan Rp ${excess.toLocaleString('id-ID')} otomatis masuk Saldo Deposit ${orderer.name || 'Pemesan'}\n\nLanjut?`
+    );
+    return { ok: okConfirm, applied: amount - excess, excess };
+  };
+
+  const recordExcessToDeposit = async ({ customerId, customerName, amount, accountId, bookingCode, date }) => {
+    if (!customerId || !amount || amount <= 0) return;
+    const account = financialAccounts.find(a => a.id === accountId);
+    const ledgerDocId = `deposit_${customerId}_${Date.now()}`;
+    await updateDoc(doc(db, 'jamaah', customerId), { depositBalance: increment(amount) });
+    await setDoc(doc(db, 'deposit_ledger', ledgerDocId), {
+      customerId,
+      customerName: customerName || '-',
+      type: 'topup',
+      amount,
+      notes: `Kelebihan bayar booking ${bookingCode}`,
+      bookingCode: bookingCode || '',
+      createdAt: date,
+      accountId,
+      accountName: account?.name || ''
+    });
+    await adjustAccountBalance(accountId, amount, {
+      description: `Kelebihan Bayar ${bookingCode} masuk Saldo Deposit - ${customerName || '-'}`,
+      reference: bookingCode || '',
+      source: 'deposit_topup',
+      date,
+      sourceDocId: ledgerDocId
+    });
+    await postDepositTopup({
+      sourceDocId: ledgerDocId, jamaahName: customerName, amount,
+      accountId, accountName: account?.name || '', date,
+      createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+    }).catch(err => {
+      console.error('Gagal posting jurnal kelebihan bayar:', err);
+      alert(`Kelebihan bayar masuk Saldo Deposit & Kas/Bank sudah disesuaikan, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan belum akurat sampai dikoreksi, segera lapor ke tim IT/Finance.`);
+    });
+  };
+
   // Saldo tiap akun Kas/Bank (collection 'financial_accounts') — delta
   // positif = uang beneran masuk (setoran jamaah), delta negatif = keluar.
   // Metode Bayar "Saldo Deposit" SENGAJA nggak lewat sini — itu cuma
@@ -2752,6 +2814,18 @@ Terimakasih🙏`;
       return;
     }
 
+    const gOverRemaining = groupPaymentTarget.items.reduce((a, b) => a + (Number(b.totalAmount) || 0) - (Number(b.totalPaid) || 0), 0);
+    const gOverEdc = findEdcMethod(groupPaymentForm.paymentMethod);
+    const gOver = checkOverpayment({
+      amount, remaining: gOverRemaining, method: groupPaymentForm.paymentMethod,
+      orderer: { id: groupOrdererId, name: groupOrdererName },
+      mdrAmount: gOverEdc ? computeEdcMdrAmount(amount, gOverEdc.mdrPercent) : 0,
+      label: `grup ${groupPaymentTarget.code}`
+    });
+    if (!gOver.ok) return;
+    const gApplied = gOver.applied;
+    const gExcess = gOver.excess;
+
     try {
       // Urutan pax dalam grup harus sama kayak pas grup ini pertama kali
       // dibuat (biar sisa pembagian tetap konsisten jatuh ke pax pertama) —
@@ -2768,13 +2842,15 @@ Terimakasih🙏`;
             totalAmount: groupItems.reduce((a, b) => a + (Number(b.totalAmount) || 0), 0),
             totalPaid: groupItems.reduce((a, b) => a + (Number(b.totalPaid) || 0), 0),
             dp2Paid: groupItems.some(b => b.dp2Paid),
-            amount
+            amount: gApplied > 0 ? gApplied : amount
           });
 
       // Bagi rata nominal setoran ke semua pax (sisa pembagian masuk ke pax pertama)
       // — pola yang sama persis dengan pembagian DP awal pas registrasi grup baru.
-      const baseShare = Math.floor(amount / paxCount);
-      const remainder = amount - (baseShare * paxCount);
+      // Yang dibagi cuma bagian yang menutup tagihan (gApplied); kelebihan
+      // bayar (gExcess) masuk Saldo Deposit Pemesan di bawah.
+      const baseShare = Math.floor(gApplied / paxCount);
+      const remainder = gApplied - (baseShare * paxCount);
 
       // EDC: potongan MDR dihitung SEKALI dari total nominal setoran grup,
       // terus dibagi rata ke tiap pax pakai pola bagi-rata yang sama kayak
@@ -2841,8 +2917,8 @@ Terimakasih🙏`;
       // aslinya, dan pas transaksinya dihapus cuma perlu hapus 1 baris (lihat
       // handleDeleteMergedGroupPayment). Rincian per-peserta tetap ada di
       // payments_income, dicari lewat groupTransactionId yang sama.
-      if (groupPaymentForm.paymentMethod !== 'Saldo Deposit' && amount > 0) {
-        await adjustAccountBalance(groupPaymentForm.accountId, amount - groupMdrAmount, {
+      if (groupPaymentForm.paymentMethod !== 'Saldo Deposit' && gApplied > 0) {
+        await adjustAccountBalance(groupPaymentForm.accountId, gApplied - groupMdrAmount, {
           description: `Setoran Grup ${groupPaymentTarget.code} (${paxCount} peserta)`,
           reference: groupPaymentTarget.code,
           source: 'group_payment',
@@ -2866,6 +2942,14 @@ Terimakasih🙏`;
         await adjustDepositBalance(groupOrdererId, groupOrdererName, -amount, 'usage', `Bayar setoran grup ${groupPaymentTarget.code}`, groupPaymentTarget.code);
       }
 
+      if (gExcess > 0) {
+        await recordExcessToDeposit({
+          customerId: groupOrdererId, customerName: groupOrdererName, amount: gExcess,
+          accountId: groupPaymentForm.accountId, bookingCode: groupPaymentTarget.code,
+          date: resolvePaymentCreatedAt(groupPaymentForm.date)
+        });
+      }
+
       setShowGroupPaymentModal(false);
       setGroupPaymentForm({ amount: '', paymentMethod: 'Transfer Bank', paymentStage: 'DP Awal', accountId: '', notes: 'Setoran Tambahan', date: todayDateStr() });
       fetchData();
@@ -2876,7 +2960,7 @@ Terimakasih🙏`;
         action: 'create',
         module: 'Pembayaran',
         targetLabel: groupPaymentTarget.code,
-        details: `Mencatat setoran grup ${groupPaymentTarget.code} senilai Rp ${amount.toLocaleString('id-ID')} untuk ${paxCount} peserta.`
+        details: `Mencatat setoran grup ${groupPaymentTarget.code} senilai Rp ${amount.toLocaleString('id-ID')} untuk ${paxCount} peserta.` + (gExcess > 0 ? ` Kelebihan bayar Rp ${gExcess.toLocaleString('id-ID')} masuk Saldo Deposit ${groupOrdererName || 'Pemesan'}.` : '')
       });
     } catch (err) {
       alert("Gagal mencatat setoran grup: " + err.message);
@@ -5331,6 +5415,22 @@ Terimakasih🙏`;
         // perlu dibagi rata splitFlatAmount — itu cuma buat registrasi rombongan baru).
         const editedTotalAmount = addPPN(price + chargesTotalInput - discountsTotalInput).total; // + PPN 1,1%
 
+        // Kelebihan bayar -> Saldo Deposit Pemesan (dicek SEBELUM ada yang ditulis).
+        const editPayEdcPre = findEdcMethod(formData.paymentMethod);
+        const editOver = paymentVal > 0
+          ? checkOverpayment({
+              amount: paymentVal,
+              remaining: editedTotalAmount - Number(currentBooking?.totalPaid || 0),
+              method: formData.paymentMethod,
+              orderer: { id: ordererId, name: ordererName },
+              mdrAmount: editPayEdcPre ? computeEdcMdrAmount(paymentVal, editPayEdcPre.mdrPercent) : 0,
+              label: `booking ${currentBooking?.bookingCode || ''}`
+            })
+          : { ok: true, applied: 0, excess: 0 };
+        if (!editOver.ok) return;
+        const payApplied = editOver.applied;
+        const payExcess = editOver.excess;
+
         // Dihitung duluan (bukan inline di updateDoc) karena nilainya juga
         // dipakai buat nyamain tanggal jurnal `booking_created` di bawah —
         // lihat penjelasan di situ soal kenapa ini perlu.
@@ -5417,19 +5517,19 @@ Terimakasih🙏`;
           }
         }
 
-        if (paymentVal > 0) {
+        if (payApplied > 0) {
           const editPayEdcMatch = findEdcMethod(formData.paymentMethod);
           const editPayMdrAmount = editPayEdcMatch ? computeEdcMdrAmount(paymentVal, editPayEdcMatch.mdrPercent) : 0;
           const formStageValue = PAYMENT_STAGES.includes(formData.paymentStage)
             ? formData.paymentStage
-            : suggestPaymentStage({ totalAmount: editedTotalAmount, totalPaid: currentBooking?.totalPaid, dp2Paid: currentBooking?.dp2Paid, amount: paymentVal });
+            : suggestPaymentStage({ totalAmount: editedTotalAmount, totalPaid: currentBooking?.totalPaid, dp2Paid: currentBooking?.dp2Paid, amount: payApplied });
           const payRef = await addDoc(collection(db, 'payments_income'), {
             bookingId: editingBookingId,
             bookingCode: currentBooking.bookingCode,
             jamaahName: selectedJamaah.fullName,
             packageId: selectedPkg.id,
             packageName: selectedPkg.name,
-            amount: paymentVal,
+            amount: payApplied,
             paymentMethod: formData.paymentMethod,
             paymentStage: formStageValue,
             ...(formData.paymentMethod !== 'Saldo Deposit' ? { accountId: formData.accountId, accountName: payAccount?.name || '' } : {}),
@@ -5440,7 +5540,7 @@ Terimakasih🙏`;
             edcMethodId: editPayEdcMatch ? editPayEdcMatch.id : null
           });
           await postIncomePayment({
-            paymentId: payRef.id, bookingCode: currentBooking.bookingCode, amount: paymentVal,
+            paymentId: payRef.id, bookingCode: currentBooking.bookingCode, amount: payApplied,
             mdrAmount: editPayMdrAmount,
             paymentMethod: formData.paymentMethod, accountId: formData.accountId, accountName: payAccount?.name || '',
             date: resolvePaymentCreatedAt(formData.paymentDate),
@@ -5452,7 +5552,7 @@ Terimakasih🙏`;
           if (formData.paymentMethod === 'Saldo Deposit') {
             await adjustDepositBalance(ordererId, ordererName, -paymentVal, 'usage', `Bayar setoran booking ${currentBooking.bookingCode}`, currentBooking.bookingCode);
           } else {
-            await adjustAccountBalance(formData.accountId, paymentVal - editPayMdrAmount, {
+            await adjustAccountBalance(formData.accountId, payApplied - editPayMdrAmount, {
               description: `Setoran Booking ${currentBooking.bookingCode} - an. ${selectedJamaah.fullName || '-'}`,
               reference: currentBooking.bookingCode,
               source: 'booking_edit_payment',
@@ -5467,6 +5567,14 @@ Terimakasih🙏`;
               bookingCode: currentBooking.bookingCode
             });
           }
+        }
+
+        if (payExcess > 0) {
+          await recordExcessToDeposit({
+            customerId: ordererId, customerName: ordererName, amount: payExcess,
+            accountId: formData.accountId, bookingCode: currentBooking.bookingCode,
+            date: resolvePaymentCreatedAt(formData.paymentDate)
+          });
         }
 
         await syncBookingTotalPaid(editingBookingId, editedTotalAmount);
