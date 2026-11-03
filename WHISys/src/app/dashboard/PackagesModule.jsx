@@ -1,14 +1,15 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
-import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings, List, LayoutGrid, CalendarRange, Eye, EyeOff, ExternalLink, Copy } from 'lucide-react';
+import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings, List, LayoutGrid, CalendarRange, Eye, EyeOff, ExternalLink, Copy, Upload } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 import { logActivity } from '../../lib/activityLog';
 import { postJournalEntry, ACC } from '../../lib/journal';
 import { addPPN } from '../../lib/ppn';
 import { printItineraryDocument } from '../../lib/itineraryPrintDoc';
+import { importItineraryFromDocx } from '../../lib/itineraryImport';
 
 // Helper Format Tanggal dd/mm/yyyy
 const formatDateDDMMYYYY = (dateString) => {
@@ -187,6 +188,13 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
   const [editingPackageId, setEditingPackageId] = useState(null);
   // Itinerary paket sumber waktu "Duplikat Paket" (itinerary nggak ada di form, jadi dibawa terpisah).
   const [duplicateItinerary, setDuplicateItinerary] = useState(null);
+  // Import dari file Word (.docx) buatan tim Operasional: hasil baca ditampilkan
+  // di modal review dulu (importPreview), baru diterapkan ke form kalau disetujui.
+  // importedItinerary = itinerary hasil import yang ikut disimpan saat Simpan Paket.
+  const [importedItinerary, setImportedItinerary] = useState(null);
+  const [importPreview, setImportPreview] = useState(null);
+  const [importingDocx, setImportingDocx] = useState(false);
+  const importFileRef = useRef(null);
 
   // Kategori Destinasi/Kota Tujuan sekarang bisa ditambah/diedit sendiri
   // lewat tombol "Kelola Kategori" — pola & alasannya sama persis kayak
@@ -341,6 +349,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     }
     setEditingPackageId(null);
     setDuplicateItinerary(null);
+    setImportedItinerary(null);
     setFormData({
       code: getNextPackageCode(),
       name: '',
@@ -377,6 +386,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     }
     setEditingPackageId(pkg.id);
     setDuplicateItinerary(null);
+    setImportedItinerary(null);
     setFormData({
       code: pkg.code || '',
       name: pkg.name || '',
@@ -431,6 +441,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     handleOpenEdit(pkg);
     setEditingPackageId(null);
     setDuplicateItinerary(Array.isArray(pkg.itinerary) && pkg.itinerary.length > 0 ? pkg.itinerary : null);
+    setImportedItinerary(null);
     setFormData(prev => ({
       ...prev,
       code: getNextPackageCode(),
@@ -763,6 +774,43 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
     setSavingAirlineCategories(false);
   };
 
+  // ============ IMPORT ITINERARY DARI WORD ============
+  const handleImportFilePicked = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setImportingDocx(true);
+    try {
+      const result = await importItineraryFromDocx(file);
+      setImportPreview({ ...result, fileName: file.name });
+    } catch (err) {
+      alert('Gagal membaca file: ' + err.message);
+    }
+    setImportingDocx(false);
+  };
+
+  const handleApplyImport = () => {
+    if (!importPreview) return;
+    const f = importPreview.fields;
+    setFormData(prev => ({
+      ...prev,
+      ...(f.name ? { name: f.name } : {}),
+      ...(f.departureDate ? { departureDate: f.departureDate } : {}),
+      ...(f.durationDays ? { durationDays: f.durationDays } : {}),
+      ...(f.airline ? { airline: f.airline } : {}),
+      ...(f.priceMain ? { priceMain: String(f.priceMain) } : {}),
+      ...(f.priceIncludes.length ? { priceIncludes: f.priceIncludes } : {}),
+      ...(f.priceExcludes.length ? { priceExcludes: f.priceExcludes } : {}),
+      ...(f.flightSegments.length ? { flightSegments: f.flightSegments } : {}),
+      ...(f.specialNote ? { specialNote: f.specialNote } : {})
+    }));
+    if (importPreview.itinerary.length) {
+      setDuplicateItinerary(importPreview.itinerary);
+      setImportedItinerary(importPreview.itinerary);
+    }
+    setImportPreview(null);
+  };
+
   // ============ ITINERARY PAKET ============
 
   const handleOpenItinerary = (pkg) => {
@@ -1015,6 +1063,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
           const delta = payload.quotaTotal - oldTotal;
           payload.quotaRemaining = Math.max(0, oldRemaining + delta);
         }
+        if (importedItinerary) payload.itinerary = importedItinerary;
         await updateDoc(doc(db, 'packages', editingPackageId), payload);
         // Sinkron cermin Katalog Produk publik — gabungin data paket lama
         // (itinerary, dll yang nggak ikut di-touch payload form ini) sama
@@ -1874,6 +1923,24 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
             </h3>
 
             <form onSubmit={handleSubmit} className={`space-y-4 text-xs ${styles.textSub}`}>
+              <div className={`${styles.innerBg} border border-dashed border-emerald-500/40 rounded-lg p-3 flex items-center justify-between gap-3`}>
+                <div>
+                  <label className="block font-medium">Import dari File Word (.docx)</label>
+                  <p className={`text-[10px] ${styles.textSub} mt-0.5`}>
+                    Upload itinerary buatan tim Operasional. Judul, tanggal, harga, flight, itinerary per hari, include, dan exclude dibaca otomatis. Hasilnya dicek dulu sebelum masuk ke form.
+                    {importedItinerary ? ' Itinerary hasil import akan ikut tersimpan saat klik Simpan.' : ''}
+                  </p>
+                </div>
+                <input ref={importFileRef} type="file" accept=".docx" className="hidden" onChange={handleImportFilePicked} />
+                <button
+                  type="button"
+                  disabled={importingDocx}
+                  onClick={() => importFileRef.current && importFileRef.current.click()}
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-60"
+                >
+                  <Upload className="w-3.5 h-3.5" /> {importingDocx ? 'Membaca...' : 'Pilih File'}
+                </button>
+              </div>
               <div className={`${styles.innerBg} border rounded-lg p-3 flex items-center justify-between gap-3`}>
                 <div>
                   <label className="block font-medium">Status Katalog Produk</label>
@@ -2520,6 +2587,78 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       )}
 
       {/* MODAL ITINERARY PERJALANAN */}
+      {importPreview && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-2xl p-6 relative max-h-[90vh] overflow-y-auto`}>
+            <button onClick={() => setImportPreview(null)} className={`absolute right-4 top-4 ${styles.textSub}`}>
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className={`text-lg font-bold ${styles.textTitle} mb-1 flex items-center gap-2`}>
+              <Upload className="w-5 h-5 text-emerald-500" /> Cek Hasil Import
+            </h3>
+            <p className={`text-xs ${styles.textSub} mb-4`}>File: {importPreview.fileName}. Belum ada yang tersimpan. Kalau sudah sesuai, klik Terapkan ke Form, lalu edit seperlunya dan Simpan Paket.</p>
+
+            {importPreview.warnings.length > 0 && (
+              <div className="mb-4 p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-[11px] text-amber-500 space-y-1">
+                {importPreview.warnings.map((w, i) => <div key={i}>&bull; {w}</div>)}
+              </div>
+            )}
+
+            <div className={`${styles.innerBg} border rounded-xl p-4 space-y-1.5 text-xs mb-3`}>
+              <div><span className="opacity-60">Judul:</span> <strong className={styles.textTitle}>{importPreview.fields.name || '-'}</strong></div>
+              <div><span className="opacity-60">Keberangkatan:</span> {importPreview.fields.departureDate ? formatDateDDMMYYYY(importPreview.fields.departureDate) : '-'} &bull; {importPreview.fields.durationDays || '-'}</div>
+              <div><span className="opacity-60">Maskapai:</span> {importPreview.fields.airline || '-'}</div>
+              <div><span className="opacity-60">Harga per pax:</span> {importPreview.fields.priceMain ? 'Rp ' + Number(importPreview.fields.priceMain).toLocaleString('id-ID') : '-'}</div>
+            </div>
+
+            <div className={`${styles.innerBg} border rounded-xl p-4 text-xs mb-3`}>
+              <div className="font-bold mb-1.5">Flight ({importPreview.fields.flightSegments.length})</div>
+              {importPreview.fields.flightSegments.map((f, i) => (
+                <div key={i} className="opacity-80">{f.flightNumber} &bull; {f.date ? formatDateDDMMYYYY(f.date) : '-'} &bull; {f.route} &bull; {f.depTime} - {f.arrTime}</div>
+              ))}
+            </div>
+
+            <div className={`${styles.innerBg} border rounded-xl p-4 text-xs mb-3`}>
+              <div className="font-bold mb-1.5">Itinerary ({importPreview.itinerary.length} hari)</div>
+              <div className="space-y-1">
+                {importPreview.itinerary.map((d, i) => (
+                  <details key={i} className="opacity-90">
+                    <summary className="cursor-pointer">Hari {i + 1}: {d.title || '(judul kosong)'}{d.meals ? ` (${d.meals})` : ''}</summary>
+                    <div className="whitespace-pre-line pl-4 pt-1 opacity-80">{d.description}{d.hotel ? `\nHotel: ${d.hotel}` : ''}</div>
+                  </details>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div className={`${styles.innerBg} border rounded-xl p-4 text-xs`}>
+                <div className="font-bold mb-1.5">Harga Termasuk ({importPreview.fields.priceIncludes.length})</div>
+                {importPreview.fields.priceIncludes.map((x, i) => <div key={i} className="opacity-80">&bull; {x}</div>)}
+              </div>
+              <div className={`${styles.innerBg} border rounded-xl p-4 text-xs`}>
+                <div className="font-bold mb-1.5">Harga Tidak Termasuk ({importPreview.fields.priceExcludes.length})</div>
+                {importPreview.fields.priceExcludes.map((x, i) => (
+                  <div key={i} className="opacity-80">&bull; {x.label}{x.amount ? ` Rp ${Number(x.amount).toLocaleString('id-ID')}` : ''} {x.note}</div>
+                ))}
+              </div>
+            </div>
+
+            {importPreview.fields.specialNote && (
+              <div className={`${styles.innerBg} border rounded-xl p-4 text-xs mb-4`}>
+                <div className="font-bold mb-1.5">Catatan Khusus</div>
+                <div className="whitespace-pre-line opacity-80">{importPreview.fields.specialNote}</div>
+              </div>
+            )}
+
+            <p className={`text-[10px] ${styles.textSub} mb-3`}>Terapkan akan menimpa isian yang ditemukan di file (judul, tanggal, harga, flight, include, exclude, catatan, dan itinerary). Isian lain di form nggak berubah.</p>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setImportPreview(null)} className={`px-4 py-2 rounded-lg text-xs font-medium ${styles.innerBg} border`}>Batal</button>
+              <button type="button" onClick={handleApplyImport} className="px-4 py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white">Terapkan ke Form</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showItineraryModal && selectedPackageForItinerary && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className={`${styles.cardBg} border rounded-2xl w-full max-w-2xl p-6 relative max-h-[90vh] overflow-y-auto`}>
