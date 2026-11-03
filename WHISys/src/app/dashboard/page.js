@@ -9,6 +9,7 @@ import {
   Wallet,
   Sun,
   Moon,
+  Palette,
   PackageCheck,
   UserCheck,
   Sparkles,
@@ -94,6 +95,9 @@ export default function DashboardPage() {
 
   // Toggle Theme State (2 Mode: 'dark' atau 'light')
   const [theme, setTheme] = useState('dark');
+  // Tema warna: 'klasik' (tampilan lama) atau 'hangat' (charcoal hangat + emas / krem + teal).
+  // Aturan warnanya ada di globals.css, aktif lewat atribut data-palette di <html>.
+  const [palette, setPalette] = useState('klasik');
 
   // State untuk navigasi antar modul
   const [selectedBookingForModal, setSelectedBookingForModal] = useState(null);
@@ -197,6 +201,10 @@ export default function DashboardPage() {
     if (savedTheme === 'light' || savedTheme === 'dark') {
       setTheme(savedTheme);
     }
+    const savedPalette = localStorage.getItem('whisys_palette');
+    if (savedPalette === 'klasik' || savedPalette === 'hangat') {
+      setPalette(savedPalette);
+    }
     const savedSidebar = localStorage.getItem('whisys_sidebar_collapsed');
     if (savedSidebar === '1') {
       setSidebarCollapsed(true);
@@ -209,6 +217,25 @@ export default function DashboardPage() {
       localStorage.setItem('whisys_sidebar_collapsed', next ? '1' : '0');
       return next;
     });
+  };
+
+  // Terapkan tema warna ke <html>, dilepas lagi pas keluar dari dashboard
+  // supaya halaman publik (katalog, kalkulator, feedback) nggak ikut berubah.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.mode = theme;
+    if (palette === 'hangat') root.dataset.palette = 'hangat';
+    else delete root.dataset.palette;
+    return () => {
+      delete root.dataset.palette;
+      delete root.dataset.mode;
+    };
+  }, [theme, palette]);
+
+  const togglePalette = () => {
+    const next = palette === 'hangat' ? 'klasik' : 'hangat';
+    setPalette(next);
+    localStorage.setItem('whisys_palette', next);
   };
 
   const toggleTheme = () => {
@@ -490,6 +517,14 @@ export default function DashboardPage() {
           </div>
           <span className={`font-bold text-sm ${currentTheme.accentText}`}>WHISys</span>
         </div>
+        <div className="flex items-center gap-1">
+        <button
+          onClick={togglePalette}
+          className={`p-1.5 rounded-lg ${currentTheme.subText} hover:bg-emerald-500/10 transition-colors`}
+          title={palette === 'hangat' ? 'Tema Warna: Hangat (klik untuk Klasik)' : 'Tema Warna: Klasik (klik untuk Hangat)'}
+        >
+          <Palette className="w-5 h-5" />
+        </button>
         <button
           onClick={toggleTheme}
           className={`p-1.5 rounded-lg ${currentTheme.subText} hover:${currentTheme.accentText} hover:bg-emerald-500/10 transition-colors`}
@@ -497,6 +532,7 @@ export default function DashboardPage() {
         >
           {theme === 'dark' ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-indigo-600" />}
         </button>
+        </div>
       </div>
 
       {/* 1. SIDEBAR NAVIGASI ERP — di desktop/tablet (md ke atas) bisa
@@ -755,6 +791,19 @@ export default function DashboardPage() {
           <div className="flex items-center gap-3 w-full sm:w-auto">
             {/* Toggle tema ini disembunyiin di HP (md:flex) — di layar kecil
                 udah ada tombol yang sama di topbar mobile, nggak perlu dobel. */}
+            <button
+              onClick={togglePalette}
+              className={`hidden md:flex items-center gap-2 px-3 py-2 rounded-xl border transition-all text-xs font-semibold ${
+                theme === 'dark'
+                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-800'
+                  : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300 shadow-sm'
+              }`}
+              title={palette === 'hangat' ? 'Ganti ke tema warna Klasik' : 'Ganti ke tema warna Hangat'}
+            >
+              <Palette className="w-4 h-4" />
+              <span>Tema: {palette === 'hangat' ? 'Hangat' : 'Klasik'}</span>
+            </button>
+
             <button
               onClick={toggleTheme}
               className={`hidden md:flex items-center gap-2 px-3 py-2 rounded-xl border transition-all text-xs font-semibold ${
