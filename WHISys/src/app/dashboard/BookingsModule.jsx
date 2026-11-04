@@ -1384,8 +1384,7 @@ Terimakasih🙏`;
     }
     setSavingPaymentEdit(true);
     try {
-      const newEdcMatchForDoc = findEdcMethod(paymentEditForm.paymentMethod);
-      const mdrAmountForDoc = newEdcMatchForDoc ? computeEdcMdrAmount(Number(paymentEditForm.amount), newEdcMatchForDoc.mdrPercent) : 0;
+      const editMdr = resolveEditMdr(oldPay, paymentEditForm.paymentMethod, paymentEditForm.amount);
       await updateDoc(doc(db, 'payments_income', payId), {
         amount: Number(paymentEditForm.amount),
         paymentMethod: paymentEditForm.paymentMethod,
@@ -1394,9 +1393,9 @@ Terimakasih🙏`;
         ...(paymentEditForm.paymentMethod !== 'Saldo Deposit' ? { accountId: paymentEditForm.accountId, accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '' } : {}),
         // EDC: kalau metode baru match edc_methods, simpen MDR-nya; kalau
         // pindah KELUAR dari EDC, field2 ini di-reset biar nggak nyangkut.
-        mdrAmount: mdrAmountForDoc,
-        mdrPercent: newEdcMatchForDoc ? (Number(newEdcMatchForDoc.mdrPercent) || 0) : 0,
-        edcMethodId: newEdcMatchForDoc ? newEdcMatchForDoc.id : null,
+        mdrAmount: editMdr.mdrAmount,
+        mdrPercent: editMdr.mdrPercent,
+        edcMethodId: editMdr.edcMethodId,
         // Kalau field tanggalnya dikosongin, biarin createdAt lama (jangan
         // dipaksa ke waktu sekarang) — cuma di-update kalau staff emang
         // sengaja ganti tanggalnya.
@@ -1425,8 +1424,8 @@ Terimakasih🙏`;
       // metode — biar tetap benar kalau metode EDC-nya udah direname/dihapus.
       const oldWasEdc = !!findEdcMethod(oldPay?.paymentMethod) || (Number(oldPay?.mdrAmount) || 0) > 0;
       const newEdcMatch = findEdcMethod(paymentEditForm.paymentMethod);
-      const isOrWasEdc = oldWasEdc || !!newEdcMatch;
-      const mdrAmount = newEdcMatch ? computeEdcMdrAmount(Number(paymentEditForm.amount), newEdcMatch.mdrPercent) : 0;
+      const mdrAmount = editMdr.mdrAmount;
+      const isOrWasEdc = oldWasEdc || !!newEdcMatch || mdrAmount > 0;
       if (oldPay?.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
         if (paymentAccountChanged || (isOrWasEdc && !oldPay.groupTransactionId)) {
           // (Transaksi grup gabungan udah diblok di validasi awal — titik
@@ -2065,8 +2064,8 @@ Terimakasih🙏`;
       alert('Nominal melebihi sisa tagihan, tapi Pemesan belum terdata, jadi kelebihannya nggak bisa dimasukkan ke Saldo Deposit. Isi Pemesan dulu atau kurangi nominalnya.');
       return { ok: false };
     }
-    if (mdrAmount > 0 && amount - excess <= 0) {
-      alert('Pembayaran via EDC yang seluruhnya kelebihan nggak bisa dicatat otomatis. Catat kelebihannya lewat Titip Deposit di modul Keuangan.');
+    if (mdrAmount > 0) {
+      alert(`Setoran via EDC nggak boleh melebihi sisa tagihan (nominal Rp ${amount.toLocaleString('id-ID')}, sisa tagihan Rp ${rem.toLocaleString('id-ID')}), karena potongan MDR dihitung dari total yang digesek. Isi nominal sebesar sisa tagihan, lalu catat kelebihannya lewat Titip Deposit di modul Keuangan.`);
       return { ok: false };
     }
     const okConfirm = window.confirm(
@@ -2283,6 +2282,32 @@ Terimakasih🙏`;
     const pct = Number(mdrPercent) || 0;
     if (amt <= 0 || pct <= 0) return 0;
     return Math.round((amt * pct) / 100);
+  };
+
+  // MDR saat EDIT setoran. Kalau metode bayarnya TIDAK diganti, pakai persen MDR
+  // yang TERSIMPAN di setoran itu (bukan persen EDC hari ini, yang bisa aja
+  // sudah diubah di Pengaturan EDC, dan bukan dicocokkan lewat nama yang bisa
+  // sudah di-rename/dihapus). Hitung ulang pakai persen EDC saat ini cuma kalau
+  // metodenya diganti. Nominal sama dgn sebelumnya -> MDR lama dipertahankan persis.
+  const resolveEditMdr = (oldPay, newMethod, newAmount) => {
+    const amt = Number(newAmount) || 0;
+    const oldAmt = Number(oldPay?.amount) || 0;
+    const oldMdr = Number(oldPay?.mdrAmount) || 0;
+    let oldPct = Number(oldPay?.mdrPercent) || 0;
+    if (oldPct <= 0 && oldMdr > 0 && oldAmt > 0) oldPct = (oldMdr / oldAmt) * 100;
+    if (oldPay && oldPay.paymentMethod === newMethod && (oldPct > 0 || oldMdr > 0)) {
+      return {
+        mdrAmount: amt === oldAmt && oldMdr > 0 ? oldMdr : computeEdcMdrAmount(amt, oldPct),
+        mdrPercent: Number(oldPay?.mdrPercent) || oldPct,
+        edcMethodId: oldPay.edcMethodId || null
+      };
+    }
+    const m = findEdcMethod(newMethod);
+    return {
+      mdrAmount: m ? computeEdcMdrAmount(amt, m.mdrPercent) : 0,
+      mdrPercent: m ? (Number(m.mdrPercent) || 0) : 0,
+      edcMethodId: m ? m.id : null
+    };
   };
 
   // Sinkronkan (create/update/delete) record biaya admin EDC di expenses_operational
@@ -3099,8 +3124,9 @@ Terimakasih🙏`;
       // Nominal di baris mutasi harus NET (dikurangi potongan MDR), bukan gross.
       const oldWasEdc = !!findEdcMethod(pay?.paymentMethod) || (Number(pay?.mdrAmount) || 0) > 0;
       const newEdcMatch = findEdcMethod(paymentEditForm.paymentMethod);
-      const isOrWasEdc = oldWasEdc || !!newEdcMatch;
-      const mdrAmount = newEdcMatch ? computeEdcMdrAmount(Number(paymentEditForm.amount), newEdcMatch.mdrPercent) : 0;
+      const editMdr = resolveEditMdr(pay, paymentEditForm.paymentMethod, paymentEditForm.amount);
+      const mdrAmount = editMdr.mdrAmount;
+      const isOrWasEdc = oldWasEdc || !!newEdcMatch || mdrAmount > 0;
 
       await updateDoc(doc(db, 'payments_income', pay.id), {
         amount: Number(paymentEditForm.amount),
@@ -3109,8 +3135,8 @@ Terimakasih🙏`;
         notes: paymentEditForm.notes,
         ...(paymentEditForm.paymentMethod !== 'Saldo Deposit' ? { accountId: paymentEditForm.accountId, accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '' } : {}),
         mdrAmount,
-        mdrPercent: newEdcMatch ? (Number(newEdcMatch.mdrPercent) || 0) : 0,
-        edcMethodId: newEdcMatch ? newEdcMatch.id : null,
+        mdrPercent: editMdr.mdrPercent,
+        edcMethodId: editMdr.edcMethodId,
         ...(paymentEditForm.date ? { createdAt: resolvePaymentCreatedAt(paymentEditForm.date) } : {})
       });
 
