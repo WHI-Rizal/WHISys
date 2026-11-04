@@ -8,7 +8,7 @@ import { validateUploadFile, uploadDocumentFile, ALLOWED_UPLOAD_TYPES } from '@/
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN, addPPN } from '../../lib/ppn';
 import { getNextCustomerCode } from '../../lib/customerCode';
-import { postBookingCreated, postIncomePayment, postDepositTopup, postBookingCancelRefund, postJournalEntry, deleteJournalEntriesBySource, deleteAllJournalEntriesForBooking, resyncBookingCreatedJournalDate, ACC } from '../../lib/journal';
+import { postBookingCreated, postIncomePayment, postDepositTopup, postExcessToDeposit, postBookingCancelRefund, postJournalEntry, deleteJournalEntriesBySource, deleteAllJournalEntriesForBooking, resyncBookingCreatedJournalDate, ACC } from '../../lib/journal';
 import SearchableSelect from '@/components/SearchableSelect';
 import DateFieldID from '@/components/DateFieldID';
 
@@ -116,7 +116,7 @@ const PAYMENT_STAGES = ['DP Awal', 'DP 2', 'Pelunasan'];
 // yang belum punya paymentStage dikasih tahap berdasarkan urutan kronologis
 // (createdAt naik): 1 = DP Awal, 2 = DP 2, 3+ = Pelunasan.
 const resolveEffectiveStages = (payments) => {
-  const sorted = [...(payments || [])].sort((a, b) => String(a?.createdAt || '').localeCompare(String(b?.createdAt || '')));
+  const sorted = [...(payments || [])].filter(p => !p?.isDepositConversion).sort((a, b) => String(a?.createdAt || '').localeCompare(String(b?.createdAt || '')));
   return sorted.map((payment, idx) => ({
     payment,
     stage: PAYMENT_STAGES.includes(payment?.paymentStage)
@@ -1279,6 +1279,7 @@ Terimakasih🙏`;
     }
     const oldPayForRecon = paymentHistory.find(p => p.id === payId);
     if (oldPayForRecon?.settlementStatus === 'settled') { alert(SETTLED_BLOCK_MSG); return; }
+    if (oldPayForRecon?.isDepositConversion) { alert(DEPOSIT_CONV_BLOCK_MSG); return; }
     if (oldPayForRecon?.accountId && await isAccountMutationReconciled(oldPayForRecon.accountId, [payId, oldPayForRecon.groupTransactionId])) {
       alert(RECON_BLOCK_MSG);
       return;
@@ -1357,6 +1358,7 @@ Terimakasih🙏`;
     }
     const oldPay = paymentHistory.find(p => p.id === payId);
     if (oldPay?.settlementStatus === 'settled') { alert(SETTLED_BLOCK_MSG); return; }
+    if (oldPay?.isDepositConversion) { alert(DEPOSIT_CONV_BLOCK_MSG); return; }
     if (oldPay && (oldPay.paymentMethod === 'Saldo Deposit') !== (paymentEditForm.paymentMethod === 'Saldo Deposit')) {
       alert("Ganti Metode Bayar ke/dari \"Saldo Deposit\" nggak bisa lewat edit ini (biar saldo deposit & akun Kas/Bank tetap akurat). Hapus catatan ini, terus catat ulang lewat \"+Bayar\".");
       return;
@@ -2125,6 +2127,92 @@ Terimakasih🙏`;
       console.error('Gagal posting jurnal kelebihan bayar:', err);
       alert(`Kelebihan bayar masuk Saldo Deposit & Kas/Bank sudah disesuaikan, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan belum akurat sampai dikoreksi, segera lapor ke tim IT/Finance.`);
     });
+  };
+
+  // ============ Kelebihan Bayar karena TAGIHAN turun -> Saldo Deposit ============
+  // Kasus: booking sudah lunas, lalu total tagihan direvisi turun (misal revisi
+  // paspor) sehingga total terbayar > tagihan. Uangnya sudah ada di Kas/Bank,
+  // jadi yang dipindah cuma pencatatannya: Saldo Deposit pemesan naik, 1 baris
+  // pembayaran minus ("Pindah ke Deposit") bikin total terbayar pas lagi dengan
+  // tagihan, jurnal Dr Piutang Jamaah / Cr Utang Deposit Jamaah (Kas/Bank tetap).
+  const DEPOSIT_CONV_BLOCK_MSG = 'Baris "Pindah ke Deposit" ini sudah menambah Saldo Deposit pemesan, jadi nggak bisa diedit atau dihapus dari sini. Koreksi saldonya lewat Keuangan > Riwayat Deposit Jamaah.';
+
+  const sumPaidOfBooking = async (bookingId) => {
+    const snap = await getDocs(query(collection(db, 'payments_income'), where('bookingId', '==', bookingId)));
+    return snap.docs.reduce((acc, d) => acc + (Number(d.data().amount) || 0), 0);
+  };
+
+  const convertExcessToDeposit = async (booking, excess) => {
+    const ex = Math.round(Number(excess) || 0);
+    if (ex <= 0 || !booking?.ordererId) return false;
+    const nowIso = new Date().toISOString();
+    const customerId = booking.ordererId;
+    const customerName = booking.ordererName || '-';
+    const payRef = await addDoc(collection(db, 'payments_income'), {
+      bookingId: booking.id,
+      bookingCode: booking.bookingCode || '',
+      jamaahName: booking.jamaahName || '',
+      packageId: booking.packageId || '',
+      packageName: booking.packageName || '',
+      amount: -ex,
+      paymentMethod: 'Pindah ke Deposit',
+      isDepositConversion: true,
+      notes: `Kelebihan bayar (tagihan turun) dipindah ke Saldo Deposit ${customerName}`,
+      createdAt: nowIso
+    });
+    const ledgerDocId = `deposit_${customerId}_${Date.now()}`;
+    await updateDoc(doc(db, 'jamaah', customerId), { depositBalance: increment(ex) });
+    await setDoc(doc(db, 'deposit_ledger', ledgerDocId), {
+      customerId,
+      customerName,
+      type: 'excess_conversion',
+      amount: ex,
+      notes: `Kelebihan bayar booking ${booking.bookingCode} (tagihan turun) dipindah ke Saldo Deposit`,
+      bookingCode: booking.bookingCode || '',
+      paymentId: payRef.id,
+      createdAt: nowIso
+    });
+    await postExcessToDeposit({
+      paymentId: payRef.id, bookingCode: booking.bookingCode, jamaahName: customerName, amount: ex, date: nowIso,
+      createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+    }).catch(err => {
+      console.error('Gagal posting jurnal pindah kelebihan ke deposit:', err);
+      alert(`Saldo Deposit sudah bertambah, TAPI jurnalnya GAGAL diposting (${err.message}). Laporan Keuangan belum akurat sampai dikoreksi, segera lapor ke tim IT/Finance.`);
+    });
+    await syncBookingTotalPaid(booking.id, booking.totalAmount);
+    return true;
+  };
+
+  // Cek 1..N booking: kalau total terbayar (dibaca fresh dari payments_income)
+  // melebihi tagihan, tawarkan pemindahan ke Saldo Deposit. Balik jumlah
+  // booking yang dipindah (0 = nggak ada / ditolak / gagal).
+  const offerExcessConversion = async (bookingsToCheck) => {
+    if (!canManagePayments) return 0;
+    const found = [];
+    for (const b of (bookingsToCheck || [])) {
+      if (!b?.id) continue;
+      const paid = await sumPaidOfBooking(b.id);
+      const ex = Math.round(paid - (Number(b.totalAmount) || 0));
+      if (ex > 0) found.push({ b, ex });
+    }
+    if (found.length === 0) return 0;
+    if (found.some(f => !f.b.ordererId)) {
+      alert('Total terbayar melebihi tagihan, tapi Pemesan belum terdata, jadi kelebihannya nggak bisa dipindah ke Saldo Deposit. Isi Pemesan dulu lewat Edit Booking.');
+      return 0;
+    }
+    const total = found.reduce((a, f) => a + f.ex, 0);
+    const detail = found.map(f => `- ${f.b.bookingCode}: Rp ${f.ex.toLocaleString('id-ID')}`).join('\n');
+    if (!confirm(`Total yang sudah dibayar lebih besar dari tagihan. Kelebihan bayar Rp ${total.toLocaleString('id-ID')}:\n${detail}\n\nPindahkan ke Saldo Deposit pemesan sekarang? (Batal = biarkan dulu, bisa dipindah nanti dari Riwayat Pembayaran.)`)) return 0;
+    let done = 0;
+    for (const f of found) {
+      try {
+        if (await convertExcessToDeposit(f.b, f.ex)) done += 1;
+      } catch (err) {
+        alert(`Gagal memindahkan kelebihan ${f.b.bookingCode} ke Saldo Deposit: ${err.message}`);
+      }
+    }
+    if (done > 0) alert(`Kelebihan bayar ${done} booking sudah dipindah ke Saldo Deposit pemesan.`);
+    return done;
   };
 
   // Saldo tiap akun Kas/Bank (collection 'financial_accounts') — delta
@@ -3057,6 +3145,7 @@ Terimakasih🙏`;
       return;
     }
     if (pay.settlementStatus === 'settled') { alert(SETTLED_BLOCK_MSG); return; }
+    if (pay.isDepositConversion) { alert(DEPOSIT_CONV_BLOCK_MSG); return; }
     if (pay.accountId && await isAccountMutationReconciled(pay.accountId, [pay.id, pay.groupTransactionId])) {
       alert(RECON_BLOCK_MSG);
       return;
@@ -3107,6 +3196,7 @@ Terimakasih🙏`;
       return;
     }
     if (pay.settlementStatus === 'settled') { alert(SETTLED_BLOCK_MSG); return; }
+    if (pay.isDepositConversion) { alert(DEPOSIT_CONV_BLOCK_MSG); return; }
     if ((pay.paymentMethod === 'Saldo Deposit') !== (paymentEditForm.paymentMethod === 'Saldo Deposit')) {
       alert("Ganti Metode Bayar ke/dari \"Saldo Deposit\" nggak bisa lewat edit ini (biar saldo deposit & akun Kas/Bank tetap akurat). Hapus catatan ini, terus catat ulang lewat \"+Bayar\".");
       return;
@@ -3280,6 +3370,7 @@ Terimakasih🙏`;
       return;
     }
     if (docs.some(d => d.settlementStatus === 'settled')) { alert(SETTLED_BLOCK_MSG); return; }
+    if (docs.some(d => d.isDepositConversion)) { alert(DEPOSIT_CONV_BLOCK_MSG); return; }
     {
       const reconAccountId = docs.find(d => d.accountId)?.accountId;
       const reconSourceIds = [...docs.map(d => d.id), docs.find(d => d.groupTransactionId)?.groupTransactionId];
@@ -3834,6 +3925,14 @@ Terimakasih🙏`;
       await Promise.all(sortedActiveForExtra.map((item, i) =>
         syncBookingTotalPaid(item.id, perPaxExtras[i].totalAmount)
       ));
+
+      // Tagihan pax yang turun & total terbayarnya jadi lebih besar -> tawarkan
+      // pindah kelebihannya ke Saldo Deposit pemesan.
+      await offerExcessConversion(
+        sortedActiveForExtra
+          .map((item, i) => ({ ...item, totalAmount: perPaxExtras[i].totalAmount, _old: Number(item.totalAmount || 0) }))
+          .filter(x => x.totalAmount < x._old)
+      );
 
       await warnIfPartnerLinked(groupEditTarget.code, 'diedit (paket/harga/biaya tambahan)');
 
@@ -5635,6 +5734,15 @@ Terimakasih🙏`;
         }
 
         await syncBookingTotalPaid(editingBookingId, editedTotalAmount);
+
+        // Tagihan turun (misal revisi paspor) & total terbayar jadi lebih besar
+        // dari tagihan -> tawarkan pindah kelebihannya ke Saldo Deposit pemesan.
+        if (editedTotalAmount < Number(currentBooking?.totalAmount || 0)) {
+          await offerExcessConversion([{
+            ...currentBooking, totalAmount: editedTotalAmount, ordererId, ordererName,
+            jamaahName: selectedJamaah.fullName, packageId: selectedPkg.id, packageName: selectedPkg.name
+          }]);
+        }
 
         logActivity({
           userId: currentUser?.uid,
@@ -7651,6 +7759,26 @@ Terimakasih🙏`;
               Jamaah: <strong className={styles.textTitle}>{selectedBookingForHistory.jamaahName}</strong> • Kode: <span className="font-mono text-emerald-500">{selectedBookingForHistory.bookingCode}</span>
             </p>
 
+            {canManagePayments && (() => {
+              const paidNow = paymentHistory.reduce((a, p) => a + (Number(p.amount) || 0), 0);
+              const ex = Math.round(paidNow - (Number(selectedBookingForHistory.totalAmount) || 0));
+              if (ex <= 0) return null;
+              return (
+                <div className="mb-4 p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs flex flex-wrap items-center gap-2 justify-between">
+                  <span className="text-amber-500">Kelebihan bayar <b>Rp {ex.toLocaleString('id-ID')}</b> (total terbayar lebih besar dari tagihan).</span>
+                  <button
+                    onClick={async () => {
+                      const n = await offerExcessConversion([selectedBookingForHistory]);
+                      if (n > 0) { await fetchPaymentHistory(selectedBookingForHistory.id); fetchData(); }
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold"
+                  >
+                    Pindahkan ke Saldo Deposit
+                  </button>
+                </div>
+              );
+            })()}
+
             <div className={`hidden md:block overflow-x-auto max-h-60 overflow-y-auto mb-4 border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg`}>
               <table className="w-full text-left text-xs">
                 <thead className={`${styles.tableHeaderBg} uppercase`}>
@@ -8283,6 +8411,28 @@ Terimakasih🙏`;
             <p className={`text-xs ${styles.textSub} mb-4`}>
               Riwayat transaksi setoran masuk untuk pemesanan ini.
             </p>
+
+            {canManagePayments && (() => {
+              const over = (groupHistoryItems || [])
+                .map(b => ({ b, ex: Math.round((groupHistoryPayments[b.id] || []).reduce((a, p) => a + (Number(p.amount) || 0), 0) - (Number(b.totalAmount) || 0)) }))
+                .filter(x => x.ex > 0);
+              if (over.length === 0) return null;
+              const totalEx = over.reduce((a, x) => a + x.ex, 0);
+              return (
+                <div className="mb-4 p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs flex flex-wrap items-center gap-2 justify-between">
+                  <span className="text-amber-500">Kelebihan bayar <b>Rp {totalEx.toLocaleString('id-ID')}</b> di {over.length} peserta (total terbayar lebih besar dari tagihan).</span>
+                  <button
+                    onClick={async () => {
+                      const n = await offerExcessConversion(over.map(x => x.b));
+                      if (n > 0) { await fetchGroupHistoryPayments(groupHistoryItems); fetchData(); }
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold"
+                  >
+                    Pindahkan ke Saldo Deposit
+                  </button>
+                </div>
+              );
+            })()}
 
             <div className={`hidden md:block overflow-x-auto max-h-[60vh] overflow-y-auto mb-4 border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg`}>
               <table className="w-full text-left text-xs">
