@@ -134,7 +134,7 @@ const resolvePaymentCreatedAt = (dateStr) => {
 // sisanya = Pelunasan). Salinan logika yang sama dengan modul Booking.
 const PAYMENT_STAGES = ['DP Awal', 'DP 2', 'Pelunasan'];
 const resolveEffectiveStages = (payments) => {
-  const sorted = [...(payments || [])].sort((a, b) => String(a?.createdAt || '').localeCompare(String(b?.createdAt || '')));
+  const sorted = [...(payments || [])].filter(p => !p?.isDepositConversion).sort((a, b) => String(a?.createdAt || '').localeCompare(String(b?.createdAt || '')));
   return sorted.map((p, idx) => ({ payment: p, stage: PAYMENT_STAGES.includes(p?.paymentStage) ? p.paymentStage : (idx === 0 ? 'DP Awal' : idx === 1 ? 'DP 2' : 'Pelunasan') }));
 };
 const computeStageFlags = (payments) => {
@@ -2196,6 +2196,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       alert(`Setoran ini tidak dapat dihapus karena paket "${recognizedPkg.name}" omzetnya sudah "Diakui" dan sudah masuk Laporan P&L.\n\nBatalkan dulu pengakuan pendapatan paket ini lewat tombol "Batalkan Pengakuan" di tab Riwayat Setoran Jamaah/Laporan, baru setoran ini bisa dihapus/dikoreksi.`);
       return;
     }
+    if (row.docs.some(d => d.isDepositConversion)) {
+      alert('Baris "Pindah ke Deposit" sudah menambah Saldo Deposit pemesan, jadi nggak bisa dihapus dari sini. Koreksi saldonya lewat Riwayat Deposit Jamaah.');
+      return;
+    }
     if (row.docs.some(d => d.settlementStatus === 'settled')) {
       alert('Setoran EDC ini sudah di-settlement (uangnya sudah dicatat masuk rekening). Batalkan dulu settlement-nya lewat tab Settlement EDC, baru setoran ini bisa dihapus.');
       return;
@@ -4069,6 +4073,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             withdrawal: { label: 'Pengembalian', cls: 'bg-amber-500/10 text-amber-500 border-amber-500/20' },
             usage: { label: 'Dipakai Bayar Setoran', cls: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
             refund_conversion: { label: 'Konversi Refund Batal', cls: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' },
+            excess_conversion: { label: 'Kelebihan (Tagihan Turun)', cls: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' },
           };
           return map[type] || { label: type || '-', cls: 'bg-slate-500/10 text-slate-400 border-slate-500/20' };
         };
