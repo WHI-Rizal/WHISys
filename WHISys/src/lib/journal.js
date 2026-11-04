@@ -274,6 +274,24 @@ export const postEdcSettlement = async ({ settlementId, label, grossTotal, recei
   });
 };
 
+// 2c. Kelebihan bayar karena TAGIHAN booking turun (misal revisi paspor)
+//     dipindah jadi Saldo Deposit pemesan. Uangnya sudah ada di Kas/Bank dari
+//     setoran sebelumnya, jadi Kas/Bank TIDAK berubah: cuma Piutang Jamaah
+//     (yang jadi saldo kredit akibat tagihan turun) ditutup ke Utang Deposit Jamaah.
+export const postExcessToDeposit = async ({ paymentId, bookingCode, jamaahName, amount, date, createdByUid, createdByName }) => {
+  const amt = Number(amount) || 0;
+  if (amt <= 0) return null;
+  return postJournalEntry({
+    date, description: `Kelebihan bayar ${bookingCode || paymentId} dipindah ke Saldo Deposit - ${jamaahName || '-'}`,
+    source: 'excess_to_deposit', sourceDocId: paymentId, reference: bookingCode || '',
+    lines: [
+      glLine(ACC.PIUTANG_JAMAAH, amt, 0),
+      glLine(ACC.UTANG_DEPOSIT_JAMAAH, 0, amt),
+    ],
+    createdByUid, createdByName
+  });
+};
+
 // 3. Titip Deposit customer (belum tentu dipakai buat booking mana) — kas
 //    masuk, jadi utang perusahaan ke jamaah (bisa dipakai/ditarik lagi).
 export const postDepositTopup = async ({ sourceDocId, jamaahName, amount, accountId, accountName, date, createdByUid, createdByName }) => {
@@ -1087,6 +1105,7 @@ export const diagnoseMissingIncomePaymentJournals = ({ paymentsIncome, journalEn
     // itu memang desainnya, dan kalau staf iseng klik "Posting Jurnal" bakal
     // DOBEL-nyatet uang yang sebenarnya nggak pernah masuk sebagai kas baru.
     .filter(p => p.paymentMethod !== 'Carry-Over Reschedule')
+    .filter(p => !p.isDepositConversion)
     .filter(p => !journaledPaymentIds.has(p.id))
     .map(p => ({
       paymentId: p.id, bookingCode: p.bookingCode, jamaahName: p.jamaahName,
