@@ -53,6 +53,7 @@ import { calculatePPN } from './ppn';
 // ---------------------------------------------------------------------
 export const COA = [
   { code: '1101', name: 'Kas & Bank', type: 'Aset', normalBalance: 'debit' },
+  { code: '1102', name: 'Piutang Settlement EDC', type: 'Aset', normalBalance: 'debit' },
   { code: '1201', name: 'Piutang Jamaah', type: 'Aset', normalBalance: 'debit' },
   { code: '1301', name: 'Piutang Deposit Vendor', type: 'Aset', normalBalance: 'debit' },
   { code: '1401', name: 'Biaya Dibayar Dimuka', type: 'Aset', normalBalance: 'debit' },
@@ -73,6 +74,7 @@ const COA_NAME_BY_CODE = COA.reduce((acc, a) => { acc[a.code] = a.name; return a
 // dst) tanpa harus apal angka kodenya.
 export const ACC = {
   KAS_BANK: '1101',
+  PIUTANG_SETTLEMENT_EDC: '1102',
   PIUTANG_JAMAAH: '1201',
   PIUTANG_DEPOSIT_VENDOR: '1301',
   BIAYA_DIBAYAR_DIMUKA: '1401',
@@ -218,18 +220,23 @@ export const postBookingCreated = async ({ bookingId, bookingCode, totalAmount, 
 //    Jamaah, sisi lain Kas/Bank (atau Utang Deposit Jamaah kalau
 //    dibayar pakai Saldo Deposit customer). `batch` opsional, sama kayak
 //    postBookingCreated di atas.
-export const postIncomePayment = async ({ paymentId, bookingCode, amount, paymentMethod, accountId, accountName, date, createdByUid, createdByName, batch, mdrAmount = 0 }) => {
+export const postIncomePayment = async ({ paymentId, bookingCode, amount, paymentMethod, accountId, accountName, date, createdByUid, createdByName, batch, mdrAmount = 0, pendingSettlement = false }) => {
   const amt = Number(amount) || 0;
   if (amt <= 0) return null;
   const viaDeposit = paymentMethod === 'Saldo Deposit';
   // Potongan MDR (EDC/QRIS) — kalau ada, Kas/Bank yang kecatet cuma
   // yang BERSIH masuk rekening (sesuai mutasi bank beneran), dan
   // selisihnya langsung kebaca sebagai Biaya Admin EDC di entry yang sama.
-  const fee = viaDeposit ? 0 : Math.max(0, Math.min(amt, Number(mdrAmount) || 0));
+  const fee = (viaDeposit || pendingSettlement) ? 0 : Math.max(0, Math.min(amt, Number(mdrAmount) || 0));
   const netAmt = amt - fee;
   const lines = [];
   if (viaDeposit) {
     lines.push(glLine(ACC.UTANG_DEPOSIT_JAMAAH, amt, 0));
+  } else if (pendingSettlement) {
+    // Bayar pakai EDC & duitnya belum cair ke rekening: tahan dulu di
+    // Piutang Settlement EDC (GROSS). Kas/Bank & Biaya Admin EDC baru
+    // dicatat pas settlement lewat postEdcSettlement.
+    lines.push(glLine(ACC.PIUTANG_SETTLEMENT_EDC, amt, 0));
   } else {
     lines.push(glLine(ACC.KAS_BANK, netAmt, 0, { accountId, accountName }));
     if (fee > 0) {
@@ -245,6 +252,26 @@ export const postIncomePayment = async ({ paymentId, bookingCode, amount, paymen
   };
   if (batch) return setJournalEntryInBatch(batch, doc(collection(db, 'journal_entries')), params);
   return postJournalEntry(params);
+};
+
+// 2b. Settlement EDC — duit hasil gesek kartu akhirnya cair ke rekening.
+//     grossTotal  = total nominal setoran EDC yang diselesaikan (sama dgn yg
+//                   tertahan di Piutang Settlement EDC)
+//     receivedAmount = nominal yang BENERAN masuk rekening (angka mutasi bank)
+//     Selisihnya = potongan MDR, dicatat sebagai Biaya Admin EDC.
+export const postEdcSettlement = async ({ settlementId, label, grossTotal, receivedAmount, accountId, accountName, date, createdByUid, createdByName }) => {
+  const gross = Math.round(Number(grossTotal) || 0);
+  const received = Math.round(Number(receivedAmount) || 0);
+  if (gross <= 0) return null;
+  const fee = Math.max(0, gross - received);
+  const lines = [glLine(ACC.KAS_BANK, received, 0, { accountId, accountName })];
+  if (fee > 0) lines.push(glLine(ACC.OPEX, fee, 0, { category: 'Biaya Admin EDC' }));
+  lines.push(glLine(ACC.PIUTANG_SETTLEMENT_EDC, 0, gross));
+  return postJournalEntry({
+    date, description: `Settlement EDC - ${label || settlementId}`,
+    source: 'edc_settlement', sourceDocId: settlementId, reference: label || '',
+    lines, createdByUid, createdByName
+  });
 };
 
 // 3. Titip Deposit customer (belum tentu dipakai buat booking mana) — kas
@@ -742,6 +769,7 @@ export const runInitialJournalMigration = async ({
     await safe(() => postIncomePayment({
       paymentId: p.id, bookingCode: p.bookingCode, amount: p.amount, paymentMethod: p.paymentMethod,
       accountId: p.accountId, accountName: p.accountName, mdrAmount: p.mdrAmount || 0,
+      pendingSettlement: p.settlementStatus === 'pending',
       date: p.createdAt, createdByUid, createdByName
     }), `Setoran ${p.bookingCode || p.id}`);
   }
@@ -1067,6 +1095,7 @@ export const diagnoseMissingIncomePaymentJournals = ({ paymentsIncome, journalEn
       // Potongan MDR EDC (kalau ada) ikut dibawa biar jurnal yang diposting
       // ulang tetap NET di Kas/Bank + ada baris Biaya Admin EDC-nya.
       mdrAmount: Number(p.mdrAmount || 0),
+      pendingSettlement: p.settlementStatus === 'pending',
     }));
   const totalAmount = affected.reduce((acc, p) => acc + p.amount, 0);
   return { affected, totalAmount, count: affected.length };
@@ -1087,6 +1116,7 @@ export const applyMissingIncomePaymentJournalsCorrection = async ({ affected, cr
         paymentId: item.paymentId, bookingCode: item.bookingCode, amount: item.amount,
         paymentMethod: item.paymentMethod, accountId: item.accountId, accountName: item.accountName,
         mdrAmount: item.mdrAmount || 0,
+        pendingSettlement: !!item.pendingSettlement,
         date: item.createdAt || new Date().toISOString(), createdByUid, createdByName
       });
       if (posted) summary.corrected += 1; else summary.skipped += 1;
