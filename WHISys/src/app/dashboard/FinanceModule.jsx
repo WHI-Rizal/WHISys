@@ -8,6 +8,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import DateFieldID from '@/components/DateFieldID';
 import SearchableSelect from '@/components/SearchableSelect';
+import SettlementEdcTab from './SettlementEdcTab';
 import { logActivity } from '../../lib/activityLog';
 import { calculatePPN } from '../../lib/ppn';
 import {
@@ -2195,6 +2196,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       alert(`Setoran ini tidak dapat dihapus karena paket "${recognizedPkg.name}" omzetnya sudah "Diakui" dan sudah masuk Laporan P&L.\n\nBatalkan dulu pengakuan pendapatan paket ini lewat tombol "Batalkan Pengakuan" di tab Riwayat Setoran Jamaah/Laporan, baru setoran ini bisa dihapus/dikoreksi.`);
       return;
     }
+    if (row.docs.some(d => d.settlementStatus === 'settled')) {
+      alert('Setoran EDC ini sudah di-settlement (uangnya sudah dicatat masuk rekening). Batalkan dulu settlement-nya lewat tab Settlement EDC, baru setoran ini bisa dihapus.');
+      return;
+    }
     {
       const reconAccountId = row.docs.find(d => d.accountId)?.accountId;
       const reconSourceIds = [...row.docs.map(d => d.id), row.docs.find(d => d.groupTransactionId)?.groupTransactionId];
@@ -2220,8 +2225,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     try {
       // Rekening dikredit NET (gross - potongan MDR EDC) saat setoran dicatat,
       // jadi yang dibalik juga NET. Data non-EDC mdrAmount = 0 -> sama dengan gross.
-      const rowMdrTotal = row.docs.reduce((acc, d) => acc + (Number(d.mdrAmount) || 0), 0);
-      const rowNetAmount = (Number(row.amount) || 0) - rowMdrTotal;
+      // Setoran EDC yang masih "Menunggu Settlement" belum pernah masuk rekening -> net 0.
+      const netOfDoc = (d) => d.settlementStatus === 'pending' ? 0 : (Number(d.amount) || 0) - (Number(d.mdrAmount) || 0);
+      const rowNetAmount = row.docs.reduce((acc, d) => acc + netOfDoc(d), 0);
       await Promise.all(row.docs.map(d => deleteDoc(doc(db, 'payments_income', d.id))));
       await Promise.all(row.docs.map(d => deleteJournalEntriesBySource('income_payment', d.id)));
       // Uang yang beneran masuk ke Kas/Bank dicatat SATU baris mutasi per
@@ -2249,7 +2255,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           // Transaksi grup lama (dibuat sebelum perbaikan ini) — tiap
           // pecahan pax masih punya baris mutasinya sendiri-sendiri, jadi
           // dicari & dihapus satu-satu lewat id doc payments_income aslinya.
-          await Promise.all(row.docs.map(d => d.accountId ? removeAccountMutationBySource(d.accountId, d.id, -((Number(d.amount) || 0) - (Number(d.mdrAmount) || 0))) : Promise.resolve()));
+          await Promise.all(row.docs.map(d => d.accountId ? removeAccountMutationBySource(d.accountId, d.id, -netOfDoc(d)) : Promise.resolve()));
         }
       }
       // Bersihkan catatan biaya admin EDC (MDR) otomatis yang terkait setoran
@@ -2274,7 +2280,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             if (remSnap.docs.length === 0) {
               await deleteDoc(m.ref);
             } else {
-              const remMdr = remSnap.docs.reduce((acc, d) => acc + (Number(d.data().mdrAmount) || 0), 0);
+              const remMdr = remSnap.docs.reduce((acc, d) => acc + (d.data().settlementStatus ? 0 : (Number(d.data().mdrAmount) || 0)), 0);
               if (remMdr > 0) await updateDoc(m.ref, { amount: remMdr });
               else await deleteDoc(m.ref);
             }
@@ -3436,6 +3442,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           <Building2 className="w-3.5 h-3.5" /> Data Vendor ({vendorsList.length})
         </button>
         <button
+          onClick={() => setActiveTab('settlement_edc')}
+          className={`px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+            activeTab === 'settlement_edc' ? `${styles.tabActive} text-amber-500 border` : `${styles.textSub} hover:${styles.textTitle}`
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5" /> Settlement EDC
+        </button>
+        <button
           onClick={() => setActiveTab('reports')}
           className={`px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
             activeTab === 'reports' ? `${styles.tabActive} text-indigo-500 border` : `${styles.textSub} hover:${styles.textTitle}`
@@ -3444,6 +3458,17 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
           <FileBarChart className="w-3.5 h-3.5" /> Laporan
         </button>
       </div>
+
+      {activeTab === 'settlement_edc' && (
+        <SettlementEdcTab
+          isDark={isDark}
+          styles={styles}
+          financialAccounts={financialAccounts}
+          currentUser={currentUser}
+          isFinanceRole={isFinanceRole}
+          onChanged={fetchData}
+        />
+      )}
 
       {activeTab === 'income' && (
         <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
