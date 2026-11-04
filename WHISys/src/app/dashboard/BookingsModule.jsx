@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, setDoc, query, where, increment, runTransaction, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, getDoc, setDoc, query, where, increment, runTransaction, writeBatch, deleteField } from 'firebase/firestore';
 import { BookOpen, Plus, Search, CheckCircle, Clock, X, Edit, Trash2, Wallet, History, Printer, FileCheck, Check, AlertCircle, MessageSquare, Ban, RotateCcw, DoorOpen, Wand2, Filter, MoreHorizontal, Star, UserPlus, Eye, Link2, Upload, Loader2 } from 'lucide-react';
 import { validateUploadFile, uploadDocumentFile, ALLOWED_UPLOAD_TYPES } from '@/lib/documentUpload';
 import { logActivity } from '../../lib/activityLog';
@@ -1278,6 +1278,7 @@ Terimakasih🙏`;
       return;
     }
     const oldPayForRecon = paymentHistory.find(p => p.id === payId);
+    if (oldPayForRecon?.settlementStatus === 'settled') { alert(SETTLED_BLOCK_MSG); return; }
     if (oldPayForRecon?.accountId && await isAccountMutationReconciled(oldPayForRecon.accountId, [payId, oldPayForRecon.groupTransactionId])) {
       alert(RECON_BLOCK_MSG);
       return;
@@ -1292,7 +1293,7 @@ Terimakasih🙏`;
       // (groupTransactionId), baris gabungannya cuma dikurangi porsinya —
       // bukan dicari lewat id doc sendiri (nggak bakal ketemu, lihat
       // catatan di adjustGroupMutationShare).
-      if (oldPay?.accountId) {
+      if (oldPay?.accountId && !oldPay.settlementStatus) {
         if (oldPay.groupTransactionId) {
           // Reversal pakai NET (gross - MDR) karena baris mutasi/saldo isinya NET.
           await adjustGroupMutationShare(oldPay.accountId, oldPay.groupTransactionId, -netOf(oldPay));
@@ -1342,12 +1343,20 @@ Terimakasih🙏`;
     <span className="px-1.5 py-0.5 rounded text-[10px] mr-1 bg-emerald-500/15 text-emerald-500 font-semibold">{stage}</span>
   );
 
+  // Badge status settlement EDC (cuma muncul buat setoran EDC yang punya status).
+  const renderSettlementBadge = (status) => {
+    if (status === 'pending') return <span className="px-1.5 py-0.5 rounded text-[10px] mr-1 bg-amber-500/15 text-amber-500 font-semibold">Menunggu Settlement</span>;
+    if (status === 'settled') return <span className="px-1.5 py-0.5 rounded text-[10px] mr-1 bg-sky-500/15 text-sky-500 font-semibold">Sudah Settle</span>;
+    return null;
+  };
+
   const handleSavePaymentEdit = async (payId) => {
     if (!canManagePayments) {
       alert("Cuma Finance & Super Admin yang boleh mengedit riwayat pembayaran.");
       return;
     }
     const oldPay = paymentHistory.find(p => p.id === payId);
+    if (oldPay?.settlementStatus === 'settled') { alert(SETTLED_BLOCK_MSG); return; }
     if (oldPay && (oldPay.paymentMethod === 'Saldo Deposit') !== (paymentEditForm.paymentMethod === 'Saldo Deposit')) {
       alert("Ganti Metode Bayar ke/dari \"Saldo Deposit\" nggak bisa lewat edit ini (biar saldo deposit & akun Kas/Bank tetap akurat). Hapus catatan ini, terus catat ulang lewat \"+Bayar\".");
       return;
@@ -1385,6 +1394,11 @@ Terimakasih🙏`;
     setSavingPaymentEdit(true);
     try {
       const editMdr = resolveEditMdr(oldPay, paymentEditForm.paymentMethod, paymentEditForm.amount);
+      // EDC baru / EDC yang masih nunggu settlement -> tetap "menunggu settlement"
+      // (nggak nyentuh saldo rekening). EDC lama (sebelum fitur settlement)
+      // dianggap sudah settle & perilakunya nggak berubah.
+      const legacyEdcOld = !!oldPay && !oldPay.settlementStatus && (!!findEdcMethod(oldPay.paymentMethod) || (Number(oldPay.mdrAmount) || 0) > 0);
+      const newPendingEdc = !!findEdcMethod(paymentEditForm.paymentMethod) && !legacyEdcOld;
       await updateDoc(doc(db, 'payments_income', payId), {
         amount: Number(paymentEditForm.amount),
         paymentMethod: paymentEditForm.paymentMethod,
@@ -1393,9 +1407,11 @@ Terimakasih🙏`;
         ...(paymentEditForm.paymentMethod !== 'Saldo Deposit' ? { accountId: paymentEditForm.accountId, accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '' } : {}),
         // EDC: kalau metode baru match edc_methods, simpen MDR-nya; kalau
         // pindah KELUAR dari EDC, field2 ini di-reset biar nggak nyangkut.
-        mdrAmount: editMdr.mdrAmount,
+        mdrAmount: newPendingEdc ? 0 : editMdr.mdrAmount,
         mdrPercent: editMdr.mdrPercent,
         edcMethodId: editMdr.edcMethodId,
+        settlementStatus: newPendingEdc ? 'pending' : deleteField(),
+        estimatedMdrAmount: newPendingEdc ? editMdr.mdrAmount : deleteField(),
         // Kalau field tanggalnya dikosongin, biarin createdAt lama (jangan
         // dipaksa ke waktu sekarang) — cuma di-update kalau staff emang
         // sengaja ganti tanggalnya.
@@ -1424,8 +1440,9 @@ Terimakasih🙏`;
       // metode — biar tetap benar kalau metode EDC-nya udah direname/dihapus.
       const oldWasEdc = !!findEdcMethod(oldPay?.paymentMethod) || (Number(oldPay?.mdrAmount) || 0) > 0;
       const newEdcMatch = findEdcMethod(paymentEditForm.paymentMethod);
-      const mdrAmount = editMdr.mdrAmount;
+      const mdrAmount = newPendingEdc ? 0 : editMdr.mdrAmount;
       const isOrWasEdc = oldWasEdc || !!newEdcMatch || mdrAmount > 0;
+      const newNetAmount = Number(paymentEditForm.amount) - mdrAmount;
       if (oldPay?.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
         if (paymentAccountChanged || (isOrWasEdc && !oldPay.groupTransactionId)) {
           // (Transaksi grup gabungan udah diblok di validasi awal — titik
@@ -1435,7 +1452,7 @@ Terimakasih🙏`;
           // kayak pindah akun, bukan delta — reversal pakai NET lama
           // (oldPay.amount - oldPay.mdrAmount), kredit baru pakai NET baru.
           await removeAccountMutationBySource(oldPay.accountId, payId, -netOf(oldPay));
-          await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount) - mdrAmount, {
+          await adjustAccountBalance(paymentEditForm.accountId, newNetAmount, {
             description: paymentEditForm.notes || selectedBookingForHistory?.bookingCode || '-',
             source: 'income_payment',
             sourceDocId: payId,
@@ -1447,7 +1464,7 @@ Terimakasih🙏`;
             // diblok di validasi awal) — delta dihitung dari selisih
             // NOMINAL BERSIH (gross - MDR), bukan gross, biar baris mutasi
             // gabungan (isinya net) tetap akurat.
-            const deltaNet = (Number(paymentEditForm.amount) - mdrAmount) - netOf(oldPay);
+            const deltaNet = (newNetAmount) - netOf(oldPay);
             await adjustGroupMutationShare(oldPay.accountId, oldPay.groupTransactionId, deltaNet, resolvedNewDate);
           } else {
             const delta = Number(paymentEditForm.amount) - (Number(oldPay.amount) || 0);
@@ -1459,7 +1476,7 @@ Terimakasih🙏`;
         // lawas/nggak lengkap) tapi sekarang staf ngisi akunnya lewat edit —
         // catat sebagai mutasi baru di akun itu (belum pernah ada mutasi
         // buat dokumen ini sama sekali).
-        await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount) - mdrAmount, {
+        await adjustAccountBalance(paymentEditForm.accountId, newNetAmount, {
           description: paymentEditForm.notes || selectedBookingForHistory?.bookingCode || '-',
           source: 'income_payment',
           sourceDocId: payId,
@@ -1477,6 +1494,7 @@ Terimakasih🙏`;
         bookingCode: selectedBookingForHistory?.bookingCode,
         amount: Number(paymentEditForm.amount),
         mdrAmount,
+        pendingSettlement: newPendingEdc,
         paymentMethod: paymentEditForm.paymentMethod,
         accountId: paymentEditForm.accountId,
         accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '',
@@ -2187,6 +2205,7 @@ Terimakasih🙏`;
     return false;
   };
 
+  const SETTLED_BLOCK_MSG = 'Setoran EDC ini sudah di-settlement (uangnya sudah dicatat masuk rekening). Batalkan dulu settlement-nya lewat Keuangan > Settlement EDC, baru setoran ini bisa diedit/dihapus.';
   const RECON_BLOCK_MSG = 'Transaksi ini sudah "dicocokkan" (rekonsiliasi) dengan salah satu baris mutasi bank. Lepas dulu kecocokannya lewat menu Laporan Keuangan > Rekonsiliasi Bank, baru transaksi ini bisa dihapus/diedit.';
 
   // Update NOMINAL baris account_mutations yang berasal dari satu dokumen
@@ -2274,7 +2293,7 @@ Terimakasih🙏`;
   // Nominal BERSIH yang beneran masuk ke rekening dari 1 dokumen payments_income
   // (amount = GROSS, mdrAmount = potongan EDC). Dipakai buat semua reversal
   // saldo/mutasi akun — baris account_mutations & saldo akun selalu NET.
-  const netOf = (p) => (Number(p?.amount) || 0) - (Number(p?.mdrAmount) || 0);
+  const netOf = (p) => p?.settlementStatus === 'pending' ? 0 : (Number(p?.amount) || 0) - (Number(p?.mdrAmount) || 0);
 
   // Hitung potongan MDR, dibulatkan ke rupiah terdekat.
   const computeEdcMdrAmount = (amount, mdrPercent) => {
@@ -2369,7 +2388,7 @@ Terimakasih🙏`;
     let totalMdr = 0;
     try {
       const gSnap = await getDocs(query(collection(db, 'payments_income'), where('groupTransactionId', '==', groupTransactionId)));
-      totalMdr = gSnap.docs.reduce((acc, d) => acc + (Number(d.data().mdrAmount) || 0), 0);
+      totalMdr = gSnap.docs.reduce((acc, d) => acc + (d.data().settlementStatus ? 0 : (Number(d.data().mdrAmount) || 0)), 0);
     } catch (err) {
       console.error('Gagal membaca ulang MDR transaksi grup:', err);
       return;
@@ -2913,13 +2932,14 @@ Terimakasih🙏`;
             notes: `${groupPaymentForm.notes} (Grup ${groupPaymentTarget.code})`,
             createdAt: resolvePaymentCreatedAt(groupPaymentForm.date),
             groupTransactionId,
-            mdrAmount: mdrShare,
+            mdrAmount: 0,
             mdrPercent: groupEdcMatch ? (Number(groupEdcMatch.mdrPercent) || 0) : 0,
-            edcMethodId: groupEdcMatch ? groupEdcMatch.id : null
+            edcMethodId: groupEdcMatch ? groupEdcMatch.id : null,
+            ...(groupEdcMatch ? { settlementStatus: 'pending', estimatedMdrAmount: mdrShare } : {})
           });
           await postIncomePayment({
             paymentId: gPayRef.id, bookingCode: item.bookingCode, amount: paxShare,
-            mdrAmount: mdrShare,
+            mdrAmount: 0, pendingSettlement: !!groupEdcMatch,
             paymentMethod: groupPaymentForm.paymentMethod,
             accountId: groupPaymentForm.accountId, accountName: groupPaymentAccount?.name || '',
             date: resolvePaymentCreatedAt(groupPaymentForm.date),
@@ -2942,7 +2962,7 @@ Terimakasih🙏`;
       // aslinya, dan pas transaksinya dihapus cuma perlu hapus 1 baris (lihat
       // handleDeleteMergedGroupPayment). Rincian per-peserta tetap ada di
       // payments_income, dicari lewat groupTransactionId yang sama.
-      if (groupPaymentForm.paymentMethod !== 'Saldo Deposit' && gApplied > 0) {
+      if (groupPaymentForm.paymentMethod !== 'Saldo Deposit' && gApplied > 0 && !groupEdcMatch) {
         await adjustAccountBalance(groupPaymentForm.accountId, gApplied - groupMdrAmount, {
           description: `Setoran Grup ${groupPaymentTarget.code} (${paxCount} peserta)`,
           reference: groupPaymentTarget.code,
@@ -3036,6 +3056,7 @@ Terimakasih🙏`;
       alert("Cuma Finance & Super Admin yang boleh menghapus riwayat pembayaran.");
       return;
     }
+    if (pay.settlementStatus === 'settled') { alert(SETTLED_BLOCK_MSG); return; }
     if (pay.accountId && await isAccountMutationReconciled(pay.accountId, [pay.id, pay.groupTransactionId])) {
       alert(RECON_BLOCK_MSG);
       return;
@@ -3043,7 +3064,7 @@ Terimakasih🙏`;
     if (!confirm("Apakah Anda yakin ingin menghapus catatan pembayaran ini?")) return;
     try {
       await deleteDoc(doc(db, 'payments_income', pay.id));
-      if (pay.accountId) {
+      if (pay.accountId && !pay.settlementStatus) {
         if (pay.groupTransactionId) {
           // Porsi dari setoran grup gabungan: baris mutasinya milik bersama
           // (sourceDocId = groupTransactionId), jadi cuma dikurangi porsi NET-nya.
@@ -3085,6 +3106,7 @@ Terimakasih🙏`;
       alert("Cuma Finance & Super Admin yang boleh mengedit riwayat pembayaran.");
       return;
     }
+    if (pay.settlementStatus === 'settled') { alert(SETTLED_BLOCK_MSG); return; }
     if ((pay.paymentMethod === 'Saldo Deposit') !== (paymentEditForm.paymentMethod === 'Saldo Deposit')) {
       alert("Ganti Metode Bayar ke/dari \"Saldo Deposit\" nggak bisa lewat edit ini (biar saldo deposit & akun Kas/Bank tetap akurat). Hapus catatan ini, terus catat ulang lewat \"+Bayar\".");
       return;
@@ -3125,8 +3147,11 @@ Terimakasih🙏`;
       const oldWasEdc = !!findEdcMethod(pay?.paymentMethod) || (Number(pay?.mdrAmount) || 0) > 0;
       const newEdcMatch = findEdcMethod(paymentEditForm.paymentMethod);
       const editMdr = resolveEditMdr(pay, paymentEditForm.paymentMethod, paymentEditForm.amount);
-      const mdrAmount = editMdr.mdrAmount;
+      const legacyEdcOld = !!pay && !pay.settlementStatus && (!!findEdcMethod(pay.paymentMethod) || (Number(pay.mdrAmount) || 0) > 0);
+      const newPendingEdc = !!findEdcMethod(paymentEditForm.paymentMethod) && !legacyEdcOld;
+      const mdrAmount = newPendingEdc ? 0 : editMdr.mdrAmount;
       const isOrWasEdc = oldWasEdc || !!newEdcMatch || mdrAmount > 0;
+      const newNetAmount = Number(paymentEditForm.amount) - mdrAmount;
 
       await updateDoc(doc(db, 'payments_income', pay.id), {
         amount: Number(paymentEditForm.amount),
@@ -3137,6 +3162,8 @@ Terimakasih🙏`;
         mdrAmount,
         mdrPercent: editMdr.mdrPercent,
         edcMethodId: editMdr.edcMethodId,
+        settlementStatus: newPendingEdc ? 'pending' : deleteField(),
+        estimatedMdrAmount: newPendingEdc ? editMdr.mdrAmount : deleteField(),
         ...(paymentEditForm.date ? { createdAt: resolvePaymentCreatedAt(paymentEditForm.date) } : {})
       });
 
@@ -3155,7 +3182,7 @@ Terimakasih🙏`;
           // NET setelah MDR), jadi diganti total (hapus+tulis ulang) pakai
           // NET lama untuk reversal & NET baru untuk kredit.
           await removeAccountMutationBySource(pay.accountId, pay.id, -netOf(pay));
-          await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount) - mdrAmount, {
+          await adjustAccountBalance(paymentEditForm.accountId, newNetAmount, {
             description: paymentEditForm.notes || pay.bookingCode || '-',
             source: 'income_payment',
             sourceDocId: pay.id,
@@ -3165,14 +3192,14 @@ Terimakasih🙏`;
           // Porsi dari setoran grup gabungan (akun nggak berubah): baris
           // mutasi bersama (sourceDocId = groupTransactionId, isinya NET)
           // disesuaikan lewat delta NET, bukan dihapus/ditulis ulang per doc.
-          const deltaNet = (Number(paymentEditForm.amount) - mdrAmount) - netOf(pay);
+          const deltaNet = (newNetAmount) - netOf(pay);
           await adjustGroupMutationShare(pay.accountId, pay.groupTransactionId, deltaNet, resolvedNewDate);
         } else {
           const delta = Number(paymentEditForm.amount) - (Number(pay.amount) || 0);
           await updateAccountMutationAmount(pay.accountId, pay.id, Number(paymentEditForm.amount), delta, resolvedNewDate);
         }
       } else if (!pay.accountId && paymentEditForm.accountId && paymentEditForm.paymentMethod !== 'Saldo Deposit') {
-        await adjustAccountBalance(paymentEditForm.accountId, Number(paymentEditForm.amount) - mdrAmount, {
+        await adjustAccountBalance(paymentEditForm.accountId, newNetAmount, {
           description: paymentEditForm.notes || pay.bookingCode || '-',
           source: 'income_payment',
           sourceDocId: pay.id,
@@ -3191,6 +3218,7 @@ Terimakasih🙏`;
         bookingCode: bookingItem?.bookingCode || pay.bookingCode,
         amount: Number(paymentEditForm.amount),
         mdrAmount,
+        pendingSettlement: newPendingEdc,
         paymentMethod: paymentEditForm.paymentMethod,
         accountId: paymentEditForm.accountId,
         accountName: financialAccounts.find(a => a.id === paymentEditForm.accountId)?.name || '',
@@ -3251,6 +3279,7 @@ Terimakasih🙏`;
       alert("Cuma Finance & Super Admin yang boleh menghapus riwayat pembayaran.");
       return;
     }
+    if (docs.some(d => d.settlementStatus === 'settled')) { alert(SETTLED_BLOCK_MSG); return; }
     {
       const reconAccountId = docs.find(d => d.accountId)?.accountId;
       const reconSourceIds = [...docs.map(d => d.id), docs.find(d => d.groupTransactionId)?.groupTransactionId];
@@ -3755,13 +3784,14 @@ Terimakasih🙏`;
               notes: `${groupEditForm.addPaymentNotes} (Grup ${groupEditTarget.code})`,
               createdAt: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
               groupTransactionId,
-              mdrAmount: mdrShare,
+              mdrAmount: 0,
               mdrPercent: addEdcMatch ? (Number(addEdcMatch.mdrPercent) || 0) : 0,
-              edcMethodId: addEdcMatch ? addEdcMatch.id : null
+              edcMethodId: addEdcMatch ? addEdcMatch.id : null,
+              ...(addEdcMatch ? { settlementStatus: 'pending', estimatedMdrAmount: mdrShare } : {})
             });
             await postIncomePayment({
               paymentId: geIncomeRef.id, bookingCode: item.bookingCode, amount: share,
-              mdrAmount: mdrShare,
+              mdrAmount: 0, pendingSettlement: !!addEdcMatch,
               paymentMethod: groupEditForm.addPaymentMethod,
               accountId: groupEditForm.addAccountId, accountName: groupEditAccount?.name || '',
               date: resolvePaymentCreatedAt(groupEditForm.addPaymentDate),
@@ -3776,7 +3806,7 @@ Terimakasih🙏`;
         // Mutasi Kas/Bank dicatat SATU KALI per transaksi setoran ini (bukan
         // per pecahan pax) — pola sama persis dengan setoran grup lainnya,
         // biar "Riwayat Mutasi" persis sama jumlah uang yang beneran masuk.
-        if (groupEditForm.addPaymentMethod !== 'Saldo Deposit' && addAmount > 0) {
+        if (groupEditForm.addPaymentMethod !== 'Saldo Deposit' && addAmount > 0 && !addEdcMatch) {
           await adjustAccountBalance(groupEditForm.addAccountId, addAmount - addMdrAmount, {
             description: `Setoran Grup (Edit) ${groupEditTarget.code} (${sortedActive.length} peserta)`,
             reference: groupEditTarget.code,
@@ -5561,13 +5591,14 @@ Terimakasih🙏`;
             ...(formData.paymentMethod !== 'Saldo Deposit' ? { accountId: formData.accountId, accountName: payAccount?.name || '' } : {}),
             notes: formData.paymentNotes,
             createdAt: resolvePaymentCreatedAt(formData.paymentDate),
-            mdrAmount: editPayMdrAmount,
+            mdrAmount: 0,
             mdrPercent: editPayEdcMatch ? (Number(editPayEdcMatch.mdrPercent) || 0) : 0,
-            edcMethodId: editPayEdcMatch ? editPayEdcMatch.id : null
+            edcMethodId: editPayEdcMatch ? editPayEdcMatch.id : null,
+            ...(editPayEdcMatch ? { settlementStatus: 'pending', estimatedMdrAmount: editPayMdrAmount } : {})
           });
           await postIncomePayment({
             paymentId: payRef.id, bookingCode: currentBooking.bookingCode, amount: payApplied,
-            mdrAmount: editPayMdrAmount,
+            mdrAmount: 0, pendingSettlement: !!editPayEdcMatch,
             paymentMethod: formData.paymentMethod, accountId: formData.accountId, accountName: payAccount?.name || '',
             date: resolvePaymentCreatedAt(formData.paymentDate),
             createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
@@ -5577,7 +5608,7 @@ Terimakasih🙏`;
           });
           if (formData.paymentMethod === 'Saldo Deposit') {
             await adjustDepositBalance(ordererId, ordererName, -paymentVal, 'usage', `Bayar setoran booking ${currentBooking.bookingCode}`, currentBooking.bookingCode);
-          } else {
+          } else if (!editPayEdcMatch) {
             await adjustAccountBalance(formData.accountId, payApplied - editPayMdrAmount, {
               description: `Setoran Booking ${currentBooking.bookingCode} - an. ${selectedJamaah.fullName || '-'}`,
               reference: currentBooking.bookingCode,
@@ -5716,13 +5747,14 @@ Terimakasih🙏`;
               ...(formData.paymentMethod !== 'Saldo Deposit' ? { accountId: formData.accountId, accountName: payAccount?.name || '' } : {}),
               notes: formData.paymentNotes,
               createdAt: resolvePaymentCreatedAt(formData.paymentDate),
-              mdrAmount: singleDpMdrAmount,
+              mdrAmount: 0,
               mdrPercent: singleDpEdcMatch ? (Number(singleDpEdcMatch.mdrPercent) || 0) : 0,
-              edcMethodId: singleDpEdcMatch ? singleDpEdcMatch.id : null
+              edcMethodId: singleDpEdcMatch ? singleDpEdcMatch.id : null,
+              ...(singleDpEdcMatch ? { settlementStatus: 'pending', estimatedMdrAmount: singleDpMdrAmount } : {})
             });
             await postIncomePayment({
               paymentId: payRef.id, bookingCode, amount: paymentVal,
-              mdrAmount: singleDpMdrAmount,
+              mdrAmount: 0, pendingSettlement: !!singleDpEdcMatch,
               paymentMethod: formData.paymentMethod, accountId: formData.accountId, accountName: payAccount?.name || '',
               date: resolvePaymentCreatedAt(formData.paymentDate),
               createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email,
@@ -5740,7 +5772,7 @@ Terimakasih🙏`;
           if (paymentVal > 0) {
             if (formData.paymentMethod === 'Saldo Deposit') {
               await adjustDepositBalance(ordererId, ordererName, -paymentVal, 'usage', `Bayar DP booking ${bookingCode}`, bookingCode);
-            } else {
+            } else if (!singleDpEdcMatch) {
               await adjustAccountBalance(formData.accountId, paymentVal - singleDpMdrAmount, {
                 description: `DP Booking ${bookingCode} - an. ${selectedJamaah.fullName || '-'}`,
                 reference: bookingCode,
@@ -5879,13 +5911,14 @@ Terimakasih🙏`;
                 notes: `${formData.paymentNotes} (Grup ${groupBookingCode}, ${paxCount} pax)`,
                 createdAt: resolvePaymentCreatedAt(formData.paymentDate),
                 groupTransactionId,
-                mdrAmount: paxMdrShare,
+                mdrAmount: 0,
                 mdrPercent: groupDpEdcMatch ? (Number(groupDpEdcMatch.mdrPercent) || 0) : 0,
-                edcMethodId: groupDpEdcMatch ? groupDpEdcMatch.id : null
+                edcMethodId: groupDpEdcMatch ? groupDpEdcMatch.id : null,
+                ...(groupDpEdcMatch ? { settlementStatus: 'pending', estimatedMdrAmount: paxMdrShare } : {})
               });
               await postIncomePayment({
                 paymentId: groupNewPayRef.id, bookingCode, amount: paxShare,
-                mdrAmount: paxMdrShare,
+                mdrAmount: 0, pendingSettlement: !!groupDpEdcMatch,
                 paymentMethod: formData.paymentMethod, accountId: formData.accountId, accountName: payAccount?.name || '',
                 date: resolvePaymentCreatedAt(formData.paymentDate),
                 createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email,
@@ -5907,7 +5940,7 @@ Terimakasih🙏`;
           // sama mutasi bank aslinya. Rincian per-peserta tetap ada di
           // payments_income, dicari lewat groupTransactionId yang sama —
           // dipakai juga pas transaksinya dihapus (handleDeleteMergedGroupPayment).
-          if (formData.paymentMethod !== 'Saldo Deposit' && paymentVal > 0) {
+          if (formData.paymentMethod !== 'Saldo Deposit' && paymentVal > 0 && !groupDpEdcMatch) {
             await adjustAccountBalance(formData.accountId, paymentVal - groupDpMdrAmount, {
               description: `DP Booking Grup ${groupBookingCode} (${paxCount} peserta)`,
               reference: groupBookingCode,
@@ -7544,7 +7577,7 @@ Terimakasih🙏`;
                           const mdr = computeEdcMdrAmount(formData.initialPayment, edcMatch.mdrPercent);
                           return (
                             <p className="text-[11px] mt-1 text-amber-500">
-                              Potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')} — Bersih masuk rekening: Rp {(Number(formData.initialPayment || 0) - mdr).toLocaleString('id-ID')}
+                              Metode EDC: statusnya "Menunggu Settlement" (belum masuk rekening sampai Finance catat settlement). Estimasi potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')}
                             </p>
                           );
                         })()}
@@ -7710,7 +7743,7 @@ Terimakasih🙏`;
                                 const mdr = computeEdcMdrAmount(paymentEditForm.amount, edcMatch.mdrPercent);
                                 return (
                                   <p className="text-[10px] mt-1 text-amber-500">
-                                    Potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')} — Bersih: Rp {(Number(paymentEditForm.amount || 0) - mdr).toLocaleString('id-ID')}
+                                    Metode EDC: statusnya "Menunggu Settlement" (belum masuk rekening sampai Finance catat settlement). Estimasi potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')}
                                   </p>
                                 );
                               })()}
@@ -7732,6 +7765,7 @@ Terimakasih🙏`;
                             <td className="p-3">
                               <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{pay.paymentMethod}{pay.accountName ? ` - ${pay.accountName}` : ''}</span>
                               {renderStageBadge(getEffectiveStageOf(pay.id, paymentHistory))}
+                              {renderSettlementBadge(pay.settlementStatus)}
                               <span className={styles.textSub}>{pay.notes}</span>
                             </td>
                             <td className="p-3 font-bold text-emerald-500">
@@ -7842,7 +7876,7 @@ Terimakasih🙏`;
                           const mdr = computeEdcMdrAmount(paymentEditForm.amount, edcMatch.mdrPercent);
                           return (
                             <p className="text-[10px] text-amber-500">
-                              Potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')} — Bersih: Rp {(Number(paymentEditForm.amount || 0) - mdr).toLocaleString('id-ID')}
+                              Metode EDC: statusnya "Menunggu Settlement" (belum masuk rekening sampai Finance catat settlement). Estimasi potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')}
                             </p>
                           );
                         })()}
@@ -7860,7 +7894,7 @@ Terimakasih🙏`;
                         <p className={`font-bold ${styles.textTitle}`}>Rp {Number(pay.amount).toLocaleString('id-ID')}</p>
                         <div className={`mt-1 space-y-0.5 ${styles.textSub}`}>
                           <p>Tanggal: {formatDateDDMMYYYY(pay.createdAt)}</p>
-                          <p>Metode: {pay.paymentMethod}{pay.accountName ? ` - ${pay.accountName}` : ''} {renderStageBadge(getEffectiveStageOf(pay.id, paymentHistory))}</p>
+                          <p>Metode: {pay.paymentMethod}{pay.accountName ? ` - ${pay.accountName}` : ''} {renderStageBadge(getEffectiveStageOf(pay.id, paymentHistory))}{renderSettlementBadge(pay.settlementStatus)}</p>
                           {pay.notes && <p>Catatan: {pay.notes}</p>}
                         </div>
                         {canManagePayments && (
@@ -8179,7 +8213,7 @@ Terimakasih🙏`;
                     const mdr = computeEdcMdrAmount(groupPaymentForm.amount, edcMatch.mdrPercent);
                     return (
                       <p className="text-[11px] mt-1 text-amber-500">
-                        Potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')} — Bersih masuk rekening: Rp {(Number(groupPaymentForm.amount || 0) - mdr).toLocaleString('id-ID')}
+                        Metode EDC: statusnya "Menunggu Settlement" (belum masuk rekening sampai Finance catat settlement). Estimasi potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')}
                       </p>
                     );
                   })()}
@@ -8342,7 +8376,7 @@ Terimakasih🙏`;
                                   const mdr = computeEdcMdrAmount(paymentEditForm.amount, edcMatch.mdrPercent);
                                   return (
                                     <p className="text-[10px] mt-1 text-amber-500">
-                                      Potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')} — Bersih: Rp {(Number(paymentEditForm.amount || 0) - mdr).toLocaleString('id-ID')}
+                                      Metode EDC: statusnya "Menunggu Settlement" (belum masuk rekening sampai Finance catat settlement). Estimasi potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')}
                                     </p>
                                   );
                                 })()}
@@ -8364,6 +8398,7 @@ Terimakasih🙏`;
                               <td className="p-3">
                                 <span className={`${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} px-1.5 py-0.5 rounded text-[10px] mr-1`}>{tx.paymentMethod}{tx.accountName ? ` - ${tx.accountName}` : ''}</span>
                                 {renderStageBadge(getEffectiveStageOf(tx.docs[0].id, groupHistoryPayments[tx.docs[0].bookingId] || []))}
+                                {renderSettlementBadge(tx.docs.some(d => d.settlementStatus === 'pending') ? 'pending' : tx.docs[0].settlementStatus)}
                                 <span className={styles.textSub}>{tx.notes}</span>
                               </td>
                               <td className="p-3 font-bold text-emerald-500">
@@ -8486,7 +8521,7 @@ Terimakasih🙏`;
                             const mdr = computeEdcMdrAmount(paymentEditForm.amount, edcMatch.mdrPercent);
                             return (
                               <p className="text-[10px] text-amber-500">
-                                Potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')} — Bersih: Rp {(Number(paymentEditForm.amount || 0) - mdr).toLocaleString('id-ID')}
+                                Metode EDC: statusnya "Menunggu Settlement" (belum masuk rekening sampai Finance catat settlement). Estimasi potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')}
                               </p>
                             );
                           })()}
@@ -8504,7 +8539,7 @@ Terimakasih🙏`;
                           <p className={`font-bold ${styles.textTitle}`}>Rp {Number(tx.amount).toLocaleString('id-ID')}</p>
                           <div className={`mt-1 space-y-0.5 ${styles.textSub}`}>
                             <p>Tanggal: {formatDateDDMMYYYY(tx.createdAt)}</p>
-                            <p>Metode: {tx.paymentMethod}{tx.accountName ? ` - ${tx.accountName}` : ''} {renderStageBadge(getEffectiveStageOf(tx.docs[0].id, groupHistoryPayments[tx.docs[0].bookingId] || []))}</p>
+                            <p>Metode: {tx.paymentMethod}{tx.accountName ? ` - ${tx.accountName}` : ''} {renderStageBadge(getEffectiveStageOf(tx.docs[0].id, groupHistoryPayments[tx.docs[0].bookingId] || []))}{renderSettlementBadge(tx.docs.some(d => d.settlementStatus === 'pending') ? 'pending' : tx.docs[0].settlementStatus)}</p>
                             {tx.notes && <p>Catatan: {tx.notes}</p>}
                           </div>
                           {canManagePayments && (
@@ -9053,7 +9088,7 @@ Terimakasih🙏`;
                       const mdr = computeEdcMdrAmount(groupEditForm.addPaymentAmount, edcMatch.mdrPercent);
                       return (
                         <p className="text-[11px] mt-1 text-amber-500">
-                          Potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')} — Bersih masuk rekening: Rp {(Number(groupEditForm.addPaymentAmount || 0) - mdr).toLocaleString('id-ID')}
+                          Metode EDC: statusnya "Menunggu Settlement" (belum masuk rekening sampai Finance catat settlement). Estimasi potongan MDR {edcMatch.mdrPercent}%: Rp {mdr.toLocaleString('id-ID')}
                         </p>
                       );
                     })()}
