@@ -290,14 +290,16 @@ export default function KatalogPublikPage() {
                   className="bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col shadow-sm hover:shadow-md transition-shadow"
                 >
                   <div className="bg-slate-100 flex items-center justify-center">
-                    {pkg.flyerImageDataUrl ? (
+                    {pkg.flyerUrl ? (
                       // Sengaja TANPA tinggi tetap + object-cover, biar gambar flyer
                       // (biasanya udah didesain penuh dengan judul/harga di dalamnya)
                       // nggak kepotong. Tingginya ngikutin rasio asli gambar
                       // (w-full + h-auto), jadi tinggi kartu antar paket bisa
                       // sedikit beda-beda tergantung rasio flyernya masing-masing.
                       <img
-                        src={pkg.flyerImageDataUrl}
+                        src={pkg.flyerUrl}
+                        loading="lazy"
+                        decoding="async"
                         alt={pkg.name || 'Paket'}
                         className="w-full h-auto block"
                       />
