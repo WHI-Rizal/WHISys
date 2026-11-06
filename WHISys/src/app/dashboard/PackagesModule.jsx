@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, query, where } from 'firebase/firestore';
 import { Package, Plus, Search, Calendar, Edit, Trash2, Filter, Plane, MapPin, Globe, RefreshCw, X, ListOrdered, ChevronUp, ChevronDown, Printer, MessageSquare, Utensils, BedDouble, ArrowUpDown, Settings, List, LayoutGrid, CalendarRange, Eye, EyeOff, ExternalLink, Copy, Upload } from 'lucide-react';
 import DateFieldID from '@/components/DateFieldID';
 import { logActivity } from '../../lib/activityLog';
@@ -230,6 +230,13 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
   // BookingsModule.jsx (kasus GRP-606826).
   const [savingPackage, setSavingPackage] = useState(false);
 
+  // Flyer disimpan di collection terpisah `package_flyers` (doc ID = ID paket)
+  // supaya dokumen `packages` tetap kecil dan modul lain nggak ikut narik
+  // gambar base64 tiap kali baca daftar paket. `flyerDirty` = true kalau staf
+  // upload/hapus flyer di form ini, jadi kita tahu perlu nulis ulang atau nggak.
+  const [flyerDirty, setFlyerDirty] = useState(false);
+  const [migratingFlyers, setMigratingFlyers] = useState(false);
+
   // Kop surat (nama PT, alamat, telepon, email) buat dokumen "Detail Paket
   // Wisata" — sumbernya sama persis kayak Invoice di BookingsModule.jsx
   // (settings/company_profile, diatur dari menu Pengaturan > Identitas PT),
@@ -376,6 +383,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       flyerImageDataUrl: '',
       isActive: true
     });
+    setFlyerDirty(false);
     setShowModal(true);
   };
 
@@ -422,12 +430,19 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         ? pkg.flightSegments : DEFAULT_FLIGHT_SEGMENTS,
       specialNote: pkg.specialNote || '',
       flyerImageDataUrl: pkg.flyerImageDataUrl || '',
+      // (kalau flyer-nya ada di `package_flyers`, dimuat async di bawah)
       // Paket lama belum punya field ini sama sekali — default-nya TETAP
       // aktif (bukan tiba-tiba ilang dari katalog cuma gara-gara field-nya
       // belum pernah diisi).
       isActive: pkg.isActive !== false
     });
+    setFlyerDirty(false);
     setShowModal(true);
+    if (!pkg.flyerImageDataUrl && pkg.hasFlyer) {
+      fetchFlyerOf(pkg).then((flyer) => {
+        if (flyer) setFormData(prev => ({ ...prev, flyerImageDataUrl: prev.flyerImageDataUrl || flyer }));
+      });
+    }
   };
 
   // Duplikat Paket: buka form "Tambah Paket" yang udah keisi data paket sumber (judul + "(Salinan)",
@@ -509,13 +524,35 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
   // Firestore Rules-nya belum sempat di-update user) — data paket utama
   // tetap kesimpen normal, cuma katalog publiknya yang telat kesinkron;
   // errornya dicatat di console biar ketauan pas debug.
+  // Ambil gambar flyer satu paket. Paket lama yang belum dimigrasi masih
+  // nyimpen base64 langsung di dokumen `packages` (dipakai sebagai fallback).
+  const fetchFlyerOf = async (pkg) => {
+    if (!pkg || !pkg.id) return '';
+    if (pkg.flyerImageDataUrl) return pkg.flyerImageDataUrl;
+    if (!pkg.hasFlyer) return '';
+    try {
+      const snap = await getDoc(doc(db, 'package_flyers', pkg.id));
+      return snap.exists() ? (snap.data().dataUrl || '') : '';
+    } catch (err) {
+      console.error('Gagal membaca flyer paket:', err);
+      return '';
+    }
+  };
+
   const syncPublicCatalog = async (pkgId, data) => {
     try {
       if (!pkgId) return;
       if (data.isActive === false) {
         await deleteDoc(doc(db, 'public_catalog', pkgId));
       } else {
-        await setDoc(doc(db, 'public_catalog', pkgId), buildPublicCatalogDoc(data));
+        let full = data;
+        // Data paket dari daftar nggak lagi bawa gambar flyer, jadi ambil
+        // dulu dari `package_flyers` biar cermin katalog nggak kehilangan flyer.
+        if (data.flyerImageDataUrl === undefined) {
+          const flyer = await fetchFlyerOf({ id: pkgId, ...data });
+          full = { ...data, flyerImageDataUrl: flyer };
+        }
+        await setDoc(doc(db, 'public_catalog', pkgId), buildPublicCatalogDoc(full));
       }
     } catch (err) {
       console.error('Gagal menyinkronkan Katalog Produk publik:', err);
@@ -589,6 +626,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       await deleteDoc(doc(db, 'packages', pkg.id));
       // Ikut hapus cermin katalog publiknya juga — jangan sampai paket yang
       // udah dihapus dari sistem masih nongol di wisatahalalindonesia.com.
+      await deleteDoc(doc(db, 'package_flyers', pkg.id)).catch(() => {});
       await deleteDoc(doc(db, 'public_catalog', pkg.id)).catch((err) => {
         console.error('Gagal menghapus dari Katalog Produk publik:', err);
       });
@@ -897,8 +935,32 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
   // dipanggil dari satu fungsi bersama di src/lib/itineraryPrintDoc.js biar
   // kalau format cetakan diubah, dua-duanya (dashboard & publik) otomatis
   // ikut sinkron.
-  const handlePrintItinerary = (pkg, days) => {
-    printItineraryDocument(pkg, days, { companyInfo });
+  const handlePrintItinerary = async (pkg, days) => {
+    const flyer = await fetchFlyerOf(pkg);
+    printItineraryDocument({ ...pkg, flyerImageDataUrl: flyer }, days, { companyInfo });
+  };
+
+  // Migrasi sekali jalan: pindahkan flyer base64 yang masih nempel di dokumen
+  // `packages` ke collection `package_flyers`. Setelah ini dokumen paket jauh
+  // lebih ringan buat semua modul yang baca daftar paket.
+  const handleMigrateFlyers = async () => {
+    const targets = packagesList.filter(p => p.flyerImageDataUrl);
+    if (targets.length === 0) return;
+    if (!confirm(`Pindahkan flyer ${targets.length} paket ke penyimpanan terpisah? Tampilan flyer tidak berubah, tapi sistem jadi lebih ringan.`)) return;
+    setMigratingFlyers(true);
+    let done = 0;
+    try {
+      for (const p of targets) {
+        await setDoc(doc(db, 'package_flyers', p.id), { dataUrl: p.flyerImageDataUrl, updatedAt: new Date().toISOString() });
+        await updateDoc(doc(db, 'packages', p.id), { hasFlyer: true, flyerImageDataUrl: deleteField() });
+        done++;
+      }
+      alert(`Selesai. Flyer ${done} paket sudah dipindahkan.`);
+    } catch (err) {
+      alert(`Berhenti di tengah jalan (${done} paket sudah dipindah): ${err.message}`);
+    }
+    setMigratingFlyers(false);
+    fetchData();
   };
 
   // ============ Rencana Anggaran (Planning Cost) — tambah/edit/hapus baris ============
@@ -975,6 +1037,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         alert('Gambar masih terlalu besar walau udah dikompres. Coba pakai foto lain yang lebih sederhana/resolusi lebih rendah.');
       } else {
         setFormData(prev => ({ ...prev, flyerImageDataUrl: dataUrl }));
+        setFlyerDirty(true);
       }
     } catch (err) {
       console.error('Gagal memproses flyer:', err);
@@ -985,6 +1048,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
 
   const handleRemoveFlyer = () => {
     setFormData(prev => ({ ...prev, flyerImageDataUrl: '' }));
+    setFlyerDirty(true);
   };
 
   // Dipakai buat preview live di modal DAN buat hitung budgetCostTotal yang
@@ -1047,7 +1111,6 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         priceExcludes: cleanedPriceExcludes,
         flightSegments: cleanedFlightSegments,
         specialNote: formData.specialNote || '',
-        flyerImageDataUrl: formData.flyerImageDataUrl || '',
         isActive: formData.isActive !== false,
         updatedAt: new Date().toISOString()
       };
@@ -1064,12 +1127,39 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
           payload.quotaRemaining = Math.max(0, oldRemaining + delta);
         }
         if (importedItinerary) payload.itinerary = importedItinerary;
+
+        // Flyer: simpan di `package_flyers`, bukan di dokumen paket.
+        // - Staf ganti/hapus flyer di form -> tulis ulang / hapus.
+        // - Paket lama masih bawa base64 di dokumennya -> pindahkan sekalian.
+        const legacyFlyer = originalPkg?.flyerImageDataUrl || '';
+        let flyerForSync;
+        if (flyerDirty) {
+          flyerForSync = formData.flyerImageDataUrl || '';
+          if (flyerForSync) {
+            await setDoc(doc(db, 'package_flyers', editingPackageId), { dataUrl: flyerForSync, updatedAt: new Date().toISOString() });
+          } else {
+            await deleteDoc(doc(db, 'package_flyers', editingPackageId)).catch(() => {});
+          }
+          payload.hasFlyer = !!flyerForSync;
+          payload.flyerImageDataUrl = deleteField();
+        } else if (legacyFlyer) {
+          flyerForSync = legacyFlyer;
+          await setDoc(doc(db, 'package_flyers', editingPackageId), { dataUrl: legacyFlyer, updatedAt: new Date().toISOString() });
+          payload.hasFlyer = true;
+          payload.flyerImageDataUrl = deleteField();
+        }
         await updateDoc(doc(db, 'packages', editingPackageId), payload);
         // Sinkron cermin Katalog Produk publik — gabungin data paket lama
         // (itinerary, dll yang nggak ikut di-touch payload form ini) sama
         // field yang baru aja diubah, biar public_catalog tetap lengkap &
         // up to date.
-        await syncPublicCatalog(editingPackageId, { ...originalPkg, ...payload });
+        {
+          const { flyerImageDataUrl: _drop, ...payloadNoFlyer } = payload;
+          await syncPublicCatalog(editingPackageId, {
+            ...originalPkg, ...payloadNoFlyer,
+            ...(flyerForSync !== undefined ? { flyerImageDataUrl: flyerForSync } : { flyerImageDataUrl: undefined, hasFlyer: originalPkg?.hasFlyer })
+          });
+        }
 
         // Sinkronkan revisi harga jual & tanggal keberangkatan ke SEMUA
         // booking AKTIF yang masih pakai paket ini. Booking nyimpen
@@ -1184,10 +1274,15 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
         payload.quotaRemaining = payload.quotaTotal;
         payload.createdAt = new Date().toISOString();
         if (duplicateItinerary) payload.itinerary = duplicateItinerary;
+        const newFlyer = formData.flyerImageDataUrl || '';
+        payload.hasFlyer = !!newFlyer;
         const newPkgRef = await addDoc(collection(db, 'packages'), payload);
+        if (newFlyer) {
+          await setDoc(doc(db, 'package_flyers', newPkgRef.id), { dataUrl: newFlyer, updatedAt: new Date().toISOString() });
+        }
         // Paket baru langsung disinkron ke Katalog Produk publik kalau
         // statusnya Aktif (default-nya memang Aktif, lihat formData.isActive).
-        await syncPublicCatalog(newPkgRef.id, payload);
+        await syncPublicCatalog(newPkgRef.id, { ...payload, flyerImageDataUrl: newFlyer });
 
         logActivity({
           userId: currentUser?.uid,
@@ -1347,6 +1442,16 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
           >
             <ExternalLink className="w-4 h-4" /> Lihat Katalog Publik
           </a>
+          {canManagePackages && packagesList.some(p => p.flyerImageDataUrl) && (
+            <button
+              onClick={handleMigrateFlyers}
+              disabled={migratingFlyers}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-amber-500/50 text-amber-500 hover:bg-amber-500/10 transition-all disabled:opacity-50"
+              title="Pindahkan gambar flyer keluar dari dokumen paket supaya sistem lebih ringan"
+            >
+              <Upload className="w-4 h-4" /> {migratingFlyers ? 'Memindahkan...' : 'Optimalkan Flyer'}
+            </button>
+          )}
           {canManagePackages && (
             <button
               onClick={handleOpenAdd}
