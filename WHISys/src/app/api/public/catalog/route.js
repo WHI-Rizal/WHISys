@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { getAdminDb } from '@/lib/firebaseAdmin';
+import { stripFlyer } from '@/lib/catalogFlyer';
 
 // =====================================================================
 // Endpoint PUBLIK (TANPA login) — dipanggil dari luar sistem WHISys,
@@ -102,13 +103,39 @@ async function overlayLiveSeats(packages) {
   }
 }
 
-export async function GET() {
+export async function GET(request) {
   try {
+    // Flyer (base64) SENGAJA nggak ikut dikirim di JSON ini lagi: diganti
+    // `flyerUrl` yang menunjuk ke /api/public/catalog/flyer/[id] (bisa di-cache).
+    // Dulu 1 respons bisa ~11MB dan menghabiskan kuota transfer Vercel.
+    const reqUrl = new URL(request.url);
+    const wantedId = reqUrl.searchParams.get('id');
+    // Alamat flyer dibuat ABSOLUT (website utama di domain lain ikut pakai API ini).
+    // `flyerImageDataUrl` tetap diisi (dengan alamat yang sama, bukan base64)
+    // supaya konsumen lama yang memakai field itu di <img src> tetap jalan.
+    const toPublic = (p) => {
+      const s = stripFlyer(p, reqUrl.origin);
+      return s.flyerUrl ? { ...s, flyerImageDataUrl: s.flyerUrl } : s;
+    };
+    if (wantedId) {
+      // Detail 1 paket (dipakai halaman /katalog/[id]) — nggak perlu narik semua paket.
+      const one = await getDoc(doc(db, 'public_catalog', wantedId));
+      if (!one.exists()) {
+        return NextResponse.json({ error: 'Paket tidak ditemukan.' }, { status: 404, headers: CORS_HEADERS });
+      }
+      const [live] = await overlayLiveSeats([{ id: one.id, ...one.data() }]);
+      if (!live) {
+        return NextResponse.json({ error: 'Paket tidak ditemukan.' }, { status: 404, headers: CORS_HEADERS });
+      }
+      return NextResponse.json({ package: toPublic(live) }, { headers: CORS_HEADERS });
+    }
+
     const snap = await getDocs(collection(db, 'public_catalog'));
     const mirrored = snap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .sort((a, b) => new Date(a.departureDate || 0) - new Date(b.departureDate || 0));
-    const packages = await overlayLiveSeats(mirrored);
+    const live = await overlayLiveSeats(mirrored);
+    const packages = live.map(toPublic);
 
     return NextResponse.json({ packages, count: packages.length }, { headers: CORS_HEADERS });
   } catch (err) {
