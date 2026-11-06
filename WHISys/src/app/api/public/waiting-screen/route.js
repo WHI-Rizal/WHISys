@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { flyerUrlOf } from '@/lib/catalogFlyer';
 import { timingSafeEqual } from 'crypto';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 
@@ -74,7 +75,7 @@ export async function GET(request) {
         destinationCity: p.destinationCity || '',
         priceFrom: priceOf(p),
         quotaRemaining: p.quotaRemaining != null ? Math.max(0, Number(p.quotaRemaining) || 0) : null,
-        ...(needFlyer && p.flyerImageDataUrl ? { flyerImageDataUrl: p.flyerImageDataUrl } : {}),
+        ...(needFlyer && p.flyerImageDataUrl ? { flyerUrl: flyerUrlOf(p) } : {}),
       }));
     }
 
