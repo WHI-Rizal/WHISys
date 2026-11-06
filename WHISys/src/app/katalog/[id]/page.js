@@ -79,10 +79,15 @@ export default function DetailPaketPage({ params }) {
       setLoading(true);
       setErrorMsg('');
       try {
-        const res = await fetch('/api/public/catalog', { cache: 'no-store' });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error || 'Gagal mengambil data katalog.');
-        const found = (Array.isArray(data.packages) ? data.packages : []).find((p) => p.id === id);
+        // Ambil 1 paket saja (bukan seluruh katalog), tanpa data gambar base64.
+        const res = await fetch(`/api/public/catalog?id=${encodeURIComponent(id)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok && res.status !== 404) throw new Error(data?.error || 'Gagal mengambil data katalog.');
+        // flyerImageDataUrl diisi alamat gambar (absolut) supaya tampilan hero
+        // & cetakan (itineraryPrintDoc, tag <img src>) tetap jalan tanpa base64.
+        const found = data?.package
+          ? { ...data.package, flyerImageDataUrl: data.package.flyerUrl ? new URL(data.package.flyerUrl, window.location.origin).href : '' }
+          : null;
         if (!cancelled) {
           if (!found) {
             setErrorMsg('Paket tidak ditemukan, mungkin sudah tidak aktif atau sudah dihapus.');
