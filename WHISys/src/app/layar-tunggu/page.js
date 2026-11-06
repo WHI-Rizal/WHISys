@@ -45,8 +45,8 @@ function FlyerCard({ p }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6em', minWidth: 0, minHeight: 0 }}>
       <div style={{ flex: 1, minHeight: 0, background: C.panel, border: `1px solid ${C.line}`, borderRadius: '1em', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {p.flyerImageDataUrl ? (
-          <img src={p.flyerImageDataUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+        {p.flyerUrl ? (
+          <img src={p.flyerUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
         ) : (
           <div style={{ padding: '1em', textAlign: 'center', fontSize: '1.5em', fontWeight: 800, color: C.gold, lineHeight: 1.3 }}>{p.name}</div>
         )}
