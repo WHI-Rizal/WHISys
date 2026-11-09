@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Calculator, Plus, Trash2, Printer, Copy, Check, Loader2, AlertTriangle, ArrowLeft } from 'lucide-react';
-import { formatTanggalPanjang } from '@/lib/publicCatalogFormat';
+import { Calculator, Plus, Trash2, Printer, Copy, Check, Loader2, AlertTriangle, ArrowLeft, Search, Calendar, X } from 'lucide-react';
+import { formatTanggalPanjang, monthYearKey, monthYearLabel } from '@/lib/publicCatalogFormat';
 import { addPPN } from '@/lib/ppn';
 
 // ============================================================================
@@ -29,6 +29,11 @@ export default function KalkulatorHargaPage() {
   const [errorMsg, setErrorMsg] = useState('');
 
   const [pkgId, setPkgId] = useState('');
+  // Pencarian & filter pemilihan paket
+  const [q, setQ] = useState('');
+  const [fBulan, setFBulan] = useState('');
+  const [fTujuan, setFTujuan] = useState('');
+  const [fJenis, setFJenis] = useState('');
   const [pax, setPax] = useState({ main: '', triple: '', double: '', child: '' });
   const [exOn, setExOn] = useState({});
   const [exQty, setExQty] = useState({});
@@ -59,6 +64,80 @@ export default function KalkulatorHargaPage() {
   }, []);
 
   const pkg = useMemo(() => packages.find((p) => p.id === pkgId) || null, [packages, pkgId]);
+
+  const opsiBulan = useMemo(() => {
+    const map = new Map();
+    packages.forEach((p) => {
+      const key = monthYearKey(p.departureDate);
+      if (key && !map.has(key)) map.set(key, monthYearLabel(key));
+    });
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [packages]);
+  const opsiTujuan = useMemo(
+    () => Array.from(new Set(packages.map((p) => p.destinationCity).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [packages]
+  );
+  const opsiJenis = useMemo(
+    () => Array.from(new Set(packages.map((p) => p.type).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [packages]
+  );
+
+  // Hasil cari + filter, diurutkan dari keberangkatan terdekat, lalu
+  // dikelompokkan per bulan keberangkatan.
+  const hasilGrup = useMemo(() => {
+    const kata = q.trim().toLowerCase();
+    const list = packages
+      .filter((p) => {
+        if (fBulan && monthYearKey(p.departureDate) !== fBulan) return false;
+        if (fTujuan && p.destinationCity !== fTujuan) return false;
+        if (fJenis && p.type !== fJenis) return false;
+        if (kata) {
+          const hay = `${p.name || ''} ${p.code || ''} ${p.destinationCity || ''} ${p.type || ''}`.toLowerCase();
+          if (!kata.split(/\s+/).every((w) => hay.includes(w))) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => String(a.departureDate || '9999').localeCompare(String(b.departureDate || '9999')));
+    const groups = [];
+    list.forEach((p) => {
+      const key = monthYearKey(p.departureDate) || 'none';
+      let g = groups[groups.length - 1];
+      if (!g || g.key !== key) {
+        g = { key, label: key === 'none' ? 'TANPA TANGGAL' : monthYearLabel(key).toUpperCase(), items: [] };
+        groups.push(g);
+      }
+      g.items.push(p);
+    });
+    return { groups, count: list.length };
+  }, [packages, q, fBulan, fTujuan, fJenis]);
+
+  const adaFilter = !!(q || fBulan || fTujuan || fJenis);
+  const resetCari = () => { setQ(''); setFBulan(''); setFTujuan(''); setFJenis(''); };
+
+  const seatInfo = (p) => {
+    if (typeof p.quotaRemaining !== 'number') return null;
+    if (p.quotaRemaining <= 0) return { text: 'Penuh', cls: 'text-rose-600' };
+    if (p.quotaRemaining <= 10) return { text: `Sisa ${p.quotaRemaining} seat`, cls: 'text-amber-600' };
+    return { text: `Sisa ${p.quotaRemaining} seat`, cls: 'text-emerald-700' };
+  };
+
+  const PaketCard = ({ p, selected }) => {
+    const seat = seatInfo(p);
+    return (
+      <div className={`w-full text-left rounded-lg px-3 py-2.5 border ${selected ? 'border-2 border-emerald-700 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
+        <div className="text-sm font-bold text-slate-900">{p.name || p.code}</div>
+        <div className="flex items-center gap-1 text-xs text-slate-500 mt-0.5">
+          <Calendar className="w-3 h-3" /> {p.departureDate ? formatTanggalPanjang(p.departureDate) : '-'}{p.code ? ` · ${p.code}` : ''}
+        </div>
+        <div className="flex items-center justify-between gap-2 mt-1.5 text-xs">
+          <span className="bg-slate-100 text-slate-700 rounded-full px-2 py-0.5">
+            {[p.type, p.destinationCity].filter(Boolean).join(' · ') || 'Paket'}
+          </span>
+          {seat && <span className={`font-bold ${seat.cls}`}>{seat.text}</span>}
+        </div>
+      </div>
+    );
+  };
 
   // Reset input tiap ganti paket biar nggak kebawa dari hitungan sebelumnya.
   const pilihPaket = (id) => {
@@ -205,15 +284,68 @@ export default function KalkulatorHargaPage() {
         {!loading && !errorMsg && (
           <>
             <section className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 print:hidden">
-              <label className="block text-xs font-semibold text-slate-600 mb-1">1. Pilih Paket</label>
-              <select value={pkgId} onChange={(e) => pilihPaket(e.target.value)} className={inputCls}>
-                <option value="">-- Pilih paket --</option>
-                {packages.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}{p.departureDate ? ` (${formatTanggalPanjang(p.departureDate)})` : ''}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-xs font-semibold text-slate-600">1. Pilih Paket</h2>
+                {pkg && (
+                  <button type="button" onClick={() => pilihPaket('')} className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline">
+                    <X className="w-3.5 h-3.5" /> Ganti paket
+                  </button>
+                )}
+              </div>
+
+              {pkg ? (
+                <PaketCard p={pkg} selected />
+              ) : (
+                <>
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="search"
+                      value={q}
+                      onChange={(e) => setQ(e.target.value)}
+                      placeholder="Cari nama atau kode paket..."
+                      className={`${inputCls} pl-9`}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
+                    <select value={fBulan} onChange={(e) => setFBulan(e.target.value)} className={inputCls}>
+                      <option value="">Semua bulan</option>
+                      {opsiBulan.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                    </select>
+                    <select value={fTujuan} onChange={(e) => setFTujuan(e.target.value)} className={inputCls}>
+                      <option value="">Semua tujuan</option>
+                      {opsiTujuan.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <select value={fJenis} onChange={(e) => setFJenis(e.target.value)} className={inputCls}>
+                      <option value="">Semua jenis</option>
+                      {opsiJenis.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 mt-3 mb-1">
+                    <span>{hasilGrup.count} paket ditemukan</span>
+                    {adaFilter && (
+                      <button type="button" onClick={resetCari} className="font-semibold text-emerald-700 hover:underline">Reset</button>
+                    )}
+                  </div>
+                  <div className="max-h-[26rem] overflow-y-auto pr-1 space-y-1">
+                    {hasilGrup.count === 0 && (
+                      <p className="text-sm text-slate-400 py-6 text-center">Nggak ada paket yang cocok. Coba kata kunci atau filter lain.</p>
+                    )}
+                    {hasilGrup.groups.map((g) => (
+                      <div key={g.key}>
+                        <p className="text-[11px] font-bold text-emerald-700 mt-3 mb-1.5">{g.label}</p>
+                        <div className="space-y-2">
+                          {g.items.map((p) => (
+                            <button key={p.id} type="button" onClick={() => pilihPaket(p.id)} className="block w-full hover:opacity-80 transition-opacity">
+                              <PaketCard p={p} selected={false} />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </section>
 
             {pkg && (
