@@ -2313,7 +2313,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     setSavingVendorBill(true);
     try {
       if (editingVendorBill) {
-        await handleVendorBillUpdate();
+        // handleVendorBillUpdate balik true kalau tersimpan. Kalau ditolak
+        // (validasi gagal), modal dibiarkan terbuka biar staf bisa benerin.
+        const updated = await handleVendorBillUpdate();
+        if (!updated) return;
         closeVendorBillModal();
         fetchData();
         return;
@@ -2398,9 +2401,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // - Vendor TIDAK boleh diganti kalau udah ada pembayaran yang nempel (nama
   //   vendor nempel di pembayaran & saldo deposit).
   // - Nominal TIDAK boleh lebih kecil dari yang udah dibayar.
-  // - Paket di tagihan cuma label/info. HPP paket dihitung dari PEMBAYARAN
-  //   vendor (payments_vendor) yang dipilih paketnya pas bayar, jadi ganti
-  //   paket di sini nggak ngubah jurnal HPP.
+  // - HPP paket dihitung dari PEMBAYARAN vendor (payments_vendor) yang ada
+  //   paketnya, bukan dari tagihan. Karena itu, paket yang ditetapkan di
+  //   tagihan otomatis ikut ditulis ke pembayaran vendor terkait yang
+  //   paketnya masih kosong (lihat paymentsToFill di bawah). Pembayaran yang
+  //   sudah punya paket sendiri tidak diubah. Jurnal tidak berubah.
   const handleOpenEditVendorBill = (bill) => {
     if (blockIfNotFinanceRole()) return;
     setEditingVendorBill(bill);
@@ -2419,21 +2424,35 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const handleVendorBillUpdate = async () => {
     const bill = editingVendorBill;
-    if (!bill) return;
+    if (!bill) return false;
     const selectedVendor = vendorsList.find(v => v.id === vendorBillForm.vendorId);
-    if (!selectedVendor) { alert("Pilih vendornya dulu."); return; }
+    if (!selectedVendor) { alert("Pilih vendornya dulu."); return false; }
     const newAmount = Number(vendorBillForm.amount);
-    if (!newAmount || newAmount <= 0) { alert("Isi nominal tagihan yang valid."); return; }
+    if (!newAmount || newAmount <= 0) { alert("Isi nominal tagihan yang valid."); return false; }
     const alreadyPaid = Number(bill.amountPaid || 0);
     if (alreadyPaid > 0 && selectedVendor.id !== bill.vendorId) {
       alert("Tagihan ini sudah ada pembayarannya, jadi vendornya nggak bisa diganti. Hapus dulu pembayaran vendor yang terkait kalau memang salah vendor.");
-      return;
+      return false;
     }
     if (newAmount < alreadyPaid - 1) {
       alert(`Nominal baru (Rp ${newAmount.toLocaleString('id-ID')}) lebih kecil dari yang sudah dibayar (Rp ${alreadyPaid.toLocaleString('id-ID')}). Hapus/koreksi pembayarannya dulu.`);
-      return;
+      return false;
     }
     const selectedPkg = packagesList.find(p => p.id === vendorBillForm.packageId);
+
+    // Paket ditetapkan di tagihan -> pembayaran vendor yang nempel ke tagihan
+    // ini dan paketnya masih KOSONG ikut ditetapkan ke paket yang sama, biar
+    // muncul di Riwayat Bayar Vendor & ikut HPP paket. Pembayaran yang sudah
+    // punya paket sendiri nggak disentuh.
+    let paymentsToFill = [];
+    if (selectedPkg) {
+      const linkedSnap = await getDocs(query(collection(db, 'payments_vendor'), where('billId', '==', bill.id)));
+      paymentsToFill = linkedSnap.docs.filter(d => !d.data().packageId);
+      if (paymentsToFill.length > 0 && selectedPkg.revenueRecognized) {
+        alert(`Paket "${selectedPkg.name}" omzet & HPP-nya sudah "Diakui", jadi ${paymentsToFill.length} pembayaran vendor di tagihan ini belum bisa ditetapkan ke paket itu. Batalkan dulu pengakuan pendapatannya di Laporan Keuangan, baru tetapkan paketnya.`);
+        return false;
+      }
+    }
     const billDateResolved = resolvePaymentCreatedAt(vendorBillForm.billDate);
     const newStatus = alreadyPaid >= newAmount - 1 ? 'paid' : (alreadyPaid > 0 ? 'partial' : 'unpaid');
     const journalChanged =
@@ -2456,6 +2475,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       createdAt: billDateResolved,
       updatedAt: new Date().toISOString()
     });
+
+    if (paymentsToFill.length > 0) {
+      const fillBatch = writeBatch(db);
+      paymentsToFill.forEach(d => fillBatch.update(d.ref, { packageId: selectedPkg.id, packageName: selectedPkg.name }));
+      await fillBatch.commit();
+    }
 
     if (journalChanged) {
       try {
@@ -2481,8 +2506,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       action: 'update',
       module: 'Tagihan Vendor',
       targetLabel: selectedVendor.name,
-      details: `Mengedit tagihan vendor "${selectedVendor.name}" (${vendorBillForm.category}), nominal Rp ${Number(bill.amount).toLocaleString('id-ID')} jadi Rp ${newAmount.toLocaleString('id-ID')}${selectedPkg ? `, paket: ${selectedPkg.name}` : ', tanpa paket'}`
+      details: `Mengedit tagihan vendor "${selectedVendor.name}" (${vendorBillForm.category}), nominal Rp ${Number(bill.amount).toLocaleString('id-ID')} jadi Rp ${newAmount.toLocaleString('id-ID')}${selectedPkg ? `, paket: ${selectedPkg.name}` : ', tanpa paket'}${paymentsToFill.length > 0 ? `, ${paymentsToFill.length} pembayaran vendor ikut ditetapkan ke paket ini` : ''}`
     });
+    if (paymentsToFill.length > 0) {
+      alert(`Tagihan tersimpan. ${paymentsToFill.length} pembayaran vendor yang nempel ke tagihan ini otomatis ditetapkan ke paket "${selectedPkg.name}" dan sekarang muncul di Riwayat Bayar Vendor paket itu.`);
+    }
+    return true;
   };
 
   // Hapus Tagihan Vendor — CUMA boleh kalau belum ada pembayaran yang
