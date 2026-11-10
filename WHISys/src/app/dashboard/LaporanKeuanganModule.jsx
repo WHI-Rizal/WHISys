@@ -2,11 +2,11 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit, writeBatch, documentId } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit, writeBatch, documentId, increment } from 'firebase/firestore';
 import {
   BookOpen, Wallet, TrendingUp, Scale, Users, RefreshCw, Download,
   ChevronDown, ChevronRight, ShieldCheck, X, BarChart3, CheckCircle2, RotateCcw,
-  Clock, ArrowDownLeft, ArrowUpRight, Eye, Pencil, Trash2, AlertTriangle
+  Clock, ArrowDownLeft, ArrowUpRight, Eye, Pencil, Trash2, AlertTriangle, ArrowLeftRight
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -20,7 +20,8 @@ import {
   diagnoseMissingBookingJournals, applyMissingBookingJournalsCorrection,
   diagnoseArReconciliation, removeDuplicateBookingCreatedEntries, removeOrphanBookingJournalEntries,
   diagnoseMissingCommissionJournals, applyMissingCommissionJournalsCorrection, deleteJournalEntryById,
-  diagnoseMissingIncomePaymentJournals, applyMissingIncomePaymentJournalsCorrection
+  diagnoseMissingIncomePaymentJournals, applyMissingIncomePaymentJournalsCorrection,
+  postFundTransfer, postOperationalExpense, deleteJournalEntriesBySource
 } from '../../lib/journal';
 import { parseBankStatementFile } from '../../lib/bankStatementParser';
 
@@ -1702,6 +1703,8 @@ function CashFlowTab({ styles, isDark, journalEntries, financialAccounts }) {
   // bulan (kas masuk = debit, kas keluar = credit) & per source.
   const cashLines = [];
   journalEntries.forEach(e => {
+    // Pindah dana antar rekening sendiri bukan kas masuk/keluar perusahaan.
+    if (e.source === 'fund_transfer') return;
     (e.lines || []).filter(l => l.accountCode === ACC.KAS_BANK).forEach(l => {
       cashLines.push({ period: getPeriodKey(e.date), source: e.source, debit: l.debit || 0, credit: l.credit || 0, date: e.date, description: e.description });
     });
@@ -4075,6 +4078,170 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
   const [mutationDateFrom, setMutationDateFrom] = useState('');
   const [mutationDateTo, setMutationDateTo] = useState('');
 
+  // ---- Pindah Dana antar rekening Kas/Bank ----
+  const roleLowerCB = (currentUser?.role || '').toLowerCase();
+  const canTransfer = roleLowerCB.includes('super') || roleLowerCB === 'finance';
+  const TRANSFER_FEE_CATEGORY = 'Biaya Administrasi Bank';
+  const emptyTransferForm = () => ({ fromId: '', toId: '', amount: '', adminFee: '', date: todayISODate(), notes: '' });
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferForm, setTransferForm] = useState(emptyTransferForm());
+  const [savingTransfer, setSavingTransfer] = useState(false);
+  const [cancelingTransferId, setCancelingTransferId] = useState(null);
+
+  const resolveTransferCreatedAt = (dateStr) => {
+    if (!dateStr) return new Date().toISOString();
+    const timePart = new Date().toTimeString().slice(0, 8);
+    const combined = new Date(`${dateStr}T${timePart}`);
+    return isNaN(combined.getTime()) ? new Date().toISOString() : combined.toISOString();
+  };
+
+  const handleTransferSubmit = async (e) => {
+    e.preventDefault();
+    if (savingTransfer) return;
+    if (!canTransfer) { alert('Cuma Finance dan Super Admin yang boleh memindahkan dana.'); return; }
+    const from = financialAccounts.find(a => a.id === transferForm.fromId);
+    const to = financialAccounts.find(a => a.id === transferForm.toId);
+    const amt = Math.round(Number(transferForm.amount) || 0);
+    const fee = Math.round(Number(transferForm.adminFee) || 0);
+    if (!from) { alert('Pilih rekening asal dulu.'); return; }
+    if (!to) { alert('Pilih rekening tujuan dulu.'); return; }
+    if (from.id === to.id) { alert('Rekening asal dan tujuan nggak boleh sama.'); return; }
+    if (amt <= 0) { alert('Isi nominal yang valid (lebih dari 0).'); return; }
+    if (fee < 0) { alert('Biaya admin nggak boleh minus.'); return; }
+    const fromBalance = Number(from.balance) || 0;
+    if (fromBalance < amt + fee) {
+      if (!confirm(`Saldo ${from.name} sekarang ${formatRp(fromBalance)}, lebih kecil dari total yang keluar (${formatRp(amt + fee)}). Saldonya akan jadi minus. Tetap lanjut?`)) return;
+    }
+    setSavingTransfer(true);
+    try {
+      const createdAt = resolveTransferCreatedAt(transferForm.date);
+      const transferId = `ftr_${Date.now()}`;
+      const feeId = `${transferId}_fee`;
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'fund_transfers', transferId), {
+        fromAccountId: from.id, fromAccountName: from.name,
+        toAccountId: to.id, toAccountName: to.name,
+        amount: amt, adminFee: fee, notes: transferForm.notes || '',
+        transferDate: transferForm.date || todayISODate(),
+        createdAt, createdByUid: currentUser?.uid || '',
+        createdByName: currentUser?.fullName || currentUser?.email || ''
+      });
+      batch.update(doc(db, 'financial_accounts', from.id), { balance: increment(-(amt + fee)) });
+      batch.update(doc(db, 'financial_accounts', to.id), { balance: increment(amt) });
+      batch.set(doc(collection(db, 'account_mutations')), {
+        accountId: from.id, accountName: from.name, type: 'out', amount: amt,
+        description: `Pindah dana ke ${to.name}`, reference: transferForm.notes || to.name,
+        source: 'fund_transfer', sourceDocId: transferId, createdAt
+      });
+      batch.set(doc(collection(db, 'account_mutations')), {
+        accountId: to.id, accountName: to.name, type: 'in', amount: amt,
+        description: `Pindah dana dari ${from.name}`, reference: transferForm.notes || from.name,
+        source: 'fund_transfer', sourceDocId: transferId, createdAt
+      });
+      if (fee > 0) {
+        batch.set(doc(db, 'expenses_operational', feeId), {
+          category: TRANSFER_FEE_CATEGORY, amount: fee,
+          accountId: from.id, accountName: from.name,
+          notes: `Biaya admin pindah dana ${from.name} ke ${to.name}`,
+          expenseDate: transferForm.date || todayISODate(),
+          relatedFundTransferId: transferId, createdAt
+        });
+        batch.set(doc(collection(db, 'account_mutations')), {
+          accountId: from.id, accountName: from.name, type: 'out', amount: fee,
+          description: `${TRANSFER_FEE_CATEGORY} - pindah dana ke ${to.name}`, reference: to.name,
+          source: 'operational_expense', sourceDocId: feeId, createdAt
+        });
+      }
+      await batch.commit();
+
+      const by = { createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email };
+      try {
+        await postFundTransfer({ transferId, fromAccountId: from.id, fromAccountName: from.name, toAccountId: to.id, toAccountName: to.name, amount: amt, date: createdAt, ...by });
+        if (fee > 0) {
+          await postOperationalExpense({ expenseId: feeId, category: TRANSFER_FEE_CATEGORY, amount: fee, accountId: from.id, accountName: from.name, date: createdAt, ...by });
+        }
+      } catch (jErr) {
+        console.error('Gagal posting jurnal pindah dana:', jErr);
+        alert(`Pindah dana tersimpan & saldo sudah berubah, TAPI jurnalnya GAGAL diposting (${jErr.message}). Laporan Keuangan belum akurat untuk transaksi ini sampai dikoreksi, segera lapor ke tim IT/Finance.`);
+      }
+
+      logActivity({
+        userId: currentUser?.uid, userName: currentUser?.fullName || currentUser?.email, userRole: currentUser?.role,
+        action: 'create', module: 'Akun Keuangan', targetLabel: `${from.name} ke ${to.name}`,
+        details: `Pindah dana ${formatRp(amt)} dari ${from.name} ke ${to.name}${fee > 0 ? ` + biaya admin ${formatRp(fee)}` : ''}`
+      });
+      setShowTransferModal(false);
+      setTransferForm(emptyTransferForm());
+      onRefresh();
+    } catch (err) {
+      alert('Gagal memindahkan dana: ' + err.message);
+    } finally {
+      setSavingTransfer(false);
+    }
+  };
+
+  // Batalkan pindah dana: kembalikan kedua saldo, hapus mutasi, jurnal, dan
+  // biaya admin. Diblokir kalau salah satu sisi mutasinya sudah dicocokkan
+  // di Rekonsiliasi Bank.
+  const handleCancelTransfer = async (transferId) => {
+    if (!canTransfer) { alert('Cuma Finance dan Super Admin yang boleh membatalkan pindah dana.'); return; }
+    if (!transferId || cancelingTransferId) return;
+    setCancelingTransferId(transferId);
+    try {
+      const trSnap = await getDoc(doc(db, 'fund_transfers', transferId));
+      if (!trSnap.exists()) { alert('Pindah dana ini sudah dibatalkan sebelumnya. Muat ulang halaman buat lihat kondisi terbaru.'); return; }
+      const tr = trSnap.data();
+      const feeId = `${transferId}_fee`;
+      const mutSnap = await getDocs(query(collection(db, 'account_mutations'), where('sourceDocId', 'in', [transferId, feeId])));
+      const mutDocs = mutSnap.docs;
+
+      // Cek rekonsiliasi di tiap rekening yang terlibat
+      const accountIds = Array.from(new Set(mutDocs.map(d => d.data().accountId).filter(Boolean)));
+      for (const accId of accountIds) {
+        const ids = new Set(mutDocs.filter(d => d.data().accountId === accId).map(d => d.id));
+        const matchedSnap = await getDocs(query(collection(db, 'bank_statement_lines'), where('accountId', '==', accId), where('matchStatus', '==', 'matched')));
+        if (matchedSnap.docs.some(d => ids.has(d.data().matchedMutationId))) {
+          alert('Pindah dana ini sudah "dicocokkan" dengan mutasi bank. Lepas dulu kecocokannya lewat Laporan Keuangan > Rekonsiliasi Bank, baru bisa dibatalkan.');
+          return;
+        }
+      }
+
+      const toAcc = financialAccounts.find(a => a.id === tr.toAccountId);
+      if (toAcc && (Number(toAcc.balance) || 0) < (Number(tr.amount) || 0)) {
+        if (!confirm(`Saldo ${toAcc.name} sekarang ${formatRp(toAcc.balance)}, lebih kecil dari dana yang diterima (${formatRp(tr.amount)}). Kalau dibatalkan, saldonya jadi minus. Tetap lanjut?`)) return;
+      } else if (!confirm(`Batalkan pindah dana ${formatRp(tr.amount)} dari ${tr.fromAccountName} ke ${tr.toAccountName}${Number(tr.adminFee) > 0 ? ` (termasuk biaya admin ${formatRp(tr.adminFee)})` : ''}? Kedua saldo dikembalikan seperti semula.`)) return;
+
+      const deltaByAccount = {};
+      mutDocs.forEach(d => {
+        const m = d.data();
+        deltaByAccount[m.accountId] = (deltaByAccount[m.accountId] || 0) + (m.type === 'out' ? 1 : -1) * (Number(m.amount) || 0);
+      });
+      const batch = writeBatch(db);
+      Object.entries(deltaByAccount).forEach(([accId, delta]) => {
+        if (delta) batch.update(doc(db, 'financial_accounts', accId), { balance: increment(delta) });
+      });
+      mutDocs.forEach(d => batch.delete(d.ref));
+      batch.delete(doc(db, 'expenses_operational', feeId));
+      batch.delete(doc(db, 'fund_transfers', transferId));
+      await batch.commit();
+
+      await deleteJournalEntriesBySource('fund_transfer', transferId);
+      await deleteJournalEntriesBySource('operational_expense', feeId);
+
+      logActivity({
+        userId: currentUser?.uid, userName: currentUser?.fullName || currentUser?.email, userRole: currentUser?.role,
+        action: 'delete', module: 'Akun Keuangan', targetLabel: `${tr.fromAccountName} ke ${tr.toAccountName}`,
+        details: `Membatalkan pindah dana ${formatRp(tr.amount)} dari ${tr.fromAccountName} ke ${tr.toAccountName}`
+      });
+      onRefresh();
+      if (mutationAccount) handleOpenMutations(mutationAccount);
+    } catch (err) {
+      alert('Gagal membatalkan pindah dana: ' + err.message);
+    } finally {
+      setCancelingTransferId(null);
+    }
+  };
+
   const handleAccountSubmit = async (e) => {
     e.preventDefault();
     if (!accountForm.name.trim()) {
@@ -4246,6 +4413,7 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
             Rp {financialAccounts.reduce((acc, a) => acc + (Number(a.balance) || 0), 0).toLocaleString('id-ID')}
           </p>
         </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
         <button
           onClick={() => {
             setEditingAccountId(null);
@@ -4256,6 +4424,17 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
         >
           <Wallet className="w-4 h-4" /> + Tambah Akun
         </button>
+        {canTransfer && (
+          <button
+            onClick={() => { setTransferForm(emptyTransferForm()); setShowTransferModal(true); }}
+            disabled={financialAccounts.length < 2}
+            title={financialAccounts.length < 2 ? 'Butuh minimal 2 akun Kas/Bank' : 'Pindahkan dana antar rekening'}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-3.5 py-2 rounded-lg text-xs font-medium transition-all"
+          >
+            <ArrowLeftRight className="w-4 h-4" /> Pindah Dana
+          </button>
+        )}
+        </div>
       </div>
 
       <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
@@ -4466,6 +4645,109 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
         </div>
       )}
 
+      {showTransferModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`${styles.cardBg} border rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto relative`}>
+            <div className={`p-5 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} flex justify-between items-start gap-4`}>
+              <div>
+                <h3 className={`text-lg font-bold ${styles.textTitle}`}>Pindah Dana</h3>
+                <p className={`text-xs ${styles.textSub} mt-1`}>Pindahkan dana antar rekening Kas/Bank perusahaan.</p>
+              </div>
+              <button onClick={() => setShowTransferModal(false)} className={`p-1.5 ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'} rounded-lg`}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleTransferSubmit} className="p-5 space-y-4 text-sm">
+              <div>
+                <label className="block mb-1 font-medium text-xs">Dari Rekening</label>
+                <select
+                  required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={transferForm.fromId}
+                  onChange={e => setTransferForm({ ...transferForm, fromId: e.target.value, toId: transferForm.toId === e.target.value ? '' : transferForm.toId })}
+                >
+                  <option value="">- Pilih rekening asal -</option>
+                  {financialAccounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.name} (saldo {formatRp(a.balance)})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block mb-1 font-medium text-xs">Ke Rekening</label>
+                <select
+                  required
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={transferForm.toId}
+                  onChange={e => setTransferForm({ ...transferForm, toId: e.target.value })}
+                >
+                  <option value="">- Pilih rekening tujuan -</option>
+                  {financialAccounts.filter(a => a.id !== transferForm.fromId).map(a => (
+                    <option key={a.id} value={a.id}>{a.name} (saldo {formatRp(a.balance)})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block mb-1 font-medium text-xs">Nominal (Rp)</label>
+                  <input
+                    type="number" min="1" inputMode="numeric" required placeholder="0"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={transferForm.amount}
+                    onChange={e => setTransferForm({ ...transferForm, amount: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-medium text-xs">Biaya Admin (Rp)</label>
+                  <input
+                    type="number" min="0" inputMode="numeric" placeholder="0"
+                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                    value={transferForm.adminFee}
+                    onChange={e => setTransferForm({ ...transferForm, adminFee: e.target.value })}
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] opacity-70 -mt-2">Biaya admin opsional. Kalau diisi, otomatis dicatat sebagai Biaya Administrasi Bank dan memotong rekening asal.</p>
+              <div>
+                <label className="block mb-1 font-medium text-xs">Tanggal</label>
+                <DateFieldID
+                  value={transferForm.date}
+                  onChange={(val) => setTransferForm({ ...transferForm, date: val })}
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                />
+              </div>
+              <div>
+                <label className="block mb-1 font-medium text-xs">Catatan (opsional)</label>
+                <input
+                  type="text" placeholder="cth: Pindah ke rekening operasional"
+                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                  value={transferForm.notes}
+                  onChange={e => setTransferForm({ ...transferForm, notes: e.target.value })}
+                />
+              </div>
+              {(() => {
+                const amt = Math.round(Number(transferForm.amount) || 0);
+                const fee = Math.round(Number(transferForm.adminFee) || 0);
+                if (amt <= 0) return null;
+                return (
+                  <div className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-1`}>
+                    <div className="flex justify-between"><span className={styles.textSub}>Keluar dari rekening asal</span><span className="font-semibold text-rose-500">{formatRp(amt + fee)}</span></div>
+                    <div className="flex justify-between"><span className={styles.textSub}>Masuk ke rekening tujuan</span><span className="font-semibold text-emerald-500">{formatRp(amt)}</span></div>
+                  </div>
+                );
+              })()}
+              <div className={`pt-3 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setShowTransferModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
+                  Batal
+                </button>
+                <button type="submit" disabled={savingTransfer} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium disabled:opacity-60">
+                  {savingTransfer ? 'Memproses...' : 'Pindahkan Dana'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {showMutationsModal && mutationAccount && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className={`${styles.cardBg} border rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col relative`}>
@@ -4538,7 +4820,19 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
                         getFilteredMutationRows().map(r => (
                           <tr key={r.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
                             <td className={`p-3 whitespace-nowrap ${styles.textSub}`}>{formatDateDDMMYYYY(r.createdAt)}</td>
-                            <td className={`p-3 ${styles.textTitle}`}>{r.description || '-'}</td>
+                            <td className={`p-3 ${styles.textTitle}`}>
+                              {r.description || '-'}
+                              {r.source === 'fund_transfer' && canTransfer && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleCancelTransfer(r.sourceDocId)}
+                                  disabled={cancelingTransferId === r.sourceDocId}
+                                  className="block mt-1 text-[10px] font-semibold text-rose-500 hover:underline disabled:opacity-50"
+                                >
+                                  {cancelingTransferId === r.sourceDocId ? 'Membatalkan...' : 'Batalkan pindah dana'}
+                                </button>
+                              )}
+                            </td>
                             <td className={`p-3 ${styles.textSub}`}>{r.reference || '-'}</td>
                             <td className="p-3 text-right font-medium text-emerald-500">{r.type === 'in' ? `Rp ${Number(r.amount).toLocaleString('id-ID')}` : '-'}</td>
                             <td className="p-3 text-right font-medium text-rose-500">{r.type === 'out' ? `Rp ${Number(r.amount).toLocaleString('id-ID')}` : '-'}</td>
@@ -4575,6 +4869,16 @@ function CashBankTab({ styles, isDark, currentUser, financialAccounts, onRefresh
                         <div>
                           <span className="text-[10px] opacity-60 uppercase">Keterangan</span>
                           <div className={styles.textTitle}>{r.description || '-'}</div>
+                          {r.source === 'fund_transfer' && canTransfer && (
+                            <button
+                              type="button"
+                              onClick={() => handleCancelTransfer(r.sourceDocId)}
+                              disabled={cancelingTransferId === r.sourceDocId}
+                              className="mt-1 text-[10px] font-semibold text-rose-500 hover:underline disabled:opacity-50"
+                            >
+                              {cancelingTransferId === r.sourceDocId ? 'Membatalkan...' : 'Batalkan pindah dana'}
+                            </button>
+                          )}
                         </div>
                         <div>
                           <span className="text-[10px] opacity-60 uppercase">Referensi</span>
