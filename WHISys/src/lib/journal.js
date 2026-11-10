@@ -292,6 +292,25 @@ export const postExcessToDeposit = async ({ paymentId, bookingCode, jamaahName, 
   });
 };
 
+// 2d. Pindah dana antar rekening Kas/Bank milik perusahaan sendiri. Total Kas &
+//     Bank (1101) TIDAK berubah, cuma pindah dari satu rekening ke rekening lain,
+//     jadi dua baris 1101 dengan accountId berbeda (debit rekening tujuan, kredit
+//     rekening asal). Biaya admin transfer (kalau ada) dicatat terpisah sebagai
+//     biaya operasional lewat postOperationalExpense.
+export const postFundTransfer = async ({ transferId, fromAccountId, fromAccountName, toAccountId, toAccountName, amount, date, createdByUid, createdByName }) => {
+  const amt = Math.round(Number(amount) || 0);
+  if (amt <= 0) return null;
+  return postJournalEntry({
+    date, description: `Pindah dana ${fromAccountName || '-'} ke ${toAccountName || '-'}`,
+    source: 'fund_transfer', sourceDocId: transferId, reference: `${fromAccountName || '-'} ke ${toAccountName || '-'}`,
+    lines: [
+      glLine(ACC.KAS_BANK, amt, 0, { accountId: toAccountId, accountName: toAccountName }),
+      glLine(ACC.KAS_BANK, 0, amt, { accountId: fromAccountId, accountName: fromAccountName }),
+    ],
+    createdByUid, createdByName
+  });
+};
+
 // 3. Titip Deposit customer (belum tentu dipakai buat booking mana) — kas
 //    masuk, jadi utang perusahaan ke jamaah (bisa dipakai/ditarik lagi).
 export const postDepositTopup = async ({ sourceDocId, jamaahName, amount, accountId, accountName, date, createdByUid, createdByName }) => {
