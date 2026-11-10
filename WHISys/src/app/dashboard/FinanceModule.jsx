@@ -2885,6 +2885,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // (itu nggak beneran gerakin Kas/Bank, jadi memang nggak dijurnal ke 1101).
   const cashBankLinesFinance = [];
   journalEntriesForCash.forEach(e => {
+    // Pindah dana antar rekening sendiri bukan kas masuk/keluar perusahaan.
+    if (e.source === 'fund_transfer') return;
     (e.lines || []).filter(l => l.accountCode === ACC.KAS_BANK).forEach(l => {
       cashBankLinesFinance.push({ source: e.source, debit: l.debit || 0, credit: l.credit || 0 });
     });
