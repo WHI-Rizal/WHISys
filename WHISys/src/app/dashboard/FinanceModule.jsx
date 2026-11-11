@@ -7,6 +7,7 @@ import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import DateFieldID from '@/components/DateFieldID';
+import DateRangeFieldID from '@/components/DateRangeFieldID';
 import SearchableSelect from '@/components/SearchableSelect';
 import SettlementEdcTab from './SettlementEdcTab';
 import { logActivity } from '../../lib/activityLog';
@@ -3689,11 +3690,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
               placeholder="Cari vendor, kategori, paket, catatan, nominal, atau tanggal..."
               className={`w-full ${styles.inputBg} border rounded-lg px-3 py-2 text-xs`}
             />
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <select
                 value={vpFilter.vendor}
                 onChange={e => setVpFilter({ ...vpFilter, vendor: e.target.value })}
-                className={`${styles.inputBg} border rounded-lg px-2 py-2 text-xs`}
+                className={`${styles.inputBg} border rounded-lg px-3 h-10 text-xs w-full`}
               >
                 <option value="">Semua vendor</option>
                 {vpVendorOptions.map(v => <option key={v} value={v}>{v}</option>)}
@@ -3701,39 +3702,28 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
               <select
                 value={vpFilter.category}
                 onChange={e => setVpFilter({ ...vpFilter, category: e.target.value })}
-                className={`${styles.inputBg} border rounded-lg px-2 py-2 text-xs`}
+                className={`${styles.inputBg} border rounded-lg px-3 h-10 text-xs w-full`}
               >
                 <option value="">Semua kategori</option>
                 {vpCategoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
-              <div className="col-span-2 md:col-span-1">
-                <SearchableSelect
-                  isDark={isDark}
-                  inputClassName={`${styles.inputBg} rounded-lg px-2 py-2 text-xs`}
-                  placeholder="Semua paket"
-                  emptyOptionLabel="Semua paket"
-                  pinnedOptions={[{ value: '__none__', label: 'Belum ada paket / keberangkatan' }]}
-                  value={vpFilter.pkg}
-                  onChange={(val) => setVpFilter({ ...vpFilter, pkg: val })}
-                  options={vpPackageOptions}
-                />
-              </div>
-              <div>
-                <label className={`block text-[10px] mb-0.5 ${styles.textSub}`}>Dari tanggal</label>
-                <DateFieldID
-                  value={vpFilter.from}
-                  onChange={(val) => setVpFilter({ ...vpFilter, from: val })}
-                  className={`${styles.inputBg} border rounded-lg px-2 py-2 text-xs w-full`}
-                />
-              </div>
-              <div>
-                <label className={`block text-[10px] mb-0.5 ${styles.textSub}`}>Sampai tanggal</label>
-                <DateFieldID
-                  value={vpFilter.to}
-                  onChange={(val) => setVpFilter({ ...vpFilter, to: val })}
-                  className={`${styles.inputBg} border rounded-lg px-2 py-2 text-xs w-full`}
-                />
-              </div>
+              <SearchableSelect
+                isDark={isDark}
+                inputClassName={`${styles.inputBg} h-10 !py-0 !px-3 text-xs`}
+                placeholder="Semua paket"
+                emptyOptionLabel="Semua paket"
+                pinnedOptions={[{ value: '__none__', label: 'Belum ada paket / keberangkatan' }]}
+                value={vpFilter.pkg}
+                onChange={(val) => setVpFilter({ ...vpFilter, pkg: val })}
+                options={vpPackageOptions}
+              />
+              <DateRangeFieldID
+                isDark={isDark}
+                from={vpFilter.from}
+                to={vpFilter.to}
+                onChange={({ from, to }) => setVpFilter({ ...vpFilter, from, to })}
+                className={`${styles.inputBg} border rounded-lg px-3 h-10 text-xs w-full`}
+              />
             </div>
             {vpFilterActive && (
               <div className="flex justify-end text-[11px]">
