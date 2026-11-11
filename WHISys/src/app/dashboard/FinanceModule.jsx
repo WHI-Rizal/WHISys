@@ -486,6 +486,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [showVendorModal, setShowVendorModal] = useState(false);
+  // Pencarian & filter Riwayat Bayar Vendor (buat ngecek input lama)
+  const emptyVpFilter = { q: '', vendor: '', category: '', pkg: '', from: '', to: '' };
+  const [vpFilter, setVpFilter] = useState(emptyVpFilter);
   const [showOperationalModal, setShowOperationalModal] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
   // Modal "Pengembalian Saldo Deposit" — kebalikan dari "+ Tambah Deposit",
@@ -2969,6 +2972,44 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   const sortedVendorPayments = [...vendorPayments].sort(byNewestCreatedAt);
   const sortedOperationalExpenses = [...operationalExpenses].sort(byNewestCreatedAt);
 
+  // ---- Pencarian & filter Riwayat Bayar Vendor ----
+  const localDateKey = (iso) => {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const vpVendorOptions = Array.from(new Set(vendorPayments.map(v => v.vendorName).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const vpCategoryOptions = Array.from(new Set(vendorPayments.map(v => v.category).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const vpPackageOptions = (() => {
+    const map = new Map();
+    vendorPayments.forEach(v => { if (v.packageId && v.packageId !== 'GLOBAL' && !map.has(v.packageId)) map.set(v.packageId, v.packageName || v.packageId); });
+    return Array.from(map.entries()).map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  })();
+  const vpFilterActive = Object.values(vpFilter).some(Boolean);
+  const filteredVendorPayments = sortedVendorPayments.filter(vp => {
+    if (vpFilter.vendor && vp.vendorName !== vpFilter.vendor) return false;
+    if (vpFilter.category && vp.category !== vpFilter.category) return false;
+    if (vpFilter.pkg === '__none__') { if (vp.packageId && vp.packageId !== 'GLOBAL') return false; }
+    else if (vpFilter.pkg && vp.packageId !== vpFilter.pkg) return false;
+    if (vpFilter.from || vpFilter.to) {
+      const key = localDateKey(vp.createdAt);
+      if (!key) return false;
+      if (vpFilter.from && key < vpFilter.from) return false;
+      if (vpFilter.to && key > vpFilter.to) return false;
+    }
+    const kata = vpFilter.q.trim().toLowerCase();
+    if (kata) {
+      const amt = Number(vp.amount) || 0;
+      const hay = [
+        vp.vendorName, vp.category, vp.packageName, vp.notes, vp.payMethod, vp.accountName,
+        String(amt), amt.toLocaleString('id-ID'), formatDateDDMMYYYY(vp.createdAt)
+      ].join(' ').toLowerCase();
+      if (!kata.split(/\s+/).every(w => hay.includes(w) || hay.includes(w.replace(/[.,]/g, '')))) return false;
+    }
+    return true;
+  });
+  const filteredVendorPaymentsTotal = filteredVendorPayments.reduce((acc, vp) => acc + (Number(vp.amount) || 0), 0);
+
   // Paket terkait suatu setoran/pembayaran vendor, dipakai buat cek status pengakuan pendapatan.
   // Prioritas cari lewat packageId (akurat, nggak ambigu). packageName cuma
   // fallback buat setoran lama yang dicatat sebelum field packageId ada —
@@ -3641,6 +3682,72 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
       {activeTab === 'vendor' && (
         <div className={`${styles.cardBg} border rounded-xl overflow-hidden`}>
+          <div className={`p-4 space-y-3 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+            <input
+              type="search"
+              value={vpFilter.q}
+              onChange={e => setVpFilter({ ...vpFilter, q: e.target.value })}
+              placeholder="Cari vendor, kategori, paket, catatan, nominal, atau tanggal..."
+              className={`w-full ${styles.inputBg} border rounded-lg px-3 py-2 text-xs`}
+            />
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              <select
+                value={vpFilter.vendor}
+                onChange={e => setVpFilter({ ...vpFilter, vendor: e.target.value })}
+                className={`${styles.inputBg} border rounded-lg px-2 py-2 text-xs`}
+              >
+                <option value="">Semua vendor</option>
+                {vpVendorOptions.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+              <select
+                value={vpFilter.category}
+                onChange={e => setVpFilter({ ...vpFilter, category: e.target.value })}
+                className={`${styles.inputBg} border rounded-lg px-2 py-2 text-xs`}
+              >
+                <option value="">Semua kategori</option>
+                {vpCategoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <div className="col-span-2 md:col-span-1">
+                <SearchableSelect
+                  isDark={isDark}
+                  inputClassName={`${styles.inputBg} rounded-lg px-2 py-2 text-xs`}
+                  placeholder="Semua paket"
+                  emptyOptionLabel="Semua paket"
+                  pinnedOptions={[{ value: '__none__', label: 'Belum ada paket / keberangkatan' }]}
+                  value={vpFilter.pkg}
+                  onChange={(val) => setVpFilter({ ...vpFilter, pkg: val })}
+                  options={vpPackageOptions}
+                />
+              </div>
+              <div>
+                <label className={`block text-[10px] mb-0.5 ${styles.textSub}`}>Dari tanggal</label>
+                <DateFieldID
+                  value={vpFilter.from}
+                  onChange={(val) => setVpFilter({ ...vpFilter, from: val })}
+                  className={`${styles.inputBg} border rounded-lg px-2 py-2 text-xs w-full`}
+                />
+              </div>
+              <div>
+                <label className={`block text-[10px] mb-0.5 ${styles.textSub}`}>Sampai tanggal</label>
+                <DateFieldID
+                  value={vpFilter.to}
+                  onChange={(val) => setVpFilter({ ...vpFilter, to: val })}
+                  className={`${styles.inputBg} border rounded-lg px-2 py-2 text-xs w-full`}
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <span className={styles.textSub}>
+                Menampilkan <strong>{filteredVendorPayments.length}</strong> dari {vendorPayments.length} pembayaran
+                {' '}· Total <strong className="text-rose-500">Rp {filteredVendorPaymentsTotal.toLocaleString('id-ID')}</strong>
+              </span>
+              {vpFilterActive && (
+                <button type="button" onClick={() => setVpFilter(emptyVpFilter)} className="font-semibold text-blue-500 hover:underline">
+                  Reset filter
+                </button>
+              )}
+            </div>
+          </div>
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className={`${styles.tableHeaderBg} uppercase border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
@@ -3654,12 +3761,14 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 </tr>
               </thead>
               <tbody className={`divide-y ${styles.tableRowBorder}`}>
-                {vendorPayments.length === 0 ? (
+                {filteredVendorPayments.length === 0 ? (
                   <tr>
-                    <td colSpan="6" className={`p-8 text-center ${styles.textSub}`}>Belum ada riwayat pembayaran vendor.</td>
+                    <td colSpan="6" className={`p-8 text-center ${styles.textSub}`}>
+                      {vendorPayments.length === 0 ? 'Belum ada riwayat pembayaran vendor.' : 'Nggak ada pembayaran yang cocok dengan pencarian atau filter ini.'}
+                    </td>
                   </tr>
                 ) : (
-                  sortedVendorPayments.map((vp) => (
+                  filteredVendorPayments.map((vp) => (
                     <tr key={vp.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
                       <td className={`p-4 font-semibold ${styles.textTitle}`}>{vp.vendorName}</td>
                       <td className="p-4">
@@ -3741,10 +3850,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             </table>
           </div>
           <div className="md:hidden space-y-3 p-3">
-            {vendorPayments.length === 0 ? (
-              <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada riwayat pembayaran vendor.</p>
+            {filteredVendorPayments.length === 0 ? (
+              <p className={`p-8 text-center text-xs ${styles.textSub}`}>
+                {vendorPayments.length === 0 ? 'Belum ada riwayat pembayaran vendor.' : 'Nggak ada pembayaran yang cocok dengan pencarian atau filter ini.'}
+              </p>
             ) : (
-              sortedVendorPayments.map((vp) => (
+              filteredVendorPayments.map((vp) => (
                 <div key={vp.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
                   <div className={`font-semibold ${styles.textTitle}`}>{vp.vendorName}</div>
                   <div>
