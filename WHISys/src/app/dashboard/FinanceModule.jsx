@@ -2958,7 +2958,16 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   // Baris "Riwayat Setoran Jamaah" — setoran yang kesplit ke beberapa pax
   // dalam 1 kode booking rombongan digabung balik jadi 1 baris nominal utuh.
-  const incomeRows = buildMergedIncomeRows(transactions, bookingsList);
+  // Diurutkan dari tanggal/jam transaksi TERBARU di atas. Data dari Firestore
+  // datang urut ID dokumen (acak), jadi tanpa sort ini setoran baru nggak
+  // selalu muncul paling atas.
+  const byNewestCreatedAt = (a, b) => {
+    const diff = String(b?.createdAt || '').localeCompare(String(a?.createdAt || ''));
+    return diff !== 0 ? diff : String(b?.id || b?.key || '').localeCompare(String(a?.id || a?.key || ''));
+  };
+  const incomeRows = buildMergedIncomeRows(transactions, bookingsList).sort(byNewestCreatedAt);
+  const sortedVendorPayments = [...vendorPayments].sort(byNewestCreatedAt);
+  const sortedOperationalExpenses = [...operationalExpenses].sort(byNewestCreatedAt);
 
   // Paket terkait suatu setoran/pembayaran vendor, dipakai buat cek status pengakuan pendapatan.
   // Prioritas cari lewat packageId (akurat, nggak ambigu). packageName cuma
@@ -3650,7 +3659,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                     <td colSpan="6" className={`p-8 text-center ${styles.textSub}`}>Belum ada riwayat pembayaran vendor.</td>
                   </tr>
                 ) : (
-                  vendorPayments.map((vp) => (
+                  sortedVendorPayments.map((vp) => (
                     <tr key={vp.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
                       <td className={`p-4 font-semibold ${styles.textTitle}`}>{vp.vendorName}</td>
                       <td className="p-4">
@@ -3735,7 +3744,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             {vendorPayments.length === 0 ? (
               <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada riwayat pembayaran vendor.</p>
             ) : (
-              vendorPayments.map((vp) => (
+              sortedVendorPayments.map((vp) => (
                 <div key={vp.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
                   <div className={`font-semibold ${styles.textTitle}`}>{vp.vendorName}</div>
                   <div>
@@ -3999,7 +4008,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                     <td colSpan="4" className={`p-8 text-center ${styles.textSub}`}>Belum ada catatan biaya operasional kantor.</td>
                   </tr>
                 ) : (
-                  operationalExpenses.map((op) => (
+                  sortedOperationalExpenses.map((op) => (
                     <tr key={op.id} className={isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}>
                       <td className="p-4">
                         <span className="bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2.5 py-1 rounded-full font-medium">
@@ -4045,7 +4054,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             {operationalExpenses.length === 0 ? (
               <p className={`p-8 text-center text-xs ${styles.textSub}`}>Belum ada catatan biaya operasional kantor.</p>
             ) : (
-              operationalExpenses.map((op) => (
+              sortedOperationalExpenses.map((op) => (
                 <div key={op.id} className={`${styles.innerBg} border rounded-lg p-3 text-xs space-y-2`}>
                   <div>
                     <span className="bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2.5 py-1 rounded-full font-medium inline-block">
