@@ -3008,7 +3008,6 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     }
     return true;
   });
-  const filteredVendorPaymentsTotal = filteredVendorPayments.reduce((acc, vp) => acc + (Number(vp.amount) || 0), 0);
 
   // Paket terkait suatu setoran/pembayaran vendor, dipakai buat cek status pengakuan pendapatan.
   // Prioritas cari lewat packageId (akurat, nggak ambigu). packageName cuma
@@ -3736,17 +3735,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                 />
               </div>
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-              <span className={styles.textSub}>
-                Menampilkan <strong>{filteredVendorPayments.length}</strong> dari {vendorPayments.length} pembayaran
-                {' '}· Total <strong className="text-rose-500">Rp {filteredVendorPaymentsTotal.toLocaleString('id-ID')}</strong>
-              </span>
-              {vpFilterActive && (
+            {vpFilterActive && (
+              <div className="flex justify-end text-[11px]">
                 <button type="button" onClick={() => setVpFilter(emptyVpFilter)} className="font-semibold text-blue-500 hover:underline">
                   Reset filter
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs">
