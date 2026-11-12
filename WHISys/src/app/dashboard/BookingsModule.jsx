@@ -414,6 +414,13 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   // koreksi" dari snapshot data yang SAMA (groupEditTarget.items, belum
   // ke-refresh), jadi masing2 posting jurnal koreksinya sendiri2 & numpuk.
   const [isSavingGroupEdit, setIsSavingGroupEdit] = useState(false);
+  // Lock submit "Catat Setoran Grup" — dulu nggak ada pengaman sama sekali,
+  // jadi klik ganda / Enter dua kali / koneksi lambat bikin setoran tercatat
+  // dobel (2 kali groupTransactionId berbeda, nominal sama). Pakai ref (sinkron)
+  // + state (buat disable tombol), karena state saja bisa lolos kalau dua klik
+  // masuk sebelum render ulang.
+  const groupPaymentLockRef = useRef(false);
+  const [isSavingGroupPayment, setIsSavingGroupPayment] = useState(false);
 
   // State Riwayat Setoran
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -2958,6 +2965,9 @@ Terimakasih🙏`;
     const gApplied = gOver.applied;
     const gExcess = gOver.excess;
 
+    if (groupPaymentLockRef.current) return; // sudah ada proses simpan yang berjalan
+    groupPaymentLockRef.current = true;
+    setIsSavingGroupPayment(true);
     try {
       // Urutan pax dalam grup harus sama kayak pas grup ini pertama kali
       // dibuat (biar sisa pembagian tetap konsisten jatuh ke pax pertama) —
@@ -3097,6 +3107,9 @@ Terimakasih🙏`;
       });
     } catch (err) {
       alert("Gagal mencatat setoran grup: " + err.message);
+    } finally {
+      groupPaymentLockRef.current = false;
+      setIsSavingGroupPayment(false);
     }
   };
 
@@ -8381,8 +8394,8 @@ Terimakasih🙏`;
                 <button type="button" onClick={() => setShowGroupPaymentModal(false)} className={`px-4 py-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'} rounded-lg`}>
                   Batal
                 </button>
-                <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium">
-                  Simpan Setoran
+                <button type="submit" disabled={isSavingGroupPayment} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium disabled:opacity-60 disabled:cursor-not-allowed">
+                  {isSavingGroupPayment ? 'Menyimpan...' : 'Simpan Setoran'}
                 </button>
               </div>
             </form>
