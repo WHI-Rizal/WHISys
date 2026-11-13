@@ -170,7 +170,6 @@ export function parseItineraryText(rawLinesInput) {
     const m = l.match(/^(?:IDR|Rp)\.?\s*([\d.]+)\s*\/?\s*pax/i);
     if (m) { priceMain = Number(m[1].replace(/\./g, '')); break; }
   }
-  if (!priceMain) warnings.push('Harga per pax nggak terbaca, isi manual.');
 
   // ---- Maskapai ----
   let airline = '';
@@ -187,7 +186,7 @@ export function parseItineraryText(rawLinesInput) {
     const m = l.replace(/[–—]/g, '-').match(flightRe);
     if (m) flightSegments.push({ flightNumber: m[2].replace(/\s+/, ' '), date: dmyToIso(m[1]), route: `${m[3]} - ${m[4]}`, depTime: fixTime(m[5]), arrTime: fixTime(m[6]) });
   }
-  if (!flightSegments.length) warnings.push('Jadwal flight nggak terbaca, isi manual di Rincian Penerbangan.');
+  if (!flightSegments.length && !/^la\b|la\s*only|tanpa\s*tiket/i.test(airline)) warnings.push('Jadwal flight nggak terbaca, isi manual di Rincian Penerbangan.');
 
   // ---- Bagi bagian ----
   const idxItin = lines.findIndex((l) => /^itinerary\b/i.test(l));
@@ -195,7 +194,9 @@ export function parseItineraryText(rawLinesInput) {
   const idxExc = lines.findIndex((l) => /^exclude\b/i.test(l));
   const firstDay = lines.findIndex((l) => /^DAY\s*\d+/i.test(l));
   const itinStart = idxItin >= 0 ? idxItin + 1 : firstDay;
-  const itinEnd = [idxInc, idxExc].filter((x) => x > itinStart).sort((a, b) => a - b)[0] ?? lines.length;
+  // Template Private Trip: blok HARGA (harga per opsi, kurs, ketentuan) ada setelah itinerary.
+  const idxHarga = lines.findIndex((l) => /^harga(\s+paket)?\s*:?\s*$/i.test(l));
+  const itinEnd = [idxInc, idxExc, idxHarga].filter((x) => x > itinStart).sort((a, b) => a - b)[0] ?? lines.length;
 
   // ---- Itinerary per hari ----
   const days = [];
@@ -235,6 +236,41 @@ export function parseItineraryText(rawLinesInput) {
   if (!days.length) warnings.push('Itinerary per hari (DAY 1, DAY 2, dst) nggak terbaca. Cek penulisannya.');
   if (days.some((d) => !d.title)) warnings.push('Ada hari yang judul rutenya nggak terbaca, lengkapi manual.');
 
+  // ---- Info khas Private Trip (masuk Catatan Khusus + harga anak) ----
+  const privateNotes = [];
+  let priceChild = 0;
+  const amountOf = (l) => {
+    const m = l.match(/(?:IDR|Rp)\.?\s*([\d.]+)/i);
+    return m ? Number(m[1].replace(/\./g, '')) : 0;
+  };
+  // Total peserta
+  for (const l of nonEmpty) {
+    const m = l.match(/^total\s*(?:pax|peserta)\s*:?\s*(.+)$/i);
+    if (m) { privateNotes.push('Total peserta: ' + tidy(m[1])); break; }
+  }
+  // Blok HOTEL (sebelum ITINERARY): satu baris per kota
+  const idxHotel = lines.findIndex((l) => /^hotel\s*:?\s*$/i.test(l));
+  if (idxHotel >= 0) {
+    const hotelEnd = [idxItin, firstDay].filter((x) => x > idxHotel).sort((a, b) => a - b)[0] ?? lines.length;
+    const hotels = [];
+    for (let i = idxHotel + 1; i < hotelEnd; i++) if (lines[i]) hotels.push(tidy(lines[i].replace(/^[•\-]\s*/, '')));
+    if (hotels.length) privateNotes.push('Hotel: ' + hotels.join('; '));
+  }
+  // Blok HARGA
+  if (idxHarga >= 0) {
+    const hargaEnd = [idxInc, idxExc].filter((x) => x > idxHarga).sort((a, b) => a - b)[0] ?? lines.length;
+    for (let i = idxHarga + 1; i < hargaEnd; i++) {
+      const l = lines[i];
+      if (!l) continue;
+      if (/^note\b/i.test(l)) break;
+      if (/^(?:harga\s+)?(?:dewasa|adult|utama)\b/i.test(l) && amountOf(l)) { priceMain = amountOf(l); continue; }
+      if (/^(?:harga\s+)?(?:anak|child)\b/i.test(l) && amountOf(l)) { priceChild = amountOf(l); continue; }
+      privateNotes.push(tidy(l.replace(/^[•\-]\s*/, '')));
+    }
+  }
+
+  if (!priceMain) warnings.push('Harga per pax nggak terbaca, isi manual.');
+
   // ---- Include ----
   const priceIncludes = [];
   if (idxInc >= 0) {
@@ -271,12 +307,12 @@ export function parseItineraryText(rawLinesInput) {
   if (periode && days.length && dayDiff(periode.start, periode.end) + 1 !== days.length) {
     warnings.push(`Periode menunjukkan ${dayDiff(periode.start, periode.end) + 1} hari, tapi itinerary punya ${days.length} hari. Cek lagi.`);
   }
-  if (notes.some((n) => /disc|diskon|full payment|infant|usia/i.test(n))) {
+  if (!priceChild && notes.some((n) => /disc|diskon|full payment|infant|usia/i.test(n))) {
     warnings.push('Ada ketentuan harga anak/infant di catatan. Harga anak (kolom Harga Anak) nggak diisi otomatis, silakan atur manual.');
   }
 
   return {
-    fields: { name, departureDate, durationDays, airline, priceMain, priceIncludes, priceExcludes, flightSegments, specialNote: notes.join('\n') },
+    fields: { name, departureDate, durationDays, airline, priceMain, priceChild, priceIncludes, priceExcludes, flightSegments, specialNote: [...privateNotes, ...notes].join('\n') },
     itinerary: days.map(({ _date, ...d }) => d),
     warnings
   };
