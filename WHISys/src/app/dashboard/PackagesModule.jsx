@@ -2035,6 +2035,13 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                     Upload itinerary buatan tim Operasional. Judul, tanggal, harga, flight, itinerary per hari, include, dan exclude dibaca otomatis. Hasilnya dicek dulu sebelum masuk ke form.
                     {importedItinerary ? ' Itinerary hasil import akan ikut tersimpan saat klik Simpan.' : ''}
                   </p>
+                  <a
+                    href="/templates/Template-Itinerary-WHI.docx"
+                    download
+                    className="inline-block mt-1 text-[10px] font-semibold text-emerald-500 hover:underline"
+                  >
+                    Unduh Template Word
+                  </a>
                 </div>
                 <input ref={importFileRef} type="file" accept=".docx" className="hidden" onChange={handleImportFilePicked} />
                 <button
