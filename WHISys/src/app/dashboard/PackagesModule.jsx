@@ -837,6 +837,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
       ...(f.durationDays ? { durationDays: f.durationDays } : {}),
       ...(f.airline ? { airline: f.airline } : {}),
       ...(f.priceMain ? { priceMain: String(f.priceMain) } : {}),
+      ...(f.priceChild ? { priceChild: String(f.priceChild) } : {}),
       ...(f.priceIncludes.length ? { priceIncludes: f.priceIncludes } : {}),
       ...(f.priceExcludes.length ? { priceExcludes: f.priceExcludes } : {}),
       ...(f.flightSegments.length ? { flightSegments: f.flightSegments } : {}),
@@ -2035,13 +2036,22 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                     Upload itinerary buatan tim Operasional. Judul, tanggal, harga, flight, itinerary per hari, include, dan exclude dibaca otomatis. Hasilnya dicek dulu sebelum masuk ke form.
                     {importedItinerary ? ' Itinerary hasil import akan ikut tersimpan saat klik Simpan.' : ''}
                   </p>
-                  <a
-                    href="/templates/Template-Itinerary-WHI.docx"
-                    download
-                    className="inline-block mt-1 text-[10px] font-semibold text-emerald-500 hover:underline"
-                  >
-                    Unduh Template Word
-                  </a>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+                    <a
+                      href="/templates/Template-Itinerary-WHI.docx"
+                      download
+                      className="text-[10px] font-semibold text-emerald-500 hover:underline"
+                    >
+                      Unduh Template Series
+                    </a>
+                    <a
+                      href="/templates/Template-Itinerary-Private-WHI.docx"
+                      download
+                      className="text-[10px] font-semibold text-emerald-500 hover:underline"
+                    >
+                      Unduh Template Private Trip
+                    </a>
+                  </div>
                 </div>
                 <input ref={importFileRef} type="file" accept=".docx" className="hidden" onChange={handleImportFilePicked} />
                 <button
@@ -2721,6 +2731,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
               <div><span className="opacity-60">Keberangkatan:</span> {importPreview.fields.departureDate ? formatDateDDMMYYYY(importPreview.fields.departureDate) : '-'} &bull; {importPreview.fields.durationDays || '-'}</div>
               <div><span className="opacity-60">Maskapai:</span> {importPreview.fields.airline || '-'}</div>
               <div><span className="opacity-60">Harga per pax:</span> {importPreview.fields.priceMain ? 'Rp ' + Number(importPreview.fields.priceMain).toLocaleString('id-ID') : '-'}</div>
+              {importPreview.fields.priceChild ? <div><span className="opacity-60">Harga anak:</span> {'Rp ' + Number(importPreview.fields.priceChild).toLocaleString('id-ID')}</div> : null}
             </div>
 
             <div className={`${styles.innerBg} border rounded-xl p-4 text-xs mb-3`}>
