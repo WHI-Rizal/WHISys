@@ -135,8 +135,15 @@ function parseMoneyLine(line) {
   };
 }
 
-export function parseItineraryText(rawLines) {
+export function parseItineraryText(rawLinesInput) {
   const warnings = [];
+  // Template Import Itinerary WHI: semua teks DI ATAS baris "=== MULAI ITINERARY ==="
+  // (petunjuk pengisian) diabaikan, dan baris yang diawali "//" dianggap catatan
+  // pribadi. File Word lama tanpa penanda tetap dibaca seperti biasa.
+  let rawLines = rawLinesInput;
+  const startIdx = rawLinesInput.findIndex((l) => /^\s*={3,}\s*mulai/i.test(l));
+  if (startIdx >= 0) rawLines = rawLinesInput.slice(startIdx + 1);
+  rawLines = rawLines.filter((l) => !/^\s*\/\//.test(l));
   const lines = rawLines.map(stripDecor);
   const nonEmpty = lines.filter(Boolean);
 
