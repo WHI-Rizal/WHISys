@@ -24,6 +24,7 @@ import {
   postFundTransfer, postOperationalExpense, deleteJournalEntriesBySource
 } from '../../lib/journal';
 import { parseBankStatementFile } from '../../lib/bankStatementParser';
+import IntercompanyTab from './IntercompanyTab';
 
 const DEFAULT_COMPANY_PROFILE = {
   name: 'PT. WISATA HALAL INTERNASIONAL',
@@ -1045,6 +1046,9 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
           { key: 'ar_ap', label: 'Piutang & Hutang', icon: Users },
           { key: 'margin_analysis', label: 'Analisa Margin', icon: ArrowUpRight },
           { key: 'bank_reconciliation', label: 'Rekonsiliasi Bank', icon: RefreshCw },
+          ...(isSuperAdmin || (currentUser?.role || '').toLowerCase() === 'finance'
+            ? [{ key: 'intercompany', label: 'Hutang Piutang Antar PT', icon: ArrowLeftRight }]
+            : []),
         ].map(t => (
           <button
             key={t.key}
@@ -1088,6 +1092,9 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
       )}
       {activeTab === 'cash_bank' && (
         <CashBankTab styles={styles} isDark={isDark} currentUser={currentUser} financialAccounts={financialAccounts} onRefresh={fetchData} />
+      )}
+      {activeTab === 'intercompany' && (
+        <IntercompanyTab styles={styles} isDark={isDark} currentUser={currentUser} financialAccounts={financialAccounts} operationalExpenses={operationalExpenses} onChanged={fetchData} />
       )}
       {activeTab === 'bank_reconciliation' && (
         <BankReconciliationTab styles={styles} isDark={isDark} currentUser={currentUser} financialAccounts={financialAccounts} />
