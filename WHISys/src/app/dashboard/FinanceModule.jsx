@@ -2006,6 +2006,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
 
   const handleDeleteOperationalExpense = async (op) => {
     if (blockIfNotFinanceRole()) return;
+    if (op?.source === 'intercompany') {
+      alert('Biaya ini dibuat otomatis dari Laporan Keuangan > Hutang Piutang Antar PT. Batalkan dari tab itu.');
+      return;
+    }
     if (op?.source === MDR_EXPENSE_SOURCE) {
       alert(MDR_BLOCK_MSG);
       return;
@@ -2408,8 +2412,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // - HPP paket dihitung dari PEMBAYARAN vendor (payments_vendor) yang ada
   //   paketnya, bukan dari tagihan. Karena itu, paket yang ditetapkan di
   //   tagihan otomatis ikut ditulis ke pembayaran vendor terkait yang
-  //   paketnya masih kosong (lihat paymentsToFill di bawah). Pembayaran yang
-  //   sudah punya paket sendiri tidak diubah. Jurnal tidak berubah.
+  //   paketnya masih kosong, dan kalau paket tagihan diganti atau dikosongkan,
+  //   pembayaran yang masih memakai paket lama tagihan ikut berubah (lihat
+  //   paymentsToFill dan paymentsToChange di bawah). Pembayaran yang paketnya
+  //   dipilih sendiri tidak diubah. Jurnal tidak berubah.
   const handleOpenEditVendorBill = (bill) => {
     if (blockIfNotFinanceRole()) return;
     setEditingVendorBill(bill);
@@ -2444,16 +2450,38 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     }
     const selectedPkg = packagesList.find(p => p.id === vendorBillForm.packageId);
 
-    // Paket ditetapkan di tagihan -> pembayaran vendor yang nempel ke tagihan
-    // ini dan paketnya masih KOSONG ikut ditetapkan ke paket yang sama, biar
-    // muncul di Riwayat Bayar Vendor & ikut HPP paket. Pembayaran yang sudah
-    // punya paket sendiri nggak disentuh.
+    // Paket di tagihan ikut diteruskan ke pembayaran vendor yang nempel ke
+    // tagihan ini, biar Riwayat Bayar Vendor & HPP paket selalu searah:
+    // - paket DITETAPKAN: pembayaran yang paketnya masih kosong ikut diisi.
+    // - paket DIGANTI / DIKOSONGKAN: pembayaran yang paketnya masih sama dengan
+    //   paket lama tagihan ikut diganti / dikosongkan.
+    // Pembayaran yang paketnya dipilih sendiri (beda dari paket lama tagihan)
+    // nggak disentuh. Pembayaran lewat Saldo Deposit Vendor nggak pernah
+    // dikosongkan paketnya (metode itu wajib punya paket).
+    const oldPkgId = bill.packageId || '';
+    const newPkgId = selectedPkg?.id || '';
     let paymentsToFill = [];
-    if (selectedPkg) {
+    let paymentsToChange = [];
+    let paymentsKeptDeposit = 0;
+    if (oldPkgId || newPkgId) {
       const linkedSnap = await getDocs(query(collection(db, 'payments_vendor'), where('billId', '==', bill.id)));
-      paymentsToFill = linkedSnap.docs.filter(d => !d.data().packageId);
-      if (paymentsToFill.length > 0 && selectedPkg.revenueRecognized) {
-        alert(`Paket "${selectedPkg.name}" omzet & HPP-nya sudah "Diakui", jadi ${paymentsToFill.length} pembayaran vendor di tagihan ini belum bisa ditetapkan ke paket itu. Batalkan dulu pengakuan pendapatannya di Laporan Keuangan, baru tetapkan paketnya.`);
+      if (newPkgId) paymentsToFill = linkedSnap.docs.filter(d => !d.data().packageId);
+      if (oldPkgId && oldPkgId !== newPkgId) {
+        const sameAsOld = linkedSnap.docs.filter(d => d.data().packageId === oldPkgId);
+        if (newPkgId) {
+          paymentsToChange = sameAsOld;
+        } else {
+          paymentsToChange = sameAsOld.filter(d => d.data().payMethod !== 'Saldo Deposit Vendor');
+          paymentsKeptDeposit = sameAsOld.length - paymentsToChange.length;
+        }
+      }
+      const oldPkg = oldPkgId ? packagesList.find(p => p.id === oldPkgId) : null;
+      if (paymentsToChange.length > 0 && oldPkg?.revenueRecognized) {
+        alert(`Paket lama "${oldPkg.name}" omzet & HPP-nya sudah "Diakui", jadi ${paymentsToChange.length} pembayaran vendor di tagihan ini belum bisa dipindah atau dilepas dari paket itu. Batalkan dulu pengakuan pendapatannya di Laporan Keuangan, baru ubah paket tagihannya.`);
+        return false;
+      }
+      if ((paymentsToFill.length + paymentsToChange.length) > 0 && selectedPkg?.revenueRecognized) {
+        alert(`Paket "${selectedPkg.name}" omzet & HPP-nya sudah "Diakui", jadi ${paymentsToFill.length + paymentsToChange.length} pembayaran vendor di tagihan ini belum bisa ditetapkan ke paket itu. Batalkan dulu pengakuan pendapatannya di Laporan Keuangan, baru tetapkan paketnya.`);
         return false;
       }
     }
@@ -2480,9 +2508,11 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       updatedAt: new Date().toISOString()
     });
 
-    if (paymentsToFill.length > 0) {
+    if (paymentsToFill.length + paymentsToChange.length > 0) {
       const fillBatch = writeBatch(db);
-      paymentsToFill.forEach(d => fillBatch.update(d.ref, { packageId: selectedPkg.id, packageName: selectedPkg.name }));
+      const pkgFields = selectedPkg ? { packageId: selectedPkg.id, packageName: selectedPkg.name } : { packageId: '', packageName: '' };
+      paymentsToFill.forEach(d => fillBatch.update(d.ref, pkgFields));
+      paymentsToChange.forEach(d => fillBatch.update(d.ref, pkgFields));
       await fillBatch.commit();
     }
 
@@ -2510,10 +2540,20 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       action: 'update',
       module: 'Tagihan Vendor',
       targetLabel: selectedVendor.name,
-      details: `Mengedit tagihan vendor "${selectedVendor.name}" (${vendorBillForm.category}), nominal Rp ${Number(bill.amount).toLocaleString('id-ID')} jadi Rp ${newAmount.toLocaleString('id-ID')}${selectedPkg ? `, paket: ${selectedPkg.name}` : ', tanpa paket'}${paymentsToFill.length > 0 ? `, ${paymentsToFill.length} pembayaran vendor ikut ditetapkan ke paket ini` : ''}`
+      details: `Mengedit tagihan vendor "${selectedVendor.name}" (${vendorBillForm.category}), nominal Rp ${Number(bill.amount).toLocaleString('id-ID')} jadi Rp ${newAmount.toLocaleString('id-ID')}${selectedPkg ? `, paket: ${selectedPkg.name}` : ', tanpa paket'}${paymentsToFill.length + paymentsToChange.length > 0 ? `, ${paymentsToFill.length + paymentsToChange.length} pembayaran vendor ikut ${selectedPkg ? 'ditetapkan ke paket ini' : 'dilepas dari paket lama'}` : ''}`
     });
-    if (paymentsToFill.length > 0) {
-      alert(`Tagihan tersimpan. ${paymentsToFill.length} pembayaran vendor yang nempel ke tagihan ini otomatis ditetapkan ke paket "${selectedPkg.name}" dan sekarang muncul di Riwayat Bayar Vendor paket itu.`);
+    const touchedCount = paymentsToFill.length + paymentsToChange.length;
+    if (touchedCount > 0 || paymentsKeptDeposit > 0) {
+      const parts = [];
+      if (touchedCount > 0) {
+        parts.push(selectedPkg
+          ? `${touchedCount} pembayaran vendor yang nempel ke tagihan ini ikut ditetapkan ke paket "${selectedPkg.name}".`
+          : `${touchedCount} pembayaran vendor yang nempel ke tagihan ini ikut dilepas dari paket lama dan sekarang tampil "Belum ada keberangkatan".`);
+      }
+      if (paymentsKeptDeposit > 0) {
+        parts.push(`${paymentsKeptDeposit} pembayaran lewat Saldo Deposit Vendor tetap di paket lama, karena metode itu wajib punya paket.`);
+      }
+      alert(`Tagihan tersimpan. ${parts.join(' ')}`);
     }
     return true;
   };
@@ -2736,6 +2776,10 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   const handleEditOperationalExpense = (op) => {
     if (op?.source === MDR_EXPENSE_SOURCE) {
       alert(MDR_BLOCK_MSG);
+      return;
+    }
+    if (op?.source === 'intercompany') {
+      alert('Biaya ini dibuat otomatis dari Laporan Keuangan > Hutang Piutang Antar PT. Ubah atau batalkan dari tab itu.');
       return;
     }
     setEditingOperationalId(op.id);
@@ -4119,8 +4163,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                         - Rp {Number(op.amount).toLocaleString('id-ID')}
                       </td>
                       <td className="p-4 text-center">
-                        {op.source === 'income_payment_mdr' ? (
-                          <span className="inline-block text-[10px] px-2 py-1 rounded-full bg-slate-500/10 text-slate-400 border border-slate-500/20">Otomatis (dari setoran EDC)</span>
+                        {(op.source === 'income_payment_mdr' || op.source === 'intercompany') ? (
+                          <span className="inline-block text-[10px] px-2 py-1 rounded-full bg-slate-500/10 text-slate-400 border border-slate-500/20">{op.source === 'intercompany' ? 'Otomatis (dari Antar PT)' : 'Otomatis (dari setoran EDC)'}</span>
                         ) : (
                         <div className="flex items-center justify-center gap-1.5">
                           <button
@@ -4168,8 +4212,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
                     <span className="text-[10px] opacity-60 uppercase">Nominal Keluar</span>
                     <div className="font-bold text-amber-500">- Rp {Number(op.amount).toLocaleString('id-ID')}</div>
                   </div>
-                  {op.source === 'income_payment_mdr' ? (
-                    <div className="pt-1"><span className="inline-block text-[10px] px-2 py-1 rounded-full bg-slate-500/10 text-slate-400 border border-slate-500/20">Otomatis (dari setoran EDC)</span></div>
+                  {(op.source === 'income_payment_mdr' || op.source === 'intercompany') ? (
+                    <div className="pt-1"><span className="inline-block text-[10px] px-2 py-1 rounded-full bg-slate-500/10 text-slate-400 border border-slate-500/20">{op.source === 'intercompany' ? 'Otomatis (dari Antar PT)' : 'Otomatis (dari setoran EDC)'}</span></div>
                   ) : (
                   <div className="flex flex-wrap gap-2 pt-1">
                     <button
