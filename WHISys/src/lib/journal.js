@@ -57,10 +57,12 @@ export const COA = [
   { code: '1201', name: 'Piutang Jamaah', type: 'Aset', normalBalance: 'debit' },
   { code: '1301', name: 'Piutang Deposit Vendor', type: 'Aset', normalBalance: 'debit' },
   { code: '1401', name: 'Biaya Dibayar Dimuka', type: 'Aset', normalBalance: 'debit' },
+  { code: '1501', name: 'Piutang Afiliasi (Antar PT)', type: 'Aset', normalBalance: 'debit' },
   { code: '2101', name: 'Utang Deposit Jamaah', type: 'Liabilitas', normalBalance: 'credit' },
   { code: '2201', name: 'Pendapatan Diterima Dimuka', type: 'Liabilitas', normalBalance: 'credit' },
   { code: '2301', name: 'Hutang Vendor (Utang Usaha)', type: 'Liabilitas', normalBalance: 'credit' },
   { code: '2401', name: 'PPN Keluaran', type: 'Liabilitas', normalBalance: 'credit' },
+  { code: '2501', name: 'Hutang Afiliasi (Antar PT)', type: 'Liabilitas', normalBalance: 'credit' },
   { code: '3101', name: 'Modal / Laba Ditahan', type: 'Ekuitas', normalBalance: 'credit' },
   { code: '4101', name: 'Pendapatan Jasa Perjalanan', type: 'Pendapatan', normalBalance: 'credit' },
   { code: '5101', name: 'Beban Pokok Penjualan (HPP)', type: 'Beban', normalBalance: 'debit' },
@@ -78,10 +80,12 @@ export const ACC = {
   PIUTANG_JAMAAH: '1201',
   PIUTANG_DEPOSIT_VENDOR: '1301',
   BIAYA_DIBAYAR_DIMUKA: '1401',
+  PIUTANG_AFILIASI: '1501',
   UTANG_DEPOSIT_JAMAAH: '2101',
   PENDAPATAN_DITERIMA_DIMUKA: '2201',
   HUTANG_VENDOR: '2301',
   PPN_KELUARAN: '2401',
+  HUTANG_AFILIASI: '2501',
   MODAL: '3101',
   PENDAPATAN: '4101',
   HPP: '5101',
@@ -308,6 +312,51 @@ export const postFundTransfer = async ({ transferId, fromAccountId, fromAccountN
       glLine(ACC.KAS_BANK, 0, amt, { accountId: fromAccountId, accountName: fromAccountName }),
     ],
     createdByUid, createdByName
+  });
+};
+
+// 2e. Hutang piutang antar PT (WHINTER <-> WHINDO), dicatat dari tab Laporan
+//     Keuangan > Hutang Piutang Antar PT.
+//     paidBy 'whinter': WHINTER yang mengeluarkan uang (Kas/Bank berkurang sebesar
+//       totalAmount). Porsi beban WHINTER (ownShare, kalau ada) jadi Beban Operasional,
+//       sisanya (claimAmount) jadi Piutang Afiliasi (WHINDO berhutang ke WHINTER).
+//     paidBy 'whindo': WHINDO yang mengeluarkan uang, Kas/Bank WHINTER tidak berubah.
+//       Porsi beban WHINTER jadi Beban Operasional dan Hutang Afiliasi (WHINTER
+//       berhutang ke WHINDO).
+export const postIntercompanyTransaction = async ({ txnId, label, paidBy, totalAmount, ownShare, claimAmount, category, accountId, accountName, date, createdByUid, createdByName }) => {
+  const total = Math.round(Number(totalAmount) || 0);
+  const own = Math.round(Number(ownShare) || 0);
+  const claim = Math.round(Number(claimAmount) || 0);
+  if (total <= 0) return null;
+  const lines = [];
+  if (paidBy === 'whinter') {
+    if (own > 0) lines.push(glLine(ACC.OPEX, own, 0, { category }));
+    if (claim > 0) lines.push(glLine(ACC.PIUTANG_AFILIASI, claim, 0));
+    lines.push(glLine(ACC.KAS_BANK, 0, total, { accountId, accountName }));
+  } else {
+    if (own > 0) lines.push(glLine(ACC.OPEX, own, 0, { category }));
+    lines.push(glLine(ACC.HUTANG_AFILIASI, 0, own));
+  }
+  return postJournalEntry({
+    date, description: `Antar PT (${paidBy === 'whinter' ? 'dibayar WHINTER' : 'dibayar WHINDO'}) - ${label || txnId}`,
+    source: 'intercompany_txn', sourceDocId: txnId, reference: label || '',
+    lines, createdByUid, createdByName
+  });
+};
+
+// Pelunasan/cicilan hutang piutang antar PT.
+//   direction 'receivable': WHINDO membayar ke WHINTER, kas masuk, Piutang Afiliasi berkurang.
+//   direction 'payable': WHINTER membayar ke WHINDO, kas keluar, Hutang Afiliasi berkurang.
+export const postIntercompanySettlement = async ({ settlementId, label, direction, amount, accountId, accountName, date, createdByUid, createdByName }) => {
+  const amt = Math.round(Number(amount) || 0);
+  if (amt <= 0) return null;
+  const lines = direction === 'receivable'
+    ? [glLine(ACC.KAS_BANK, amt, 0, { accountId, accountName }), glLine(ACC.PIUTANG_AFILIASI, 0, amt)]
+    : [glLine(ACC.HUTANG_AFILIASI, amt, 0), glLine(ACC.KAS_BANK, 0, amt, { accountId, accountName })];
+  return postJournalEntry({
+    date, description: `${direction === 'receivable' ? 'Terima pelunasan dari WHINDO' : 'Bayar ke WHINDO'} - ${label || settlementId}`,
+    source: 'intercompany_settlement', sourceDocId: settlementId, reference: label || '',
+    lines, createdByUid, createdByName
   });
 };
 
