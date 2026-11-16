@@ -402,9 +402,6 @@ export default function IntercompanyTab({ isDark, styles, currentUser, financial
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className={`text-sm font-bold ${styles.textTitle}`}>Hutang Piutang Antar PT</h3>
-          <p className={`text-[11px] ${styles.textSub} mt-0.5 max-w-2xl`}>
-            Transaksi antara WHINTER (dicatat di sini) dan {COUNTERPARTY} (dicatat di erahajj). Ini sisi WHINTER saja, jadi saldonya perlu dicocokkan manual dengan catatan di erahajj.
-          </p>
         </div>
         <button
           onClick={() => { setTxnForm(emptyTxnForm()); setShowTxnModal(true); }}
