@@ -18,7 +18,7 @@ import {
   runInitialJournalMigration, postJournalEntry, postRevenueRecognition, postRevenueUnrecognition,
   backfillOpexJournalCategories, diagnoseRescheduleMigrationImpact, applyRescheduleMigrationCorrection,
   diagnoseMissingBookingJournals, applyMissingBookingJournalsCorrection,
-  diagnoseArReconciliation, removeDuplicateBookingCreatedEntries, removeOrphanBookingJournalEntries,
+  diagnoseArReconciliation, diagnoseOrphanIncomePaymentJournals, removeDuplicateBookingCreatedEntries, removeOrphanBookingJournalEntries,
   diagnoseMissingCommissionJournals, applyMissingCommissionJournalsCorrection, deleteJournalEntryById,
   diagnoseMissingIncomePaymentJournals, applyMissingIncomePaymentJournalsCorrection,
   postFundTransfer, postOperationalExpense, deleteJournalEntriesBySource
@@ -251,6 +251,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
   const [removingOrphans, setRemovingOrphans] = useState(false);
   const [expandedArBookingIds, setExpandedArBookingIds] = useState([]);
   const [deletingEntryId, setDeletingEntryId] = useState(null);
+  const [removingOrphanPayments, setRemovingOrphanPayments] = useState(false);
 
   // Diagnosa & koreksi jurnal Komisi Mitra/Agen yang belum pernah keposting
   // (lihat catatan lengkap di diagnoseMissingCommissionJournals, lib/journal.js
@@ -400,7 +401,10 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
   };
 
   const handleOpenArReconciliation = () => {
-    const result = diagnoseArReconciliation({ bookings: bookingsList, journalEntries });
+    const result = {
+      ...diagnoseArReconciliation({ bookings: bookingsList, journalEntries }),
+      orphanPayments: diagnoseOrphanIncomePaymentJournals({ paymentsIncome, journalEntries })
+    };
     setArReconciliation(result);
     setShowArReconciliation(true);
   };
@@ -435,6 +439,23 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
       alert('Gagal menghapus jurnal yatim piatu: ' + err.message);
     }
     setRemovingOrphans(false);
+  };
+
+  const handleRemoveOrphanPayments = async () => {
+    const list = arReconciliation?.orphanPayments?.orphans || [];
+    if (list.length === 0) return;
+    if (!confirm(`Hapus ${list.length} jurnal setoran yang pembayarannya udah nggak ada di Riwayat Pembayaran? Pastikan daftarnya udah dicek, ini nggak bisa dibatalkan.`)) return;
+    setRemovingOrphanPayments(true);
+    try {
+      for (const o of list) await deleteJournalEntryById(o.id);
+      await fetchData();
+      setShowArReconciliation(false);
+      setArReconciliation(null);
+      alert(`Selesai, ${list.length} jurnal setoran yatim dihapus. Buka lagi Rekonsiliasi buat lihat hasilnya.`);
+    } catch (err) {
+      alert('Gagal menghapus jurnal setoran yatim: ' + err.message);
+    }
+    setRemovingOrphanPayments(false);
   };
 
   const toggleArBookingExpand = (bookingId) => {
@@ -907,6 +928,23 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
             <p className={`text-xs ${styles.textSub} mb-3`}>
               Bandingin per booking aktif: nilai "Piutang Jamaah" hasil jurnal (yang kepakai di Neraca) vs sisa tagihan live (totalAmount - totalPaid, yang kepakai di tab Piutang & Hutang). Cuma booking yang BEDA yang ditampilin. Diff positif = jurnal kelebihan catat (kemungkinan dobel-posting); diff negatif = jurnal kurang catat (ada yang belum kejurnal). Read-only, belum ada apapun yang diubah.
             </p>
+            {arReconciliation.orphanPayments?.orphans?.length > 0 && (
+              <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 mb-3">
+                <p className="text-xs font-bold text-amber-500 mb-1">Ketemu {arReconciliation.orphanPayments.orphans.length} jurnal SETORAN yang pembayarannya udah nggak ada di Riwayat Pembayaran (total {formatRp(arReconciliation.orphanPayments.total)}). Biasanya sisa dari pembayaran yang dihapus tapi jurnalnya gagal ikut terhapus:</p>
+                <ul className="text-[11px] text-amber-400 list-disc list-inside mb-2 max-h-32 overflow-y-auto">
+                  {arReconciliation.orphanPayments.orphans.map(o => (
+                    <li key={o.id}>{o.reference || o.sourceDocId} · {o.date ? String(o.date).slice(0, 10).split('-').reverse().join('/') : '-'} · {formatRp(o.amount)}</li>
+                  ))}
+                </ul>
+                <button
+                  onClick={handleRemoveOrphanPayments}
+                  disabled={removingOrphanPayments}
+                  className="w-full px-3 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg disabled:opacity-60"
+                >
+                  {removingOrphanPayments ? 'Memproses...' : `Hapus ${arReconciliation.orphanPayments.orphans.length} Jurnal Setoran Yatim Ini`}
+                </button>
+              </div>
+            )}
             {arReconciliation.orphanEntries.length > 0 && (
               <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 mb-3">
                 <p className="text-xs font-bold text-rose-500 mb-1">Ketemu {arReconciliation.orphanEntries.length} jurnal YATIM PIATU (nempel ke booking yang udah dihapus permanen dari sistem) — total Rp {formatRp(arReconciliation.orphanTotal1201)} nempel di Neraca selamanya kalau nggak dibersihin:</p>
