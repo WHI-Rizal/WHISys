@@ -420,6 +420,11 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   // + state (buat disable tombol), karena state saja bisa lolos kalau dua klik
   // masuk sebelum render ulang.
   const groupPaymentLockRef = useRef(false);
+  // Kunci anti dobel-submit berbasis ref (state React telat kebaca pas dobel-klik).
+  const rescheduleLockRef = useRef(false);
+  const groupRescheduleLockRef = useRef(false);
+  const groupEditLockRef = useRef(false);
+  const paymentEditLockRef = useRef(false);
   const [isSavingGroupPayment, setIsSavingGroupPayment] = useState(false);
 
   // State Riwayat Setoran
@@ -1359,6 +1364,16 @@ Terimakasih🙏`;
   };
 
   const handleSavePaymentEdit = async (payId) => {
+    if (paymentEditLockRef.current) return;
+    paymentEditLockRef.current = true;
+    try {
+      return await handleSavePaymentEditInner(payId);
+    } finally {
+      paymentEditLockRef.current = false;
+    }
+  };
+
+  const handleSavePaymentEditInner = async (payId) => {
     if (!canManagePayments) {
       alert("Cuma Finance & Super Admin yang boleh mengedit riwayat pembayaran.");
       return;
@@ -2656,6 +2671,16 @@ Terimakasih🙏`;
   };
 
   const handleRescheduleSubmit = async (e) => {
+    if (rescheduleLockRef.current) return;
+    rescheduleLockRef.current = true;
+    try {
+      return await handleRescheduleSubmitInner(e);
+    } finally {
+      rescheduleLockRef.current = false;
+    }
+  };
+
+  const handleRescheduleSubmitInner = async (e) => {
     e.preventDefault();
     if (!selectedBookingForAction) return;
     if (!canReschedule) {
@@ -3204,6 +3229,16 @@ Terimakasih🙏`;
   };
 
   const handleSaveGroupPaymentEdit = async (pay) => {
+    if (paymentEditLockRef.current) return;
+    paymentEditLockRef.current = true;
+    try {
+      return await handleSaveGroupPaymentEditInner(pay);
+    } finally {
+      paymentEditLockRef.current = false;
+    }
+  };
+
+  const handleSaveGroupPaymentEditInner = async (pay) => {
     if (!canManagePayments) {
       alert("Cuma Finance & Super Admin yang boleh mengedit riwayat pembayaran.");
       return;
@@ -3656,6 +3691,16 @@ Terimakasih🙏`;
   };
 
   const handleGroupEditSubmit = async (e) => {
+    if (groupEditLockRef.current) return;
+    groupEditLockRef.current = true;
+    try {
+      return await handleGroupEditSubmitInner(e);
+    } finally {
+      groupEditLockRef.current = false;
+    }
+  };
+
+  const handleGroupEditSubmitInner = async (e) => {
     e.preventDefault();
     if (!groupEditTarget) return;
     // Anti-dobel-submit — lihat penjelasan di deklarasi isSavingGroupEdit di
@@ -3983,6 +4028,16 @@ Terimakasih🙏`;
   };
 
   const handleGroupRescheduleSubmit = async (e) => {
+    if (groupRescheduleLockRef.current) return;
+    groupRescheduleLockRef.current = true;
+    try {
+      return await handleGroupRescheduleSubmitInner(e);
+    } finally {
+      groupRescheduleLockRef.current = false;
+    }
+  };
+
+  const handleGroupRescheduleSubmitInner = async (e) => {
     e.preventDefault();
     if (!groupRescheduleTarget) return;
     if (!canReschedule) {
