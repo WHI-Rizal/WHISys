@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, getDoc, setDoc, deleteDoc, doc, updateDoc, query, where, increment, writeBatch, runTransaction } from 'firebase/firestore';
 import { Wallet, ArrowDownLeft, ArrowUpRight, X, Trash2, TrendingUp, BarChart3, Eye, Building2, CheckCircle2, RotateCcw, Clock, Download, Pencil, Plus, Settings, FileBarChart, ChevronDown, ChevronRight, FileEdit, History } from 'lucide-react';
@@ -503,6 +503,9 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   // lambat + klik ulang bisa bikin data (dan saldo, dan jurnal) tercatat
   // dobel. Lihat juga audit "Kualitas Kode & Bug" §HIGH.
   const [savingIncome, setSavingIncome] = useState(false);
+  // Kunci berbasis ref: state savingIncome baru kebaca setelah render ulang, jadi
+  // dobel-klik yang rapat masih bisa lolos. Ref ini ke-set seketika.
+  const incomeLockRef = useRef(false);
   const [savingDeposit, setSavingDeposit] = useState(false);
   const [savingWithdrawDeposit, setSavingWithdrawDeposit] = useState(false);
   const [savingVendor, setSavingVendor] = useState(false);
@@ -2052,7 +2055,8 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
   const handleIncomeSubmit = async (e) => {
     e.preventDefault();
     if (blockIfNotFinanceRole()) return;
-    if (savingIncome) return; // cegah double-submit (double-klik/koneksi lambat)
+    if (incomeLockRef.current || savingIncome) return; // cegah double-submit (double-klik/koneksi lambat)
+    incomeLockRef.current = true;
     setSavingIncome(true);
     try {
       const groupItems = bookingsList
@@ -2187,6 +2191,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
     } catch (err) {
       alert("Gagal mencatat pembayaran: " + err.message);
     } finally {
+      incomeLockRef.current = false;
       setSavingIncome(false);
     }
   };
