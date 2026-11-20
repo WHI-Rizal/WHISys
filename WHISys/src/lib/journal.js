@@ -656,15 +656,41 @@ export const postBookingCancelRefund = async ({ bookingId, bookingCode, writeOff
 // udah ada (removeAccountMutationBySource dkk di FinanceModule.jsx),
 // bukan gantiin — dua-duanya jalan bareng biar Kas/Bank & Jurnal tetap
 // sinkron begitu ada transaksi yang dihapus.
+let _lastJournalDeleteAlertAt = 0;
 export const deleteJournalEntriesBySource = async (source, sourceDocId) => {
-  if (!sourceDocId) return;
+  if (!sourceDocId) return true;
   try {
     const q = query(collection(db, 'journal_entries'), where('source', '==', source), where('sourceDocId', '==', sourceDocId));
     const snap = await getDocs(q);
     await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+    return true;
   } catch (err) {
     console.error(`Gagal menghapus jurnal terkait (${source}/${sourceDocId}):`, err);
+    // Dulu error ini ditelan diam-diam, jadi data aslinya kehapus tapi jurnalnya
+    // nyangkut (bikin selisih di Neraca/Rekonsiliasi). Sekarang dikasih tau ke
+    // user. Di-throttle 5 detik biar nggak muncul alert bertubi-tubi pas hapus
+    // banyak baris sekaligus.
+    if (typeof window !== 'undefined' && Date.now() - _lastJournalDeleteAlertAt > 5000) {
+      _lastJournalDeleteAlertAt = Date.now();
+      alert(`PERHATIAN: data berhasil dihapus tapi jurnalnya GAGAL ikut terhapus (${source}). Jurnal akan nyangkut dan bikin selisih. Buka Laporan Keuangan > Rekonsiliasi Piutang Jamaah per Booking buat membersihkannya. Detail: ${err.message}`);
+    }
+    return false;
   }
+};
+
+// Jurnal `income_payment` yang dokumen payments_income pasangannya sudah nggak
+// ada (misal pembayaran dihapus tapi jurnalnya gagal ikut terhapus). Pure
+// function, read-only: cuma ngasih daftar, hapusnya lewat deleteJournalEntryById.
+export const diagnoseOrphanIncomePaymentJournals = ({ paymentsIncome, journalEntries }) => {
+  const payIds = new Set((paymentsIncome || []).map(p => p.id));
+  const orphans = (journalEntries || [])
+    .filter(j => j.source === 'income_payment' && j.sourceDocId && !payIds.has(j.sourceDocId))
+    .map(j => {
+      const piutang = (j.lines || []).filter(l => l.accountCode === ACC.PIUTANG_JAMAAH);
+      const amount = piutang.reduce((a, l) => a + (Number(l.credit) || 0) - (Number(l.debit) || 0), 0);
+      return { id: j.id, date: j.date, description: j.description, reference: j.reference, sourceDocId: j.sourceDocId, amount };
+    });
+  return { orphans, total: orphans.reduce((a, o) => a + o.amount, 0) };
 };
 
 // Perbaikan 17 Sep 2026 (kasus GRP-570533 lanjutan) — Rules Firestore
