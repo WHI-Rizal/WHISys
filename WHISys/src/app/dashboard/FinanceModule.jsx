@@ -3325,6 +3325,7 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
       'Tanggal Keberangkatan',
       'Status',
       'Nilai Transaksi (Rp)',
+      'Sumber Lead',
     ]];
 
     const groupBookingRows = (bookings, statusLabel, includeAmount) => {
@@ -3343,10 +3344,13 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
             packageName: bk.packageName || pkg?.name || '-',
             departureDate: bk.departureDate ? formatDateDDMMYYYY(bk.departureDate) : '-',
             status: statusLabel,
+            leadSource: '',
             pax: 0,
             amount: 0,
           };
         }
+        // Sumber Lead: ambil yang pertama keisi di grup (1 closing = 1 sumber lead).
+        if (!byGroup[groupKey].leadSource && bk.leadSource) byGroup[groupKey].leadSource = bk.leadSource;
         // Tanggal transaksi grup dipakai yang PALING AWAL antar pax-nya,
         // jaga-jaga kalau ada perbedaan jam/detik createdAt antar dokumen
         // dalam 1 grup pendaftaran yang sama.
@@ -3383,11 +3387,12 @@ export default function FinanceModule({ onSelectBooking, theme = 'dark', current
         r.departureDate,
         r.status,
         r.amount,
+        r.leadSource || '-',
       ]);
     });
 
-    rows.push(['TOTAL', '', '', '', '', '', '', '', '', closingTcGrandTotal.totalClosing]);
-    rows.push(['JUMLAH PAX', '', '', closingTcGrandTotal.totalPax, '', '', '', '', '', '']);
+    rows.push(['TOTAL', '', '', '', '', '', '', '', '', closingTcGrandTotal.totalClosing, '']);
+    rows.push(['JUMLAH PAX', '', '', closingTcGrandTotal.totalPax, '', '', '', '', '', '', '']);
 
     // BOM di depan biar Excel baca UTF-8 dengan benar (nama TC/destinasi
     // yang pakai karakter non-ASCII nggak jadi karakter aneh pas dibuka).
