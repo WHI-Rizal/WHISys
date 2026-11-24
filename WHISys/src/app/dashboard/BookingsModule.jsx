@@ -11,6 +11,7 @@ import { getNextCustomerCode } from '../../lib/customerCode';
 import { postBookingCreated, postIncomePayment, postDepositTopup, postExcessToDeposit, postBookingCancelRefund, postJournalEntry, deleteJournalEntriesBySource, deleteAllJournalEntriesForBooking, resyncBookingCreatedJournalDate, ACC } from '../../lib/journal';
 import SearchableSelect from '@/components/SearchableSelect';
 import DateFieldID from '@/components/DateFieldID';
+import ManifestImportModal from './ManifestImportModal';
 
 // Firestore where(..., 'in', [...]) cuma dukung maks 30 nilai sekaligus —
 // buat query yang array-nya bisa aja lebih dari itu (grup rombongan gede),
@@ -721,6 +722,7 @@ export default function BookingsModule({ targetBookingId, theme = 'dark', userRo
   const [showRoomTypeManager, setShowRoomTypeManager] = useState(false);
   const [roomingTab, setRoomingTab] = useState('rooming'); // 'rooming' | 'manifest'
   const [showTlPicker, setShowTlPicker] = useState(false);
+  const [showManifestImport, setShowManifestImport] = useState(false);
   const [tlPickId, setTlPickId] = useState('');
   const [savingTl, setSavingTl] = useState(false);
   const [newRoomType, setNewRoomType] = useState({ name: '', capacity: '' });
@@ -9730,6 +9732,14 @@ Terimakasih🙏`;
                       <UserPlus className="w-3.5 h-3.5" /> Tambah Tour Leader
                     </button>
                   )}
+                  {canManageRoomTypes && (
+                    <button
+                      onClick={() => setShowManifestImport(true)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} rounded-lg text-[11px] font-medium`}
+                    >
+                      <Upload className="w-3.5 h-3.5" /> Import dari File
+                    </button>
+                  )}
                   <button
                     onClick={() => handleExportManifest(manifestRows, roomingPackage)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium"
@@ -9847,6 +9857,21 @@ Terimakasih🙏`;
             )}
           </div>
         </div>
+      )}
+
+      {/* MODAL IMPORT MANIFEST DARI FILE LAMA (Google Sheet / Excel / CSV) */}
+      {showManifestImport && roomingPackage && (
+        <ManifestImportModal
+          isDark={isDark}
+          styles={styles}
+          pkg={roomingPackage}
+          bookings={roomingBookingsForPackage}
+          jamaahList={jamaahList}
+          roomTypeNames={Object.keys(ROOM_CAPACITY)}
+          currentUser={currentUser}
+          onClose={() => setShowManifestImport(false)}
+          onDone={refreshRoomingData}
+        />
       )}
 
       {/* MODAL TAMBAH TOUR LEADER */}
