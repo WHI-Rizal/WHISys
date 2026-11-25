@@ -536,10 +536,232 @@ export function parsePrivateDocXml(xml) {
   };
 }
 
+// ---------- Parser Series 2 (format "HARI KE n") ----------
+// Format dokumen tim OP yang ditulis begini:
+//   Judul paket (1-2 baris)
+//   Rp 20.900.000                      (harga per pax, kata "/pax" boleh nggak ada)
+//   Flight by Malaysia Airlines:
+//   MH 716 12MAR CGK KUL 12.20 - 15.30 / MH 720 CGK KUL 15.40 - 18.50   ("/" = pilihan alternatif)
+//   ITINERARY:
+//   HARI KE 1 JAKARTA - HONGKONG - ZHUHAI (B/L/D)
+//   Jumat, 12/03/2027
+//   (poin-poin kegiatan, "Bermalam di Zhuhai", "[Hotel * 3 / setaraf]")
+//   NOTE : ...   INCLUDE : ...   EXCLUDE : ...
+// Template Series (DAY 1, DAY 2, ...) tetap dibaca parseItineraryText, nggak diubah.
+
+const HARI_RE = /^HARI\s*KE\s*(\d+)\b\s*[:\-]?\s*(.*)$/i;
+const stripBullet = (l) => l.replace(/^[-•]\s+/, '');
+
+// Sama seperti docxXmlToLines, tapi paragraf berbentuk list (poin) diberi awalan "- ".
+export function docxXmlToBulletLines(xml) {
+  const paras = xml.match(/<w:p[ >][\s\S]*?<\/w:p>/g) || [];
+  const out = [];
+  paras.forEach((px) => {
+    const bullet = /<w:numPr>/.test(px);
+    const text = decodeEntities(
+      px.replace(/<w:(?:br|cr)\b[^>]*\/>/g, '\n').replace(/<w:tab\b[^>]*\/>/g, ' ').replace(/<[^>]+>/g, '')
+    );
+    text.split('\n').forEach((l) => out.push(bullet && l.trim() ? '- ' + l.trim() : l));
+  });
+  return out;
+}
+
+export function isHariKeLines(lines) {
+  const clean = lines.map((l) => stripBullet(stripDecor(l)));
+  return clean.some((l) => HARI_RE.test(l)) && !clean.some((l) => /^DAY\s*\d+/i.test(l));
+}
+
+const addIsoDays = (isoStr, n) => {
+  const d = new Date(isoStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return iso(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+};
+const isoToDmy = (s) => (s ? s.split('-').reverse().join('/') : '');
+
+export function parseHariKeText(rawLinesInput) {
+  const warnings = [];
+  let rawLines = rawLinesInput;
+  const startIdx = rawLinesInput.findIndex((l) => /^\s*={3,}\s*mulai/i.test(l));
+  if (startIdx >= 0) rawLines = rawLinesInput.slice(startIdx + 1);
+  rawLines = rawLines.filter((l) => !/^\s*\/\//.test(l));
+  const L = rawLines.map((l) => tidy(stripDecor(starFix(l))));
+  const P = L.map(stripBullet);
+
+  const idxFirstDay = P.findIndex((l) => HARI_RE.test(l));
+  const idxItin = P.findIndex((l, i) => i < idxFirstDay && /^itinerary\b/i.test(l));
+  const headEnd = idxItin >= 0 ? idxItin : idxFirstDay;
+  const idxInc = P.findIndex((l, i) => i > idxFirstDay && /^include\b/i.test(l));
+  const idxExc = P.findIndex((l, i) => i > idxFirstDay && /^exclude\b/i.test(l));
+  const sectionEnd = (idx) => [idxInc, idxExc].filter((x) => x > idx).sort((a, b) => a - b)[0] ?? L.length;
+
+  // ---- Header: judul, harga, maskapai, flight ----
+  const head = P.slice(0, headEnd);
+  const priceRe = /^(?:harga\s*:?\s*)?(?:IDR|Rp)\.?\s*([\d.]+)/i;
+  const fi = head.findIndex((l) => /^flight\s*(?:by|detail)?\b/i.test(l));
+  const priceIdx = head.findIndex((l) => priceRe.test(l));
+  const titleEnd = [fi, priceIdx].filter((x) => x >= 0).sort((a, b) => a - b)[0] ?? head.length;
+  const name = tidy(head.slice(0, titleEnd).filter((l) => l && !/^\(.*\)$/.test(l)).slice(0, 3).join(' - '));
+  if (!name) warnings.push('Judul paket nggak terbaca, isi manual.');
+
+  let priceMain = 0;
+  if (priceIdx >= 0) priceMain = Number(head[priceIdx].match(priceRe)[1].replace(/\./g, '')) || 0;
+  if (!priceMain) warnings.push('Harga per pax nggak terbaca, isi manual.');
+
+  let airline = '';
+  if (fi >= 0) {
+    airline = tidy(head[fi].replace(/^flight\s*(?:by|detail)?\s*:?\s*/i, '').replace(/[:\s]+$/, ''));
+  }
+
+  // Flight: tiap baris boleh berisi beberapa segmen dipisah "/". Segmen tanpa tanggal ikut tanggal segmen sebelumnya di baris itu.
+  const flightRe = /\b([A-Z0-9]{2})\s?(\d{1,4})\s+(?:(\d{1,2})\s?([A-Za-z]{3,9})\s+)?([A-Z]{3})\s*-?\s*([A-Z]{3})\s+(\d{1,2}[:.]\d{2})\s*-\s*(\d{1,2}[:.]\d{2})/g;
+  const rawFlights = [];
+  let hasAlt = false;
+  head.slice(fi >= 0 ? fi + 1 : 0).forEach((line) => {
+    let lastDM = null;
+    let count = 0;
+    let m;
+    flightRe.lastIndex = 0;
+    while ((m = flightRe.exec(line))) {
+      count++;
+      const mon = mon3(m[4]);
+      if (m[3] && mon) lastDM = { d: Number(m[3]), m: mon };
+      rawFlights.push({ code: `${m[1]} ${m[2]}`, dm: lastDM, route: `${m[5]} - ${m[6]}`, dep: fixTime(m[7]), arr: fixTime(m[8]) });
+    }
+    if (count > 1 && /\s\/\s/.test(line)) hasAlt = true;
+  });
+
+  // ---- Itinerary per hari ----
+  const days = [];
+  const notes = [];
+  let cur = null;
+  let inNote = false;
+  const flush = () => {
+    if (!cur) return;
+    const hotelCatLine = cur.lines.find((x) => /^\[\s*hotel\b/i.test(x) || /^hotel\s+bintang\b/i.test(x));
+    const stayLine = cur.lines.find((x) => /bermalam di/i.test(x));
+    const catText = hotelCatLine ? tidy(stripBullet(hotelCatLine).replace(/^\[|\]$/g, '')) : '';
+    const stay = stayLine ? 'Bermalam di ' + tidy(stripBullet(stayLine).replace(/^.*bermalam di\s*/i, '')).replace(/[.]$/, '') : '';
+    const hotel = stay ? (catText ? `${stay} (${catText})` : stay) : catText;
+    const desc = cur.lines.filter((x) => x && x !== hotelCatLine);
+    days.push({
+      title: cur.title,
+      description: desc.map((x) => x.replace(/^•\s*/, '- ')).join('\n'),
+      meals: cur.meals,
+      hotel,
+      _n: cur.n,
+      _date: cur.date
+    });
+    cur = null;
+  };
+  const dateFromLine = (l) => {
+    let m = l.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (m) return iso(m[3], Number(m[2]), Number(m[1]));
+    m = l.match(/(\d{1,2})\s+([A-Za-z.]{3,})\s+(\d{4})/);
+    if (m && monthNum(m[2])) return iso(m[3], monthNum(m[2]), Number(m[1]));
+    return '';
+  };
+  if (idxFirstDay >= 0) {
+    const itinEnd = [idxInc, idxExc].filter((x) => x > idxFirstDay).sort((a, b) => a - b)[0] ?? L.length;
+    for (let i = idxFirstDay; i < itinEnd; i++) {
+      const l = L[i];
+      if (!l) continue;
+      const hm = P[i].match(HARI_RE);
+      if (hm) {
+        flush();
+        inNote = false;
+        let rest = tidy(hm[2]);
+        let meals = '';
+        const mm = rest.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
+        if (mm && /^[BLD][BLD\s\/,&\-]*$/i.test(mm[2])) { rest = tidy(mm[1]); meals = normMeals(mm[2].replace(/[\s,&]+/g, '/').toUpperCase()); }
+        cur = { n: Number(hm[1]), title: rest.toUpperCase(), meals, date: '', lines: [] };
+        continue;
+      }
+      if (/^note\b/i.test(P[i])) {
+        flush();
+        inNote = true;
+        const rest = P[i].replace(/^note\s*:?\s*/i, '').trim();
+        if (rest) notes.push(rest);
+        continue;
+      }
+      if (inNote) { notes.push(P[i]); continue; }
+      if (cur) {
+        if (!cur.date && !cur.lines.length) {
+          const d = dateFromLine(l);
+          if (d && !/^-/.test(l)) { cur.date = d; continue; }
+        }
+        cur.lines.push(l);
+      }
+    }
+    flush();
+  }
+  if (!days.length) warnings.push('Itinerary per hari (HARI KE 1, HARI KE 2, dst) nggak terbaca. Cek penulisannya.');
+  if (days.some((d) => !d.title)) warnings.push('Ada hari yang judul rutenya nggak terbaca, lengkapi manual.');
+
+  // ---- Tanggal berangkat, tahun flight, cek tanggal antar hari ----
+  const dayDates = days.map((d) => d._date).filter(Boolean);
+  const first = days.find((d) => d._date);
+  let departureDate = days[0]?._date || '';
+  if (!departureDate && first) departureDate = addIsoDays(first._date, -(first._n - 1));
+  const flightSegments = [];
+  const baseY = departureDate ? Number(departureDate.slice(0, 4)) : new Date().getFullYear();
+  rawFlights.forEach((f) => {
+    let date = '';
+    if (f.dm) {
+      const cands = [baseY, baseY + 1].map((y) => iso(y, f.dm.m, f.dm.d));
+      date = (departureDate && cands.find((c) => dayDiff(departureDate, c) >= -2 && dayDiff(departureDate, c) <= 150)) || cands[0];
+    }
+    flightSegments.push({ flightNumber: f.code, date, route: f.route, depTime: f.dep, arrTime: f.arr });
+  });
+  if (!departureDate && flightSegments.find((f) => f.date)) departureDate = flightSegments.find((f) => f.date).date;
+  if (!departureDate) warnings.push('Tanggal keberangkatan nggak terbaca, isi manual.');
+  if (!flightSegments.length && !/^la\b|la\s*only|tanpa\s*tiket/i.test(airline)) warnings.push('Jadwal flight nggak terbaca, isi manual di Rincian Penerbangan.');
+  if (hasAlt) warnings.push('Ada pilihan flight alternatif (dipisah tanda "/"). Semuanya dimasukkan ke Rincian Penerbangan, hapus yang nggak dipakai.');
+  if (flightSegments.some((f) => !f.date)) warnings.push('Ada flight yang tanggalnya nggak terbaca, lengkapi manual.');
+  if (departureDate) {
+    const bad = days.filter((d) => d._date && d._date !== addIsoDays(departureDate, d._n - 1));
+    bad.forEach((d) => warnings.push(`Tanggal di HARI KE ${d._n} (${isoToDmy(d._date)}) nggak nyambung dengan HARI KE 1. Cek lagi penulisannya.`));
+  }
+
+  // ---- Include & exclude ----
+  const priceIncludes = [];
+  if (idxInc >= 0) {
+    const end = sectionEnd(idxInc);
+    for (let i = idxInc + 1; i < end; i++) {
+      const l = L[i];
+      if (!l) continue;
+      if (/^note\b/i.test(P[i])) break;
+      priceIncludes.push(tidy(l.replace(/^(\d+[.)]|[•\-])\s*/, '')));
+    }
+  } else warnings.push('Bagian INCLUDE nggak ditemukan.');
+
+  const priceExcludes = [];
+  if (idxExc >= 0) {
+    const end = sectionEnd(idxExc);
+    let after = false;
+    for (let i = idxExc + 1; i < end; i++) {
+      const l = L[i];
+      if (!l) continue;
+      if (/^note\b/i.test(P[i])) { after = true; const rest = P[i].replace(/^note\s*:?\s*/i, '').trim(); if (rest) notes.push(rest); continue; }
+      if (after) { notes.push(P[i]); continue; }
+      const it = parseMoneyLine(l.replace(/^[-•]\s*/, ''));
+      if (it.label) priceExcludes.push(it);
+    }
+  } else warnings.push('Bagian EXCLUDE nggak ditemukan.');
+
+  return {
+    fields: { name, departureDate, durationDays: days.length ? `${days.length} Hari` : '', airline, priceMain, priceChild: 0, priceIncludes, priceExcludes, flightSegments, specialNote: notes.join('\n') },
+    itinerary: days.map(({ _n, _date, ...d }) => d),
+    warnings
+  };
+}
+
 export async function importItineraryFromDocx(file) {
   const xml = await readDocxXml(file);
-  // Dokumen Private Trip (tabel Date | Destination | Meals | ...) dibaca per struktur tabel,
-  // dokumen Series (teks per baris) dibaca pakai parseItineraryText.
+  // 1) Dokumen Private Trip (tabel Date | Destination | Meals | ...) dibaca per struktur tabel.
   if (isPrivateDocXml(xml)) return parsePrivateDocXml(xml);
+  // 2) Dokumen Series 2 (judul hari "HARI KE 1", "HARI KE 2", ...) dibaca parseHariKeText.
+  const bulletLines = docxXmlToBulletLines(xml);
+  if (isHariKeLines(bulletLines)) return parseHariKeText(bulletLines);
+  // 3) Dokumen Series 1 (judul hari "DAY 1", "DAY 2", ...) tetap pakai parseItineraryText.
   return parseItineraryText(docxXmlToLines(xml));
 }
