@@ -727,7 +727,7 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
                 />
               </div>
 
-              {/* Dua kolom: kiri = identitas diri (gender, tanggal & tempat lahir),
+              {/* Dua kolom: kiri = identitas diri (gender, tanggal & tempat lahir, alamat),
                   kanan = kontak + semua info paspor ditumpuk di bawah No. WhatsApp. */}
               <div className="grid grid-cols-2 gap-4 items-start">
                 <div className="space-y-4">
@@ -766,6 +766,15 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
                       onChange={(e) => setFormData({ ...formData, birthPlace: e.target.value })}
                     />
                   </div>
+                  <div>
+                    <label className="block mb-1 font-medium">Alamat Tempat Tinggal</label>
+                    <textarea
+                      rows="3" placeholder="Jl. Raya Utama No. 12..."
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={formData.address}
+                      onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                    ></textarea>
+                  </div>
                 </div>
                 <div className="space-y-4">
                   <div>
@@ -787,21 +796,21 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
                     />
                   </div>
                   <div>
-                    <label className="block mb-1 font-medium">Tanggal Expired Paspor</label>
-                    <DateFieldID
-                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                      nativeClassName={`[color-scheme:${theme}]`}
-                      value={formData.passportExpiry}
-                      onChange={(val) => setFormData({ ...formData, passportExpiry: val })}
-                    />
-                  </div>
-                  <div>
                     <label className="block mb-1 font-medium">Tanggal Terbit Paspor</label>
                     <DateFieldID
                       className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
                       nativeClassName={`[color-scheme:${theme}]`}
                       value={formData.passportIssueDate}
                       onChange={(val) => setFormData({ ...formData, passportIssueDate: val })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 font-medium">Tanggal Expired Paspor</label>
+                    <DateFieldID
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      nativeClassName={`[color-scheme:${theme}]`}
+                      value={formData.passportExpiry}
+                      onChange={(val) => setFormData({ ...formData, passportExpiry: val })}
                     />
                   </div>
                   <div>
@@ -814,16 +823,6 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
                     />
                   </div>
                 </div>
-              </div>
-
-              <div>
-                <label className="block mb-1 font-medium">Alamat Tempat Tinggal</label>
-                <textarea
-                  rows="2" placeholder="Jl. Raya Utama No. 12..."
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                ></textarea>
               </div>
 
               <div className={`pt-4 flex justify-end gap-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
