@@ -727,90 +727,92 @@ export default function JamaahModule({ theme = 'dark', currentUser = null, userR
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block mb-1 font-medium">Jenis Kelamin</label>
-                  <select
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    value={formData.gender}
-                    onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                  >
-                    <option value="L">Laki-Laki</option>
-                    <option value="P">Perempuan</option>
-                  </select>
+              {/* Dua kolom: kiri = identitas diri (gender, tanggal & tempat lahir),
+                  kanan = kontak + semua info paspor ditumpuk di bawah No. WhatsApp. */}
+              <div className="grid grid-cols-2 gap-4 items-start">
+                <div className="space-y-4">
+                  <div>
+                    <label className="block mb-1 font-medium">Jenis Kelamin</label>
+                    <select
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={formData.gender}
+                      onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+                    >
+                      <option value="L">Laki-Laki</option>
+                      <option value="P">Perempuan</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block mb-1 font-medium">Tanggal Lahir</label>
+                    {/* Otomatis kesisi begitu NIK 16 digit yang valid diketik (lihat
+                        handleNikChange) — tapi tetap bisa diedit manual di sini,
+                        misalnya buat jamaah yang NIK-nya belum diisi atau nggak
+                        standar. Dipakai sebagai salah satu kunci login Portal
+                        Customer (Kode Jamaah + Tanggal Lahir), jadi sebisa mungkin
+                        diisi buat tiap jamaah. */}
+                    <DateFieldID
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      nativeClassName={`[color-scheme:${theme}]`}
+                      value={formData.birthDate}
+                      onChange={(val) => setFormData({ ...formData, birthDate: val })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 font-medium">Tempat Lahir</label>
+                    <input
+                      type="text" placeholder="Cth: BEKASI"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={formData.birthPlace}
+                      onChange={(e) => setFormData({ ...formData, birthPlace: e.target.value })}
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block mb-1 font-medium">No. Telepon / WhatsApp</label>
-                  <input
-                    type="text" required placeholder="08123456789"
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block mb-1 font-medium">Tanggal Lahir</label>
-                {/* Otomatis kesisi begitu NIK 16 digit yang valid diketik (lihat
-                    handleNikChange) — tapi tetap bisa diedit manual di sini,
-                    misalnya buat jamaah yang NIK-nya belum diisi atau nggak
-                    standar. Dipakai sebagai salah satu kunci login Portal
-                    Customer (Kode Jamaah + Tanggal Lahir), jadi sebisa mungkin
-                    diisi buat tiap jamaah. */}
-                <DateFieldID
-                  className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                  nativeClassName={`[color-scheme:${theme}]`}
-                  value={formData.birthDate}
-                  onChange={(val) => setFormData({ ...formData, birthDate: val })}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block mb-1 font-medium">Nomor Paspor</label>
-                  <input
-                    type="text" placeholder="X1234567"
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5 font-mono`}
-                    value={formData.passportNumber}
-                    onChange={(e) => setFormData({ ...formData, passportNumber: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1 font-medium">Tanggal Expired Paspor</label>
-                  <DateFieldID
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    nativeClassName={`[color-scheme:${theme}]`}
-                    value={formData.passportExpiry}
-                    onChange={(val) => setFormData({ ...formData, passportExpiry: val })}
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1 font-medium">Tanggal Terbit Paspor</label>
-                  <DateFieldID
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    nativeClassName={`[color-scheme:${theme}]`}
-                    value={formData.passportIssueDate}
-                    onChange={(val) => setFormData({ ...formData, passportIssueDate: val })}
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1 font-medium">Kantor Imigrasi Penerbit</label>
-                  <input
-                    type="text" placeholder="Cth: DEPOK"
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    value={formData.passportIssuingOffice}
-                    onChange={(e) => setFormData({ ...formData, passportIssuingOffice: e.target.value })}
-                  />
-                </div>
-                <div className="col-span-2">
-                  <label className="block mb-1 font-medium">Tempat Lahir</label>
-                  <input
-                    type="text" placeholder="Cth: BEKASI"
-                    className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
-                    value={formData.birthPlace}
-                    onChange={(e) => setFormData({ ...formData, birthPlace: e.target.value })}
-                  />
+                <div className="space-y-4">
+                  <div>
+                    <label className="block mb-1 font-medium">No. Telepon / WhatsApp</label>
+                    <input
+                      type="text" required placeholder="08123456789"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={formData.phone}
+                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 font-medium">Nomor Paspor</label>
+                    <input
+                      type="text" placeholder="X1234567"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5 font-mono`}
+                      value={formData.passportNumber}
+                      onChange={(e) => setFormData({ ...formData, passportNumber: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 font-medium">Tanggal Expired Paspor</label>
+                    <DateFieldID
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      nativeClassName={`[color-scheme:${theme}]`}
+                      value={formData.passportExpiry}
+                      onChange={(val) => setFormData({ ...formData, passportExpiry: val })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 font-medium">Tanggal Terbit Paspor</label>
+                    <DateFieldID
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      nativeClassName={`[color-scheme:${theme}]`}
+                      value={formData.passportIssueDate}
+                      onChange={(val) => setFormData({ ...formData, passportIssueDate: val })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 font-medium">Kantor Imigrasi Penerbit</label>
+                    <input
+                      type="text" placeholder="Cth: DEPOK"
+                      className={`w-full ${styles.inputBg} rounded-lg p-2.5`}
+                      value={formData.passportIssuingOffice}
+                      onChange={(e) => setFormData({ ...formData, passportIssuingOffice: e.target.value })}
+                    />
+                  </div>
                 </div>
               </div>
 
