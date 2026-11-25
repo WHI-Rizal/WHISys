@@ -6251,6 +6251,17 @@ Terimakasih🙏`;
     return (Number(a.groupPaxIndex) || 0) - (Number(b.groupPaxIndex) || 0);
   });
   const roomingPackage = packagesList.find(p => p.id === roomingPackageId);
+  // Nama TC (Sumber Closing) buat kolom TC di tab Manifest. Peserta yang nggak nyimpen sumber
+  // closing-nya sendiri (mis. ditambah belakangan di grup) meminjam dari peserta lain di grup yang sama.
+  const manifestTcName = (b) => {
+    if (b.isTL) return '';
+    const src = b.closingSourceName
+      ? b
+      : (b.groupBookingCode ? bookings.find(x => x.groupBookingCode === b.groupBookingCode && x.closingSourceName) : null);
+    if (!src) return '';
+    return src.closingSourceName + (src.closingSourceType === 'partner' ? ' (Mitra)' : '');
+  };
+
   // Baris manifest: Tour Leader selalu paling atas, lalu jamaah (urut rombongan).
   const manifestRows = [
     ...((roomingPackage?.tourLeaders || []).map(t => {
@@ -9748,28 +9759,29 @@ Terimakasih🙏`;
                   </button>
                 </div>
                 <div className={`border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-lg overflow-x-auto`}>
-                  <table className="w-full text-left text-xs min-w-[1100px]">
+                  <table className="w-full text-left text-xs min-w-[1250px]">
                     <thead className={`${styles.tableHeaderBg} uppercase`}>
                       <tr>
-                        <th className="p-2">No</th>
-                        <th className="p-2">Kode</th>
-                        <th className="p-2">Name</th>
-                        <th className="p-2">Paspor No.</th>
-                        <th className="p-2">F/M</th>
-                        <th className="p-2">Place of Birth</th>
-                        <th className="p-2">Date of Birth</th>
-                        <th className="p-2">Age</th>
-                        <th className="p-2">Date of Issue</th>
-                        <th className="p-2">Date of Expiry</th>
-                        <th className="p-2">Issuing Office</th>
-                        <th className="p-2">Room</th>
-                        <th className="p-2">Number</th>
-                        <th className="p-2">Note</th>
+                        <th className="p-2 whitespace-nowrap">No</th>
+                        <th className="p-2 whitespace-nowrap">Kode</th>
+                        <th className="p-2 whitespace-nowrap">TC</th>
+                        <th className="p-2 whitespace-nowrap">Name</th>
+                        <th className="p-2 whitespace-nowrap">Paspor No.</th>
+                        <th className="p-2 whitespace-nowrap">F/M</th>
+                        <th className="p-2 whitespace-nowrap">Place of Birth</th>
+                        <th className="p-2 whitespace-nowrap">Date of Birth</th>
+                        <th className="p-2 whitespace-nowrap">Age</th>
+                        <th className="p-2 whitespace-nowrap">Date of Issue</th>
+                        <th className="p-2 whitespace-nowrap">Date of Expiry</th>
+                        <th className="p-2 whitespace-nowrap">Issuing Office</th>
+                        <th className="p-2 whitespace-nowrap">Room</th>
+                        <th className="p-2 whitespace-nowrap">Number</th>
+                        <th className="p-2 whitespace-nowrap">Note</th>
                       </tr>
                     </thead>
                     <tbody className={`divide-y ${styles.tableRowBorder}`}>
                       {manifestRows.length === 0 ? (
-                        <tr><td colSpan="14" className={`p-6 text-center ${styles.textSub}`}>Belum ada jamaah aktif di paket ini.</td></tr>
+                        <tr><td colSpan="15" className={`p-6 text-center ${styles.textSub}`}>Belum ada jamaah aktif di paket ini.</td></tr>
                       ) : (
                         manifestRows.map((b, i) => {
                           const j = jamaahList.find(x => x.id === b.jamaahId) || jamaahList.find(x => x.fullName === b.jamaahName) || {};
@@ -9784,12 +9796,10 @@ Terimakasih🙏`;
                             />
                           );
                           const dt = (field) => (
-                            <input
-                              type="date"
-                              key={`${j.id}-${field}-${j[field] || ''}`}
-                              defaultValue={j[field] || ''}
-                              onBlur={(e) => { if (e.target.value !== (j[field] || '')) handleSaveJamaahField(j.id, field, e.target.value); }}
-                              className={cell}
+                            <DateFieldID
+                              value={j[field] || ''}
+                              onChange={(v) => { if (v !== (j[field] || '')) handleSaveJamaahField(j.id, field, v); }}
+                              className={`${cell} min-w-[110px]`}
                             />
                           );
                           return (
@@ -9805,6 +9815,7 @@ Terimakasih🙏`;
                                   </span>
                                 ) : (b.groupBookingCode || b.bookingCode || '-')}
                               </td>
+                              <td className="p-2 whitespace-nowrap">{manifestTcName(b) || '-'}</td>
                               <td className={`p-2 font-medium whitespace-nowrap ${styles.textTitle}`}>
                                 {j.id ? (
                                   <a
