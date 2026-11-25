@@ -2033,7 +2033,7 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                 <div>
                   <label className="block font-medium">Import dari File Word (.docx)</label>
                   <p className={`text-[10px] ${styles.textSub} mt-0.5`}>
-                    Upload itinerary buatan tim Operasional, baik format Series maupun dokumen Private Trip (yang ada tabel harganya). Judul, tanggal, harga, flight, itinerary per hari, include, dan exclude dibaca otomatis. Hasilnya dicek dulu sebelum masuk ke form.
+                    Upload itinerary buatan tim Operasional. Ada tiga format yang dikenali otomatis: Series 1 (judul hari DAY 1, DAY 2), Series 2 (judul hari HARI KE 1, HARI KE 2), dan dokumen Private Trip (yang ada tabel harganya). Judul, tanggal, harga, flight, itinerary per hari, include, dan exclude dibaca otomatis. Hasilnya dicek dulu sebelum masuk ke form.
                     {importedItinerary ? ' Itinerary hasil import akan ikut tersimpan saat klik Simpan.' : ''}
                   </p>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
@@ -2042,7 +2042,14 @@ export default function PackagesModule({ theme = 'dark', userRole = '', currentU
                       download
                       className="text-[10px] font-semibold text-emerald-500 hover:underline"
                     >
-                      Unduh Template Series
+                      Unduh Template Series 1 (DAY)
+                    </a>
+                    <a
+                      href="/templates/Template-Itinerary-Series2-WHI.docx"
+                      download
+                      className="text-[10px] font-semibold text-emerald-500 hover:underline"
+                    >
+                      Unduh Template Series 2 (HARI KE)
                     </a>
                     <a
                       href="/templates/Template-Itinerary-Private-WHI.docx"
