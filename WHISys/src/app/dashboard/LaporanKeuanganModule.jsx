@@ -252,6 +252,7 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
   const [expandedArBookingIds, setExpandedArBookingIds] = useState([]);
   const [deletingEntryId, setDeletingEntryId] = useState(null);
   const [removingOrphanPayments, setRemovingOrphanPayments] = useState(false);
+  const [fixingArBookingId, setFixingArBookingId] = useState(null);
 
   // Diagnosa & koreksi jurnal Komisi Mitra/Agen yang belum pernah keposting
   // (lihat catatan lengkap di diagnoseMissingCommissionJournals, lib/journal.js
@@ -456,6 +457,121 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
       alert('Gagal menghapus jurnal setoran yatim: ' + err.message);
     }
     setRemovingOrphanPayments(false);
+  };
+
+  // ---- Koreksi per booking dari popup Rekonsiliasi Piutang ----
+  // Total uang yang BENERAN tercatat di Riwayat Setoran (payments_income)
+  // buat satu booking. Ini sumber kebenaran buat "Total Dibayar".
+  const arPaidFromPayments = (bookingId) => (paymentsIncome || [])
+    .filter(p => p.bookingId === bookingId)
+    .reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+
+  // Kasus 1: kolom "Total Dibayar" di booking nggak sama dengan Riwayat
+  // Setoran (misal setoran dihapus lewat jalur yang nggak nyinkronin booking).
+  // Hitung ulang dari payments_income, sama persis kayak syncBookingTotalPaid
+  // di FinanceModule.
+  const handleSyncArBookingPaid = async (item) => {
+    if (fixingArBookingId) return;
+    setFixingArBookingId(item.bookingId);
+    try {
+      const paySnap = await getDocs(query(collection(db, 'payments_income'), where('bookingId', '==', item.bookingId)));
+      const pays = paySnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const paidReal = pays.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+      const bkSnap = await getDoc(doc(db, 'bookings', item.bookingId));
+      if (!bkSnap.exists()) { alert('Booking nggak ditemukan lagi. Buka ulang rekonsiliasi.'); return; }
+      const bk = bkSnap.data();
+      const totalAmount = Number(bk.totalAmount) || 0;
+      if (!confirm(`Sinkronkan Total Dibayar booking ${item.bookingCode} dari Riwayat Setoran?\n\nTotal Dibayar sekarang: ${formatRp(bk.totalPaid || 0)}\nSesudah disinkronkan: ${formatRp(paidReal)}`)) return;
+      const PAY_STAGES = ['DP Awal', 'DP 2', 'Pelunasan'];
+      const eff = pays.filter(p => !p.isDepositConversion)
+        .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
+        .map((p, idx) => PAY_STAGES.includes(p.paymentStage) ? p.paymentStage : (idx === 0 ? 'DP Awal' : idx === 1 ? 'DP 2' : 'Pelunasan'));
+      await updateDoc(doc(db, 'bookings', item.bookingId), {
+        totalPaid: paidReal,
+        paymentStatus: paidReal <= 0 ? 'Belum Bayar' : (paidReal >= totalAmount ? 'Full Payment' : 'DP Paid'),
+        dp2Paid: eff.some(st => st === 'DP 2' || st === 'Pelunasan'),
+        pelunasanPaid: eff.some(st => st === 'Pelunasan'),
+      });
+      logActivity({
+        userId: currentUser?.uid, userName: currentUser?.fullName || currentUser?.email, userRole: currentUser?.role,
+        action: 'update', module: 'Laporan Keuangan', targetLabel: item.bookingCode,
+        details: `Sinkron Total Dibayar dari Riwayat Setoran: ${formatRp(bk.totalPaid || 0)} menjadi ${formatRp(paidReal)}`
+      });
+      await fetchData();
+      setShowArReconciliation(false);
+      setArReconciliation(null);
+      alert('Total Dibayar sudah disinkronkan. Buka lagi "Rekonsiliasi Piutang per Booking" buat lihat hasilnya.');
+    } catch (err) {
+      alert('Gagal sinkron Total Dibayar: ' + err.message);
+    } finally {
+      setFixingArBookingId(null);
+    }
+  };
+
+  // Kasus 2: Total Dibayar sudah cocok dengan Riwayat Setoran, tapi jurnal
+  // piutang booking beda dengan tagihan live (total tagihan dikurangi
+  // setoran). Biasanya akibat koreksi total booking (Edit Grup) yang
+  // dijalankan berkali-kali pakai data lama. Posting SATU jurnal koreksi
+  // (source booking_edit_adjustment, pola sama dengan Edit booking) buat
+  // menyamakan jurnal ke tagihan live. Angka dihitung ulang dari Firestore
+  // saat tombol diklik, bukan dari tampilan popup.
+  const handleFixArBookingJournal = async (item) => {
+    if (fixingArBookingId) return;
+    setFixingArBookingId(item.bookingId);
+    try {
+      const bkSnap = await getDoc(doc(db, 'bookings', item.bookingId));
+      if (!bkSnap.exists()) { alert('Booking nggak ditemukan lagi. Buka ulang rekonsiliasi.'); return; }
+      const bk = bkSnap.data();
+      const paySnap = await getDocs(query(collection(db, 'payments_income'), where('bookingId', '==', item.bookingId)));
+      const paidReal = paySnap.docs.reduce((acc, d) => acc + (Number(d.data().amount) || 0), 0);
+      if (Math.abs(paidReal - (Number(bk.totalPaid) || 0)) > 1) {
+        alert('Total Dibayar di booking belum sama dengan Riwayat Setoran. Klik "Sinkron Total Dibayar" dulu, baru koreksi jurnalnya.');
+        return;
+      }
+      const liveOutstanding = Math.max(0, (Number(bk.totalAmount) || 0) - paidReal);
+      const jSnap = await getDocs(query(collection(db, 'journal_entries'), where('reference', '==', item.bookingCode)));
+      let journalNet = 0;
+      jSnap.docs.forEach(d => (d.data().lines || []).forEach(l => {
+        if (l.accountCode === ACC.PIUTANG_JAMAAH) journalNet += (Number(l.debit) || 0) - (Number(l.credit) || 0);
+      }));
+      const delta = Math.round(liveOutstanding - journalNet);
+      if (Math.abs(delta) <= 1) {
+        alert('Jurnal booking ini sudah sama dengan tagihan live. Buka ulang rekonsiliasi buat lihat hasil terbaru.');
+        await fetchData();
+        setShowArReconciliation(false);
+        setArReconciliation(null);
+        return;
+      }
+      const arah = delta < 0 ? 'MENGURANGI' : 'MENAMBAH';
+      if (!confirm(`Koreksi jurnal booking ${item.bookingCode}?\n\nTagihan live: ${formatRp(liveOutstanding)}\nPiutang di jurnal: ${formatRp(journalNet)}\n\nAkan diposting 1 jurnal koreksi yang ${arah} Piutang Jamaah sebesar ${formatRp(Math.abs(delta))} (lawannya Pendapatan Diterima Dimuka). Jurnal lain tidak dihapus. Lanjut?`)) return;
+      const amt = Math.abs(delta);
+      await postJournalEntry({
+        date: new Date().toISOString(),
+        description: `Koreksi Rekonsiliasi Piutang ${item.bookingCode}`,
+        source: 'booking_edit_adjustment', sourceDocId: item.bookingId, reference: item.bookingCode,
+        lines: delta > 0 ? [
+          { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: amt, credit: 0 },
+          { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: 0, credit: amt },
+        ] : [
+          { accountCode: ACC.PENDAPATAN_DITERIMA_DIMUKA, accountName: 'Pendapatan Diterima Dimuka', debit: amt, credit: 0 },
+          { accountCode: ACC.PIUTANG_JAMAAH, accountName: 'Piutang Jamaah', debit: 0, credit: amt },
+        ],
+        createdByUid: currentUser?.uid, createdByName: currentUser?.fullName || currentUser?.email
+      });
+      logActivity({
+        userId: currentUser?.uid, userName: currentUser?.fullName || currentUser?.email, userRole: currentUser?.role,
+        action: 'update', module: 'Laporan Keuangan', targetLabel: item.bookingCode,
+        details: `Koreksi jurnal rekonsiliasi piutang: ${delta < 0 ? '-' : '+'}${formatRp(amt)}`
+      });
+      await fetchData();
+      setShowArReconciliation(false);
+      setArReconciliation(null);
+      alert('Jurnal koreksi sudah diposting. Buka lagi "Rekonsiliasi Piutang per Booking", booking ini harusnya sudah hilang dari daftar.');
+    } catch (err) {
+      alert('Gagal mengoreksi jurnal: ' + err.message);
+    } finally {
+      setFixingArBookingId(null);
+    }
   };
 
   const toggleArBookingExpand = (bookingId) => {
@@ -1022,6 +1138,44 @@ export default function LaporanKeuanganModule({ theme = 'dark', currentUser = nu
                           {expandedArBookingIds.includes(item.bookingId) && (
                             <tr>
                               <td colSpan={6} className={`p-0 ${styles.innerBg}`}>
+                                {(() => {
+                                  const paidPay = arPaidFromPayments(item.bookingId);
+                                  const paidMismatch = Math.abs(paidPay - item.totalPaid) > 1;
+                                  return (
+                                    <div className={`px-3 py-2 text-[10.5px] border-b border-dashed border-slate-700/30 ${styles.textSub}`}>
+                                      <div className="flex flex-wrap gap-x-5 gap-y-1">
+                                        <span>Total Tagihan: <b className={styles.textTitle}>{formatRp(item.totalAmount)}</b></span>
+                                        <span>Total Dibayar (di booking): <b className={styles.textTitle}>{formatRp(item.totalPaid)}</b></span>
+                                        <span>Total di Riwayat Setoran: <b className={styles.textTitle}>{formatRp(paidPay)}</b></span>
+                                      </div>
+                                      {paidMismatch ? (
+                                        <div className="mt-2">
+                                          <p className="text-amber-500 font-semibold">Total Dibayar di booking nggak sama dengan Riwayat Setoran (kemungkinan ada setoran yang dihapus tanpa nyinkronin booking). Sinkronkan dulu, baru lihat selisih jurnalnya.</p>
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); handleSyncArBookingPaid(item); }}
+                                            disabled={fixingArBookingId === item.bookingId}
+                                            className="mt-1.5 px-3 py-1.5 rounded-lg text-[10.5px] font-bold bg-amber-600 hover:bg-amber-500 text-white disabled:opacity-60"
+                                          >
+                                            {fixingArBookingId === item.bookingId ? 'Memproses...' : 'Sinkron Total Dibayar dari Riwayat Setoran'}
+                                          </button>
+                                        </div>
+                                      ) : !item.isDuplicate ? (
+                                        <div className="mt-2">
+                                          <p>Total Dibayar sudah cocok dengan Riwayat Setoran, jadi tagihan live ({formatRp(item.liveOutstanding)}) yang dianggap benar. Selisih {formatRp(Math.abs(item.diff))} datang dari jurnal piutang booking ini (biasanya koreksi total booking yang dijalankan berkali-kali).</p>
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); handleFixArBookingJournal(item); }}
+                                            disabled={fixingArBookingId === item.bookingId}
+                                            className="mt-1.5 px-3 py-1.5 rounded-lg text-[10.5px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-60"
+                                          >
+                                            {fixingArBookingId === item.bookingId ? 'Memproses...' : `Samakan Jurnal dengan Tagihan Live (${item.diff > 0 ? '-' : '+'}${formatRp(Math.abs(item.diff))})`}
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <p className="mt-2 text-rose-500 font-semibold">Booking ini punya jurnal "Booking baru" dobel. Hapus dulu lewat tombol "Hapus Jurnal Dobel" di atas.</p>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                                 {item.entries.length === 0 ? (
                                   <p className={`p-3 text-[10.5px] ${styles.textSub}`}>Nggak ada jurnal yang nyentuh 1201 buat booking ini (aneh — cek manual di Jurnal Umum pakai kode booking ini).</p>
                                 ) : (
